@@ -1,0 +1,26 @@
+# Binaries
+fleetamp
+fleetamp.exe
+
+# Go
+/bin/
+/vendor/
+coverage.out
+*.test
+
+# Local runtime data
+*.db
+*.sqlite
+*.sqlite3
+/data/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
