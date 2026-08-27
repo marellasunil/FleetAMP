@@ -52,10 +52,3 @@ Before a Collector connects, the page shows an empty fleet. After an OpAMP-capab
 - [Install FleetAMP](./installation)
 - [Connect a Kubernetes Gateway](./connect-kubernetes-gateway)
 
-## Documentation locally
-
-```bash
-cd website
-npm install
-npm start
-```

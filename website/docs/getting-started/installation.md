@@ -84,3 +84,24 @@ go run ./cmd/fleetamp
 ## Current limitations
 
 The current implementation uses an in-memory agent store. Fleet inventory is therefore lost when FleetAMP restarts. Persistent storage, packaged RPM/DEB artifacts, a systemd unit, configuration-file loading, TLS termination, authentication, and production hardening are planned work rather than current guarantees.
+
+## Run FleetAMP on another Linux system
+
+For testing, FleetAMP can run directly from a cloned repository. Go is required on that machine:
+
+```bash
+git clone https://github.com/marellasunil/FleetAMP.git
+cd FleetAMP
+go mod tidy
+go test ./...
+go run ./cmd/fleetamp
+```
+
+From another terminal, verify that FleetAMP is listening:
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/api/v1/agents
+```
+
+To manage Collectors on other machines or clusters, allow inbound network access to TCP `4320` from those managed environments. The web/API listener on `8080` should only be exposed to intended users or management networks.

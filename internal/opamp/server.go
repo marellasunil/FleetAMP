@@ -3,6 +3,7 @@ package opamp
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
+	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/management"
 	"github.com/open-telemetry/opamp-go/protobufs"
 	"github.com/open-telemetry/opamp-go/server"
@@ -20,21 +22,28 @@ import (
 type Adapter struct {
 	listenEndpoint string
 	events         chan management.Event
+	configEvents   chan configs.StatusReport
 	server         server.OpAMPServer
 	mu             sync.Mutex
 	byConn         map[servertypes.Connection]*agents.ManagedAgent
+	byUID          map[string]servertypes.Connection
+	effective      map[string]string
 }
 
 func NewAdapter(listenEndpoint string) *Adapter {
 	return &Adapter{
 		listenEndpoint: listenEndpoint,
 		events:         make(chan management.Event, 128),
+		configEvents:   make(chan configs.StatusReport, 128),
 		byConn:         make(map[servertypes.Connection]*agents.ManagedAgent),
+		byUID:          make(map[string]servertypes.Connection),
+		effective:      make(map[string]string),
 	}
 }
 
-func (a *Adapter) Name() string                    { return "opamp" }
-func (a *Adapter) Events() <-chan management.Event { return a.events }
+func (a *Adapter) Name() string                              { return "opamp" }
+func (a *Adapter) Events() <-chan management.Event           { return a.events }
+func (a *Adapter) ConfigEvents() <-chan configs.StatusReport { return a.configEvents }
 
 func (a *Adapter) Start(ctx context.Context) error {
 	callbacks := servertypes.Callbacks{
@@ -80,28 +89,65 @@ func (a *Adapter) onMessage(_ context.Context, conn servertypes.Connection, msg 
 	previous, existed := a.byConn[conn]
 	if existed {
 		mergeAgent(agent, previous)
+		if msg.GetHealth() == nil {
+			agent.Healthy = previous.Healthy
+		}
 	}
 	a.byConn[conn] = cloneManagedAgent(agent)
+	a.byUID[agent.InstanceUID] = conn
 	a.mu.Unlock()
-
-	if existed && msg.GetHealth() == nil {
-		agent.Healthy = previous.Healthy
-	}
 	eventType := management.EventUpdated
 	if !existed {
 		eventType = management.EventConnected
 	}
 	a.events <- management.Event{Type: eventType, Agent: agent}
 
+	if status := msg.GetRemoteConfigStatus(); status != nil && len(status.GetLastRemoteConfigHash()) > 0 {
+		a.configEvents <- configs.StatusReport{
+			AgentInstanceUID:  agent.InstanceUID,
+			ConfigurationHash: hex.EncodeToString(status.GetLastRemoteConfigHash()),
+			Status:            remoteConfigStatus(status.GetStatus()),
+			Error:             status.GetErrorMessage(),
+			UpdatedAt:         time.Now().UTC(),
+		}
+	}
+
 	if !existed {
 		return &protobufs.ServerToAgent{
 			InstanceUid: msg.GetInstanceUid(),
 			Flags:       uint64(protobufs.ServerToAgentFlags_ServerToAgentFlags_ReportFullState),
 			Capabilities: uint64(protobufs.ServerCapabilities_ServerCapabilities_AcceptsStatus) |
-				uint64(protobufs.ServerCapabilities_ServerCapabilities_AcceptsEffectiveConfig),
+				uint64(protobufs.ServerCapabilities_ServerCapabilities_AcceptsEffectiveConfig) |
+				uint64(protobufs.ServerCapabilities_ServerCapabilities_OffersRemoteConfig),
 		}
 	}
 	return nil
+}
+
+func (a *Adapter) EffectiveConfig(instanceUID string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.effective[instanceUID]
+}
+
+func effectiveConfigString(e *protobufs.EffectiveConfig) string {
+	if e == nil || e.GetConfigMap() == nil {
+		return ""
+	}
+	var b strings.Builder
+	for name, f := range e.GetConfigMap().GetConfigMap() {
+		if f == nil {
+			continue
+		}
+		if name != "" {
+			fmt.Fprintf(&b, "# %s\n", name)
+		}
+		b.Write(f.GetBody())
+		if !strings.HasSuffix(b.String(), "\n") {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 func (a *Adapter) onConnectionClose(conn servertypes.Connection) {
@@ -109,6 +155,9 @@ func (a *Adapter) onConnectionClose(conn servertypes.Connection) {
 	agent, ok := a.byConn[conn]
 	if ok {
 		delete(a.byConn, conn)
+		if current, exists := a.byUID[agent.InstanceUID]; exists && current == conn {
+			delete(a.byUID, agent.InstanceUID)
+		}
 	}
 	a.mu.Unlock()
 	if !ok {
@@ -133,7 +182,7 @@ func managedAgentFromMessage(msg *protobufs.AgentToServer) *agents.ManagedAgent 
 	}
 
 	uid := formatInstanceUID(msg.GetInstanceUid())
-	name := firstNonEmpty(attrs["service.instance.id"], attrs["host.name"], attrs["service.name"])
+	name := firstNonEmpty(attrs["host.name"], attrs["service.name"], attrs["service.instance.id"])
 	if name == "" && uid != "" {
 		name = "otel-collector-" + shortUID(uid)
 	}
@@ -289,6 +338,77 @@ func cloneManagedAgent(agent *agents.ManagedAgent) *agents.ManagedAgent {
 	}
 	clone.Capabilities = append([]string(nil), agent.Capabilities...)
 	return &clone
+}
+
+var ErrRemoteConfigUnsupported = errors.New("agent does not advertise accepts_remote_config")
+var ErrAgentNotConnected = errors.New("agent is not connected")
+
+// SendRemoteConfig offers one immutable FleetAMP configuration to a connected agent.
+func (a *Adapter) SendRemoteConfig(ctx context.Context, instanceUID string, config *configs.Configuration) error {
+	a.mu.Lock()
+	conn, ok := a.byUID[instanceUID]
+	agent := a.byConn[conn]
+	a.mu.Unlock()
+	if !ok || agent == nil {
+		return ErrAgentNotConnected
+	}
+	if !hasCapability(agent.Capabilities, "accepts_remote_config") {
+		return ErrRemoteConfigUnsupported
+	}
+	uid, err := parseInstanceUID(instanceUID)
+	if err != nil {
+		return err
+	}
+	hash, err := hex.DecodeString(config.Hash)
+	if err != nil {
+		return fmt.Errorf("decode configuration hash: %w", err)
+	}
+	name := config.Name
+	if name == "" {
+		name = "fleetamp.yaml"
+	}
+	message := &protobufs.ServerToAgent{
+		InstanceUid:  uid,
+		Capabilities: uint64(protobufs.ServerCapabilities_ServerCapabilities_OffersRemoteConfig),
+		RemoteConfig: &protobufs.AgentRemoteConfig{
+			Config: &protobufs.AgentConfigMap{ConfigMap: map[string]*protobufs.AgentConfigFile{
+				name: {Body: []byte(config.Content), ContentType: config.ContentType},
+			}},
+			ConfigHash: hash,
+		},
+	}
+	return conn.Send(ctx, message)
+}
+
+func remoteConfigStatus(status protobufs.RemoteConfigStatuses) configs.DeliveryStatus {
+	switch status {
+	case protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED:
+		return configs.DeliveryApplied
+	case protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING:
+		return configs.DeliveryApplying
+	case protobufs.RemoteConfigStatuses_RemoteConfigStatuses_FAILED:
+		return configs.DeliveryFailed
+	default:
+		return configs.DeliverySent
+	}
+}
+
+func hasCapability(capabilities []string, wanted string) bool {
+	for _, capability := range capabilities {
+		if capability == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func parseInstanceUID(value string) ([]byte, error) {
+	clean := strings.ReplaceAll(value, "-", "")
+	decoded, err := hex.DecodeString(clean)
+	if err != nil || len(decoded) != 16 {
+		return nil, fmt.Errorf("invalid instance UID %q", value)
+	}
+	return decoded, nil
 }
 
 type stdLogger struct{}
