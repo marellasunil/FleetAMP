@@ -3,7 +3,12 @@ module.exports = {
     {
       type: 'category',
       label: 'Getting Started',
-      items: ['getting-started/overview', 'getting-started/quick-start'],
+      items: [
+        'getting-started/overview',
+        'getting-started/installation',
+        'getting-started/quick-start',
+        'getting-started/connect-kubernetes-gateway',
+      ],
     },
     {
       type: 'category',

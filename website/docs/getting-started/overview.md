@@ -7,19 +7,23 @@ title: What is FleetAMP?
 
 FleetAMP is an open-source, vendor-neutral fleet management and configuration control plane for telemetry agents.
 
-The project starts with OpenTelemetry Collectors managed through OpAMP. Its architecture intentionally separates the FleetAMP domain from management protocols, storage engines, Git systems, identity providers, deployment environments, and telemetry backends.
+The first implementation target is the OpenTelemetry Collector managed through OpAMP. FleetAMP separates the core domain from management protocols, storage engines, Git systems, identity providers, deployment environments, and telemetry backends.
 
-## Project goals
+## What works today
 
-- Maintain a central inventory of managed telemetry agents.
-- Track identity, connection state, health, capabilities, and last-seen information.
-- Deliver and observe remote configuration through management adapters.
-- Support desired-versus-effective configuration state.
-- Evolve toward labels, groups, controlled rollouts, Git-driven configuration, RBAC, and enrichment providers.
-- Run across VMs, bare metal, containers, and Kubernetes without making the deployment platform part of the core domain.
+FleetAMP can accept an OpAMP WebSocket connection from a real OpenTelemetry Collector, normalize that Collector into the `ManagedAgent` model, store it in memory, and expose the resulting fleet inventory through a REST API and basic web UI.
 
-## Current development focus
+The current verified lab uses an OpenTelemetry Collector gateway running in Docker Desktop Kubernetes and a FleetAMP process running on the Linux host.
 
-FleetAMP is under active development. The initial milestone is intentionally narrow: generic managed-agent modeling, storage abstraction, OpAMP connectivity, inventory APIs, health/state tracking, and remote configuration for OpenTelemetry Collectors.
+## Current endpoints
 
-Features described as planned in these docs are architectural direction and should not be interpreted as implemented functionality.
+```text
+HTTP / UI / REST API   :8080
+OpAMP WebSocket        :4320/v1/opamp
+```
+
+## Project direction
+
+Planned milestones include remote configuration, desired/effective state, persistence, groups/selectors, Git-driven workflows, RBAC, CMDB/CSDM enrichment, richer visualization, and additional agent adapters.
+
+Features described as planned are architectural direction and should not be interpreted as implemented functionality.

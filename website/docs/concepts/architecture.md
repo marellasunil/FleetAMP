@@ -44,3 +44,29 @@ A managed agent is independent of its runtime. VM, bare metal, container, and Ku
 ## Future integrations
 
 Provider interfaces are reserved for configuration sources such as Git systems and enrichment sources such as CSDM/CMDB. These are optional integrations, not dependencies of the core.
+
+## Current verified data path
+
+The first working FleetAMP end-to-end path is:
+
+```text
+OpenTelemetry Collector Gateway
+        │
+        │ OpAMP WebSocket
+        ▼
+internal/opamp
+        │ normalize
+        ▼
+ManagedAgent
+        │
+        ▼
+ManagedAgentStore
+        │
+        ▼
+In-memory store
+        │
+        ├── GET /api/v1/agents
+        └── GET /agents
+```
+
+The Collector's OTLP telemetry pipeline is independent of this management connection. FleetAMP manages the Collector control-plane state; it does not sit in the telemetry data path.
