@@ -1,3 +1,9 @@
+// Storage contract for immutable FleetAMP configuration artifacts.
+//
+// Purpose:
+//   Allows configuration creation/read/list behavior to remain independent of
+//   the eventual database or Git-backed persistence implementation.
+
 package storage
 
 import (

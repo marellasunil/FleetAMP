@@ -1,9 +1,33 @@
+// FleetAMP application entry point.
+//
+// Purpose:
+//   Wires the management protocol adapter, stores, lifecycle/event handling,
+//   REST API, and lightweight web UI into one FleetAMP server process.
+//
+// Runtime flow:
+//   OpAMP client -> internal/opamp.Adapter -> ManagedAgent/config events
+//   -> stores -> lifecycle/history -> REST API and /agents UI.
+//
+// Main dependencies:
+//   internal/opamp, internal/agents, internal/configs, internal/events,
+//   internal/storage/memory, and internal/storage/file.
+//
+// Configuration:
+//   FLEETAMP_HTTP_ADDR, FLEETAMP_OPAMP_ADDR, FLEETAMP_DATA_DIR,
+//   FLEETAMP_RETIRE_AFTER, and FLEETAMP_OTELCOL_BINARY control listeners,
+//   persistence, lifecycle retirement, and optional Collector validation.
+//
+// Design note:
+//   Protocol-specific OpAMP types stay behind the adapter boundary; core
+//   FleetAMP code works with protocol-independent domain models.
+
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -15,7 +39,9 @@ import (
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/FleetAMP/internal/events"
 	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
+	filestore "github.com/marellasunil/FleetAMP/internal/storage/file"
 	"github.com/marellasunil/FleetAMP/internal/storage/memory"
 )
 
@@ -32,8 +58,18 @@ func main() {
 	httpAddr := envOrDefault("FLEETAMP_HTTP_ADDR", ":8080")
 	opampAddr := envOrDefault("FLEETAMP_OPAMP_ADDR", ":4320")
 	agentStore := memory.NewAgentStore()
+	dataDir := envOrDefault("FLEETAMP_DATA_DIR", "./data")
+	eventStore, err := filestore.NewEventStore(dataDir)
+	if err != nil {
+		log.Fatalf("initialize event store: %v", err)
+	}
+	if err := loadAgentSnapshot(ctx, agentStore, dataDir); err != nil {
+		log.Fatalf("load agent snapshot: %v", err)
+	}
+	retireAfter := durationEnvOrDefault("FLEETAMP_RETIRE_AFTER", 24*time.Hour)
 	configStore := memory.NewConfigStore()
 	assignmentStore := memory.NewAssignmentStore()
+	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr)
 
 	go func() {
@@ -52,12 +88,37 @@ func main() {
 				if event.Agent == nil {
 					continue
 				}
+				now := time.Now().UTC()
+				previous, _ := agentStore.Get(ctx, event.Agent.InstanceUID)
+				switch event.Type {
+				case "connected", "updated":
+					event.Agent.Status = agents.LifecycleConnected
+					event.Agent.DisconnectedAt = nil
+					event.Agent.RetiredAt = nil
+				case "disconnected":
+					event.Agent.Status = agents.LifecycleDisconnected
+					event.Agent.Healthy = false
+					event.Agent.DisconnectedAt = &now
+				}
+				if previous != nil && !previous.FirstSeen.IsZero() {
+					event.Agent.FirstSeen = previous.FirstSeen
+				} else if event.Agent.FirstSeen.IsZero() {
+					event.Agent.FirstSeen = now
+				}
 				if err := agentStore.Upsert(ctx, event.Agent); err != nil && ctx.Err() == nil {
 					log.Printf("store agent %s: %v", event.Agent.InstanceUID, err)
+				} else if err := saveAgentSnapshot(ctx, agentStore, dataDir); err != nil && ctx.Err() == nil {
+					log.Printf("save agent snapshot: %v", err)
 				}
-				log.Printf("agent event=%s id=%s name=%s connected=%t healthy=%t",
+				if event.Type == "connected" || event.Type == "disconnected" {
+					_ = eventStore.Append(ctx, &events.AgentEvent{AgentInstanceUID: event.Agent.InstanceUID, AgentName: event.Agent.Name, Type: events.Type(event.Type), Timestamp: now})
+				}
+				if previous != nil && previous.Healthy != event.Agent.Healthy {
+					_ = eventStore.Append(ctx, &events.AgentEvent{AgentInstanceUID: event.Agent.InstanceUID, AgentName: event.Agent.Name, Type: events.HealthChanged, Timestamp: now, Metadata: map[string]string{"healthy": fmt.Sprintf("%t", event.Agent.Healthy)}})
+				}
+				log.Printf("agent event=%s id=%s name=%s connected=%t healthy=%t status=%s",
 					event.Type, event.Agent.InstanceUID, event.Agent.Name,
-					event.Agent.Connected, event.Agent.Healthy)
+					event.Agent.Connected, event.Agent.Healthy, event.Agent.Status)
 			}
 		}
 	}()
@@ -75,10 +136,12 @@ func main() {
 		}
 	}()
 
+	go runRetirementLoop(ctx, agentStore, eventStore, retireAfter, dataDir)
+
 	mux := http.NewServeMux()
 	registerHealthRoutes(mux)
-	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, adapter)
-	registerConfigRoutes(mux, configStore, assignmentStore, agentStore, adapter)
+	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, eventStore, adapter)
+	registerConfigRoutes(mux, configStore, assignmentStore, agentStore, configValidator, adapter)
 
 	httpServer := &http.Server{Addr: httpAddr, Handler: mux}
 	go func() {
@@ -108,7 +171,9 @@ func registerHealthRoutes(mux *http.ServeMux) {
 	})
 }
 
-func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, configStore *memory.ConfigStore, assignmentStore *memory.AssignmentStore, adapter *fleetopamp.Adapter) {
+func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, configStore *memory.ConfigStore, assignmentStore *memory.AssignmentStore, eventStore interface {
+	ListSince(context.Context, time.Time) ([]*events.AgentEvent, error)
+}, adapter *fleetopamp.Adapter) {
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		agentsList, err := agentStore.List(r.Context())
 		if err != nil {
@@ -123,15 +188,30 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			http.NotFound(w, r)
 			return
 		}
-		agentsList, err := agentStore.List(r.Context())
+		rangeKey := r.URL.Query().Get("range")
+		if rangeKey == "" {
+			rangeKey = "active"
+		}
+		agentsList, err := selectAgentsForRange(r.Context(), agentStore, eventStore, rangeKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		view := agentListView{Agents: agentsList, Range: rangeKey}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := agentsPage.Execute(w, agentsList); err != nil {
+		if err := agentsPage.Execute(w, view); err != nil {
 			log.Printf("render agents page: %v", err)
 		}
+	})
+
+	mux.HandleFunc("/api/v1/agent-events", func(w http.ResponseWriter, r *http.Request) {
+		since := timeRangeStart(r.URL.Query().Get("range"))
+		items, err := eventStore.ListSince(r.Context(), since)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, items)
 	})
 
 	mux.HandleFunc("/agents/", func(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +274,28 @@ type createConfigurationRequest struct {
 	ContentType string `json:"content_type"`
 }
 
-func registerConfigRoutes(mux *http.ServeMux, configStore *memory.ConfigStore, assignmentStore *memory.AssignmentStore, agentStore *memory.AgentStore, adapter *fleetopamp.Adapter) {
+// registerConfigRoutes exposes configuration artifact, validation, and
+// assignment APIs. Validation occurs both before artifact creation and again
+// immediately before delivery to protect against unsafe desired state.
+func registerConfigRoutes(mux *http.ServeMux, configStore *memory.ConfigStore, assignmentStore *memory.AssignmentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter) {
+	mux.HandleFunc("/api/v1/configurations/validate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var request createConfigurationRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		result := validator.Validate(r.Context(), request.Content)
+		status := http.StatusOK
+		if !result.Valid {
+			status = http.StatusUnprocessableEntity
+		}
+		writeJSON(w, status, result)
+	})
+
 	mux.HandleFunc("/api/v1/configurations", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -212,6 +313,11 @@ func registerConfigRoutes(mux *http.ServeMux, configStore *memory.ConfigStore, a
 			}
 			if strings.TrimSpace(request.Name) == "" || strings.TrimSpace(request.Version) == "" || strings.TrimSpace(request.Content) == "" {
 				http.Error(w, "name, version and content are required", http.StatusBadRequest)
+				return
+			}
+			validation := validator.Validate(r.Context(), request.Content)
+			if !validation.Valid {
+				writeJSON(w, http.StatusUnprocessableEntity, validation)
 				return
 			}
 			configuration := configs.NewConfiguration(request.Name, request.Version, request.Content, request.ContentType)
@@ -258,6 +364,11 @@ func registerConfigRoutes(mux *http.ServeMux, configStore *memory.ConfigStore, a
 			http.Error(w, "configuration not found", http.StatusNotFound)
 			return
 		}
+		validation := validator.Validate(r.Context(), configuration.Content)
+		if !validation.Valid {
+			writeJSON(w, http.StatusUnprocessableEntity, validation)
+			return
+		}
 		assignment := &configs.Assignment{AgentInstanceUID: agentUID, ConfigurationID: configID, ConfigurationHash: configuration.Hash, Status: configs.DeliveryPending, UpdatedAt: time.Now().UTC()}
 		_ = assignmentStore.Upsert(r.Context(), assignment)
 		err = adapter.SendRemoteConfig(r.Context(), agentUID, configuration)
@@ -293,6 +404,15 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
+func durationEnvOrDefault(key string, fallback time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
 var agentsPage = template.Must(template.New("agents").Parse(`<!doctype html>
 <html><head><meta charset="utf-8"><title>FleetAMP Agents</title>
 <style>
@@ -303,10 +423,11 @@ th,td{padding:14px 16px;text-align:left;border-bottom:1px solid #1f2937}th{color
 .ok{color:#86efac}.bad{color:#fca5a5}.empty{padding:24px;background:#111827;border-radius:12px;color:#94a3b8}
 code{color:#c4b5fd}a{color:#93c5fd;text-decoration:none}a:hover{text-decoration:underline}
 </style></head><body>
-<h1>FleetAMP — Managed Agents</h1><div class="sub">Live in-memory inventory from management adapters.</div>
-{{if .}}<table><thead><tr><th>Name</th><th>Type</th><th>Runtime</th><th>Cluster</th><th>Version</th><th>Connected</th><th>Healthy</th><th>Last Seen</th></tr></thead><tbody>
-{{range .}}<tr><td><a href="/agents/{{.InstanceUID}}">{{.Name}}</a><br><code>{{.InstanceUID}}</code></td><td>{{.Type}}</td><td>{{.Deployment.Runtime}}</td><td>{{.Deployment.Cluster}}</td><td>{{.Version}}</td><td class="{{if .Connected}}ok{{else}}bad{{end}}">{{.Connected}}</td><td class="{{if .Healthy}}ok{{else}}bad{{end}}">{{.Healthy}}</td><td>{{.LastSeen}}</td></tr>{{end}}
-</tbody></table>{{else}}<div class="empty">No managed agents connected yet.</div>{{end}}
+<h1>FleetAMP — Managed Agents</h1><div class="sub">Fleet inventory with lifecycle and historical connection activity.</div>
+<form method="get" action="/agents" style="margin-bottom:18px"><label for="range">Time range: </label><select id="range" name="range" onchange="this.form.submit()"><option value="active" {{if eq .Range "active"}}selected{{end}}>Active / recent</option><option value="15m" {{if eq .Range "15m"}}selected{{end}}>Last 15 minutes</option><option value="1h" {{if eq .Range "1h"}}selected{{end}}>Last 1 hour</option><option value="24h" {{if eq .Range "24h"}}selected{{end}}>Last 24 hours</option><option value="7d" {{if eq .Range "7d"}}selected{{end}}>Last 7 days</option><option value="30d" {{if eq .Range "30d"}}selected{{end}}>Last 30 days</option><option value="all" {{if eq .Range "all"}}selected{{end}}>All known</option></select></form>
+{{if .Agents}}<table><thead><tr><th>Name</th><th>Status</th><th>Type</th><th>Runtime</th><th>Cluster</th><th>Version</th><th>Healthy</th><th>First Seen</th><th>Last Seen</th></tr></thead><tbody>
+{{range .Agents}}<tr><td><a href="/agents/{{.InstanceUID}}">{{.Name}}</a><br><code>{{.InstanceUID}}</code></td><td class="{{if .Connected}}ok{{else}}bad{{end}}">{{.Status}}</td><td>{{.Type}}</td><td>{{.Deployment.Runtime}}</td><td>{{.Deployment.Cluster}}</td><td>{{.Version}}</td><td class="{{if .Healthy}}ok{{else}}bad{{end}}">{{.Healthy}}</td><td>{{.FirstSeen}}</td><td>{{.LastSeen}}</td></tr>{{end}}
+</tbody></table>{{else}}<div class="empty">No managed agents found for this time range.</div>{{end}}
 </body></html>`))
 
 var agentDetailPage = template.Must(template.New("agent-detail").Parse(`<!doctype html>

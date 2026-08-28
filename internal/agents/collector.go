@@ -1,3 +1,16 @@
+// Core protocol-independent managed-agent domain model.
+//
+// Purpose:
+//   Defines the identity, lifecycle, deployment metadata, labels, attributes,
+//   and capabilities FleetAMP uses for every managed telemetry agent.
+//
+// Flow:
+//   protocol adapter (for example OpAMP) -> ManagedAgent -> storage/API/UI.
+//
+// Dependencies:
+//   Only the Go time package. This package deliberately contains no OpAMP,
+//   database, Kubernetes, or cloud SDK types so the model remains portable.
+
 package agents
 
 import "time"
@@ -46,6 +59,14 @@ type DeploymentContext struct {
 // ManagedAgent is FleetAMP's protocol-independent representation of a
 // telemetry agent. Protocol-specific types (for example OpAMP protobufs)
 // must be translated into this model at the integration boundary.
+type LifecycleStatus string
+
+const (
+	LifecycleConnected    LifecycleStatus = "connected"
+	LifecycleDisconnected LifecycleStatus = "disconnected"
+	LifecycleRetired      LifecycleStatus = "retired"
+)
+
 type ManagedAgent struct {
 	InstanceUID string    `json:"instance_uid"`
 	Type        AgentType `json:"type"`
@@ -54,9 +75,14 @@ type ManagedAgent struct {
 	Hostname string `json:"hostname,omitempty"`
 	Version  string `json:"version,omitempty"`
 
-	Connected bool      `json:"connected"`
-	Healthy   bool      `json:"healthy"`
-	LastSeen  time.Time `json:"last_seen"`
+	Connected bool            `json:"connected"`
+	Healthy   bool            `json:"healthy"`
+	Status    LifecycleStatus `json:"status"`
+	FirstSeen time.Time       `json:"first_seen"`
+	LastSeen  time.Time       `json:"last_seen"`
+
+	DisconnectedAt *time.Time `json:"disconnected_at,omitempty"`
+	RetiredAt      *time.Time `json:"retired_at,omitempty"`
 
 	// Deployment describes where the agent runs. FleetAMP manages the
 	// telemetry-agent control plane; the underlying runtime remains responsible

@@ -1,3 +1,12 @@
+// Protocol-independent management adapter contract and normalized events.
+//
+// Purpose:
+//   Defines the boundary between FleetAMP core and management protocols such as
+//   OpAMP, allowing additional telemetry-agent adapters to be added later.
+//
+// Flow:
+//   concrete protocol -> Adapter.Events() -> ManagedAgent lifecycle processing.
+
 package management
 
 import (

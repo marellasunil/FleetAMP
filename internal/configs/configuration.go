@@ -1,3 +1,16 @@
+// Immutable FleetAMP configuration artifact model.
+//
+// Purpose:
+//   Represents a versioned configuration payload that can be assigned to a
+//   managed agent and correlated with OpAMP remote-config status/effective state.
+//
+// Identity:
+//   Content receives a SHA-256 hash; artifact ID is derived from name, version,
+//   and content so configuration objects are deterministic and immutable.
+//
+// Dependencies:
+//   Go crypto/sha256, encoding/hex, strings, and time only.
+
 package configs
 
 import (
@@ -18,6 +31,8 @@ type Configuration struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// NewConfiguration builds an immutable artifact with deterministic identity and
+// content hashes used for assignment and OpAMP status correlation.
 func NewConfiguration(name, version, content, contentType string) *Configuration {
 	if contentType == "" {
 		contentType = "text/yaml"

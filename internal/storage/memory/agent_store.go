@@ -1,3 +1,16 @@
+// In-memory ManagedAgentStore implementation.
+//
+// Purpose:
+//   Provides concurrency-safe current-state storage for the FleetAMP process.
+//   Values are cloned on read/write to prevent callers mutating shared state.
+//
+// Lifecycle behavior:
+//   FirstSeen and lifecycle timestamps are preserved across partial updates.
+//
+// Limitation:
+//   Process memory alone is not durable; cmd/fleetamp supplements it with an
+//   agents.json snapshot until a database-backed store is introduced.
+
 package memory
 
 import (
@@ -17,13 +30,23 @@ func NewAgentStore() *AgentStore {
 	return &AgentStore{agents: make(map[string]*agents.ManagedAgent)}
 }
 
+// Upsert stores a defensive copy and preserves lifecycle timestamps from the
+// previous record when an incremental update does not provide them.
 func (s *AgentStore) Upsert(ctx context.Context, agent *agents.ManagedAgent) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.agents[agent.InstanceUID] = cloneAgent(agent)
+	copy := cloneAgent(agent)
+	if previous, ok := s.agents[agent.InstanceUID]; ok {
+		if copy.FirstSeen.IsZero() {
+			copy.FirstSeen = previous.FirstSeen
+		}
+	} else if copy.FirstSeen.IsZero() {
+		copy.FirstSeen = copy.LastSeen
+	}
+	s.agents[agent.InstanceUID] = copy
 	return nil
 }
 

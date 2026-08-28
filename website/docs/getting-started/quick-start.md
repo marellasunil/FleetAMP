@@ -47,6 +47,8 @@ http://localhost:8080/agents
 
 Before a Collector connects, the page shows an empty fleet. After an OpAMP-capable Collector connects, FleetAMP stores its normalized `ManagedAgent` state in memory.
 
+The Collector name is clickable. Its details page shows identity and deployment metadata, health, OpAMP capabilities, the latest configuration assignment, desired configuration, and effective configuration when the agent reports it.
+
 ## Next
 
 - [Install FleetAMP](./installation)

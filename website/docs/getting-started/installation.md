@@ -105,3 +105,14 @@ curl http://localhost:8080/api/v1/agents
 ```
 
 To manage Collectors on other machines or clusters, allow inbound network access to TCP `4320` from those managed environments. The web/API listener on `8080` should only be exposed to intended users or management networks.
+
+## Runtime data and lifecycle settings
+
+For source-based development FleetAMP defaults to `./data`. A Linux service installation should set a persistent location such as:
+
+```bash
+export FLEETAMP_DATA_DIR=/var/lib/fleetamp
+export FLEETAMP_RETIRE_AFTER=24h
+```
+
+`FLEETAMP_RETIRE_AFTER` controls how long a disconnected agent remains in the recent fleet before FleetAMP marks it `retired`.

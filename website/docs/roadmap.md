@@ -17,14 +17,22 @@ FleetAMP is evolving incrementally. This page separates capabilities that are wo
 - REST inventory API at `/api/v1/agents`
 - Basic fleet UI at `/agents`
 - Docker Desktop Kubernetes Gateway verified against FleetAMP
+- Agent lifecycle: connected, disconnected and retired
+- Configurable 24-hour retirement policy
+- Persistent agent snapshots and append-only agent event history
+- Fleet time-range filtering and `/api/v1/agent-events`
+- Agent Details page with desired/effective configuration
+- Immutable configuration artifacts and in-memory configuration store
+- Per-agent configuration assignments and delivery status
+- OpAMP Supervisor-managed Kubernetes Gateway
+- Remote configuration lifecycle verified: `sent -> applying -> applied`
+- Pre-deployment configuration validation (YAML plus optional Collector `validate`)
 
 ## Next milestone
 
-- Improve displayed agent naming and identity
-- Agent details page
-- Remote configuration to one Collector
-- Desired vs effective configuration state
-- Configuration validation and deployment result tracking
+- Persist agents, configurations and assignments across FleetAMP restarts
+- Improve agent identity and deployment metadata for Supervisor-managed Collectors
+- Configuration history and drift comparison
 
 ## Persistence and fleet targeting
 

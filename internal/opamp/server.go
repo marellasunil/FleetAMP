@@ -1,3 +1,21 @@
+// OpenTelemetry OpAMP management adapter for FleetAMP.
+//
+// Purpose:
+//   Accepts OpAMP WebSocket connections, normalizes agent state into
+//   ManagedAgent events, caches effective configuration, and delivers remote
+//   configuration only when the agent advertises AcceptsRemoteConfig.
+//
+// Runtime flow:
+//   OpAMP Agent/Supervisor <-> opamp-go server -> Adapter -> FleetAMP events.
+//   FleetAMP Configuration -> Adapter -> OpAMP RemoteConfig -> status report.
+//
+// Main dependencies:
+//   github.com/open-telemetry/opamp-go plus FleetAMP agents/configs/management.
+//
+// Design constraints:
+//   Missing partial-state fields must not erase previously known health/state.
+//   Protocol capability checks are enforced before remote-control operations.
+
 package opamp
 
 import (
@@ -30,6 +48,7 @@ type Adapter struct {
 	effective      map[string]string
 }
 
+// NewAdapter creates an OpAMP adapter bound to the configured WebSocket listener.
 func NewAdapter(listenEndpoint string) *Adapter {
 	return &Adapter{
 		listenEndpoint: listenEndpoint,
@@ -45,6 +64,7 @@ func (a *Adapter) Name() string                              { return "opamp" }
 func (a *Adapter) Events() <-chan management.Event           { return a.events }
 func (a *Adapter) ConfigEvents() <-chan configs.StatusReport { return a.configEvents }
 
+// Start runs the opamp-go server until context cancellation or a listener error.
 func (a *Adapter) Start(ctx context.Context) error {
 	callbacks := servertypes.Callbacks{
 		OnConnecting: func(_ *http.Request) servertypes.ConnectionResponse {
@@ -78,6 +98,8 @@ func (a *Adapter) onConnected(_ context.Context, _ servertypes.Connection) {
 	log.Printf("OpAMP transport connected")
 }
 
+// onMessage converts incremental OpAMP messages into a complete normalized agent
+// view by merging omitted fields with the last state seen on this connection.
 func (a *Adapter) onMessage(_ context.Context, conn servertypes.Connection, msg *protobufs.AgentToServer) *protobufs.ServerToAgent {
 	agent := managedAgentFromMessage(msg)
 	if agent.InstanceUID == "" {
@@ -124,6 +146,8 @@ func (a *Adapter) onMessage(_ context.Context, conn servertypes.Connection, msg 
 	return nil
 }
 
+// EffectiveConfig returns the latest effective configuration text reported by an
+// agent. An empty string means no effective configuration body has been received.
 func (a *Adapter) EffectiveConfig(instanceUID string) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -208,6 +232,8 @@ func managedAgentFromMessage(msg *protobufs.AgentToServer) *agents.ManagedAgent 
 	return agent
 }
 
+// mergeAgent preserves previously known values when an OpAMP incremental message
+// omits fields such as health, metadata, or capabilities.
 func mergeAgent(current, previous *agents.ManagedAgent) {
 	if current.Name == "" {
 		current.Name = previous.Name
@@ -232,6 +258,8 @@ func mergeAgent(current, previous *agents.ManagedAgent) {
 	}
 }
 
+// deploymentFromAttributes maps protocol-reported metadata into FleetAMP deployment
+// context without requiring Kubernetes/cloud SDK dependencies.
 func deploymentFromAttributes(attrs map[string]string) agents.DeploymentContext {
 	d := agents.DeploymentContext{Runtime: agents.RuntimeUnknown}
 	if attrs["k8s.cluster.name"] != "" || attrs["k8s.namespace.name"] != "" || attrs["cluster.name"] != "" {

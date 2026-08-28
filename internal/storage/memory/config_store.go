@@ -1,3 +1,12 @@
+// In-memory ConfigurationStore implementation.
+//
+// Purpose:
+//   Stores immutable configuration artifacts for the current FleetAMP process
+//   using a concurrency-safe map and defensive copies.
+//
+// Limitation:
+//   Configuration persistence will move to a durable store in a later milestone.
+
 package memory
 
 import (

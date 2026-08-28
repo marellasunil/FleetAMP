@@ -1,3 +1,12 @@
+// Storage contract for current ManagedAgent state.
+//
+// Purpose:
+//   Keeps FleetAMP core logic independent of a concrete persistence engine.
+//   Implementations may be in-memory, file-backed, SQLite, or PostgreSQL.
+//
+// Dependency:
+//   internal/agents domain model plus context/errors from the Go standard library.
+
 package storage
 
 import (

@@ -1,3 +1,14 @@
+// Per-agent configuration assignment and delivery-state model.
+//
+// Purpose:
+//   Correlates one FleetAMP configuration artifact with one managed agent and
+//   records the control-plane lifecycle: pending, sent, applying, applied,
+//   failed, or unsupported.
+//
+// Dependencies:
+//   Go time package only; protocol-specific status values are normalized by
+//   the management adapter before entering this model.
+
 package configs
 
 import "time"

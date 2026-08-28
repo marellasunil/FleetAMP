@@ -1,3 +1,9 @@
+// Storage contract for per-agent configuration assignments.
+//
+// Purpose:
+//   Tracks desired configuration and asynchronous delivery status independently
+//   from the OpAMP adapter and from the chosen persistence implementation.
+
 package storage
 
 import (

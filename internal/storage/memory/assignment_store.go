@@ -1,3 +1,12 @@
+// In-memory AssignmentStore implementation.
+//
+// Purpose:
+//   Tracks agent/configuration assignments and updates delivery status using the
+//   agent UID plus configuration hash reported asynchronously by OpAMP.
+//
+// Limitation:
+//   Assignment state currently resets with the FleetAMP process.
+
 package memory
 
 import (

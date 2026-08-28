@@ -1,0 +1,20 @@
+server:
+  endpoint: ws://host.docker.internal:4320/v1/opamp
+
+capabilities:
+  reports_effective_config: true
+  reports_health: true
+  accepts_remote_config: true
+  reports_remote_config: true
+  reports_available_components: true
+
+agent:
+  executable: /agent/otelcol-contrib
+  config_files:
+    - /etc/otelcol/base.yaml
+
+storage:
+  directory: /var/lib/otel-supervisor
+
+healthcheck:
+  endpoint: 0.0.0.0:13133
