@@ -9,7 +9,7 @@ FleetAMP is evolving incrementally. This page separates capabilities that are wo
 ## Working now
 
 - Generic `ManagedAgent` domain model
-- Storage abstraction with in-memory implementation
+- Storage abstraction with memory, file-backed, and SQLite implementations
 - OpAMP server adapter based on `opamp-go`
 - Real OpenTelemetry Collector connectivity
 - Full-state request after connection
@@ -22,22 +22,26 @@ FleetAMP is evolving incrementally. This page separates capabilities that are wo
 - Persistent agent snapshots and append-only agent event history
 - Fleet time-range filtering and `/api/v1/agent-events`
 - Agent Details page with desired/effective configuration
-- Immutable configuration artifacts and in-memory configuration store
-- Per-agent configuration assignments and delivery status
+- Immutable configuration artifacts with persistent SQLite configuration store
+- Persistent SQLite-backed per-agent configuration assignments and delivery status
 - OpAMP Supervisor-managed Kubernetes Gateway
 - Remote configuration lifecycle verified: `sent -> applying -> applied`
 - Pre-deployment configuration validation (YAML plus optional Collector `validate`)
+- Desired vs effective configuration drift detection with `in_sync`, `drift`, and `unknown` states
+- Safe per-agent rollback to older immutable configuration history with validation and normal OpAMP delivery lifecycle
+- Path-level drift diagnostics with desired/effective values
+- Immutable configuration version history exposed by configuration name
 
 ## Next milestone
 
-- Persist agents, configurations and assignments across FleetAMP restarts
 - Improve agent identity and deployment metadata for Supervisor-managed Collectors
-- Configuration history and drift comparison
+- Rollback workflow using persisted configuration history
+- Continue persistence consolidation by moving agent/event state behind the database abstraction
 
 ## Persistence and fleet targeting
 
-- SQLite persistence
-- PostgreSQL implementation
+- SQLite persistence for configurations and assignments ✅
+- PostgreSQL implementation for multi-instance/HA FleetAMP
 - Labels, groups and selectors
 - Group-based configuration deployment
 - Rollout and rollback status

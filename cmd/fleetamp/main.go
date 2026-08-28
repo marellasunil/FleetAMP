@@ -10,12 +10,12 @@
 //
 // Main dependencies:
 //   internal/opamp, internal/agents, internal/configs, internal/events,
-//   internal/storage/memory, and internal/storage/file.
+//   internal/storage/memory, internal/storage/file, and internal/storage/sqlite.
 //
 // Configuration:
 //   FLEETAMP_HTTP_ADDR, FLEETAMP_OPAMP_ADDR, FLEETAMP_DATA_DIR,
-//   FLEETAMP_RETIRE_AFTER, and FLEETAMP_OTELCOL_BINARY control listeners,
-//   persistence, lifecycle retirement, and optional Collector validation.
+//   FLEETAMP_RETIRE_AFTER, FLEETAMP_DATABASE_PATH, and FLEETAMP_OTELCOL_BINARY
+//   control listeners, persistence, lifecycle retirement, and validation.
 //
 // Design note:
 //   Protocol-specific OpAMP types stay behind the adapter boundary; core
@@ -41,8 +41,10 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/events"
 	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
+	"github.com/marellasunil/FleetAMP/internal/storage"
 	filestore "github.com/marellasunil/FleetAMP/internal/storage/file"
 	"github.com/marellasunil/FleetAMP/internal/storage/memory"
+	sqlitestore "github.com/marellasunil/FleetAMP/internal/storage/sqlite"
 )
 
 type healthResponse struct {
@@ -67,8 +69,14 @@ func main() {
 		log.Fatalf("load agent snapshot: %v", err)
 	}
 	retireAfter := durationEnvOrDefault("FLEETAMP_RETIRE_AFTER", 24*time.Hour)
-	configStore := memory.NewConfigStore()
-	assignmentStore := memory.NewAssignmentStore()
+	databasePath := envOrDefault("FLEETAMP_DATABASE_PATH", dataDir+"/fleetamp.db")
+	database, err := sqlitestore.Open(ctx, databasePath)
+	if err != nil {
+		log.Fatalf("initialize sqlite database: %v", err)
+	}
+	defer database.Close()
+	configStore := database.Configurations()
+	assignmentStore := database.Assignments()
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr)
 
@@ -171,7 +179,7 @@ func registerHealthRoutes(mux *http.ServeMux) {
 	})
 }
 
-func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, configStore *memory.ConfigStore, assignmentStore *memory.AssignmentStore, eventStore interface {
+func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, eventStore interface {
 	ListSince(context.Context, time.Time) ([]*events.AgentEvent, error)
 }, adapter *fleetopamp.Adapter) {
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +247,17 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		if view.Assignment != nil {
 			view.DesiredConfig, _ = configStore.Get(r.Context(), view.Assignment.ConfigurationID)
 		}
+		if view.DesiredConfig != nil {
+			view.Drift = configs.CompareDesiredEffective(view.DesiredConfig.Content, view.EffectiveConfig)
+			allConfigs, _ := configStore.List(r.Context())
+			for _, candidate := range allConfigs {
+				if candidate.Name == view.DesiredConfig.Name {
+					view.ConfigurationHistory = append(view.ConfigurationHistory, candidate)
+				}
+			}
+		} else {
+			view.Drift = configs.CompareDesiredEffective("", view.EffectiveConfig)
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := agentDetailPage.Execute(w, view); err != nil {
 			log.Printf("render agent detail page: %v", err)
@@ -256,6 +275,8 @@ type agentDetailView struct {
 	DesiredConfig         *configs.Configuration
 	EffectiveConfig       string
 	RemoteConfigSupported bool
+	Drift                 configs.DriftResult
+	ConfigurationHistory  []*configs.Configuration
 }
 
 func hasCapability(capabilities []string, wanted string) bool {
@@ -274,10 +295,64 @@ type createConfigurationRequest struct {
 	ContentType string `json:"content_type"`
 }
 
+type rollbackResponse struct {
+	Action              string                 `json:"action"`
+	FromConfigurationID string                 `json:"from_configuration_id"`
+	TargetConfiguration *configs.Configuration `json:"target_configuration"`
+	Assignment          *configs.Assignment    `json:"assignment"`
+}
+
+func latestAssignmentForAgent(ctx context.Context, store storage.AssignmentStore, agentUID string) (*configs.Assignment, error) {
+	assignments, err := store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var latest *configs.Assignment
+	for _, assignment := range assignments {
+		if assignment.AgentInstanceUID == agentUID && (latest == nil || assignment.UpdatedAt.After(latest.UpdatedAt)) {
+			latest = assignment
+		}
+	}
+	if latest == nil {
+		return nil, storage.ErrAssignmentNotFound
+	}
+	return latest, nil
+}
+
+func deliverConfiguration(ctx context.Context, agentUID string, configuration *configs.Configuration, assignmentStore storage.AssignmentStore, adapter *fleetopamp.Adapter) (*configs.Assignment, error) {
+	assignment := &configs.Assignment{
+		AgentInstanceUID: agentUID, ConfigurationID: configuration.ID, ConfigurationHash: configuration.Hash,
+		Status: configs.DeliveryPending, UpdatedAt: time.Now().UTC(),
+	}
+	if err := assignmentStore.Upsert(ctx, assignment); err != nil {
+		return nil, err
+	}
+	if err := adapter.SendRemoteConfig(ctx, agentUID, configuration); err != nil {
+		assignment.Error = err.Error()
+		assignment.UpdatedAt = time.Now().UTC()
+		if errors.Is(err, fleetopamp.ErrRemoteConfigUnsupported) {
+			assignment.Status = configs.DeliveryUnsupported
+		} else {
+			assignment.Status = configs.DeliveryFailed
+		}
+		if storeErr := assignmentStore.Upsert(ctx, assignment); storeErr != nil {
+			return assignment, fmt.Errorf("persist failed delivery state: %w", storeErr)
+		}
+		return assignment, err
+	}
+	assignment.Status = configs.DeliverySent
+	assignment.Error = ""
+	assignment.UpdatedAt = time.Now().UTC()
+	if err := assignmentStore.Upsert(ctx, assignment); err != nil {
+		return assignment, err
+	}
+	return assignment, nil
+}
+
 // registerConfigRoutes exposes configuration artifact, validation, and
 // assignment APIs. Validation occurs both before artifact creation and again
 // immediately before delivery to protect against unsafe desired state.
-func registerConfigRoutes(mux *http.ServeMux, configStore *memory.ConfigStore, assignmentStore *memory.AssignmentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter) {
+func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter) {
 	mux.HandleFunc("/api/v1/configurations/validate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -303,6 +378,16 @@ func registerConfigRoutes(mux *http.ServeMux, configStore *memory.ConfigStore, a
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
+			}
+			name := strings.TrimSpace(r.URL.Query().Get("name"))
+			if name != "" {
+				filtered := make([]*configs.Configuration, 0)
+				for _, item := range items {
+					if item.Name == name {
+						filtered = append(filtered, item)
+					}
+				}
+				items = filtered
 			}
 			writeJSON(w, http.StatusOK, items)
 		case http.MethodPost:
@@ -345,11 +430,84 @@ func registerConfigRoutes(mux *http.ServeMux, configStore *memory.ConfigStore, a
 	})
 
 	mux.HandleFunc("/api/v1/agents/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/agents/"), "/"), "/")
+		if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "drift" {
+			agentUID := parts[0]
+			if _, err := agentStore.Get(r.Context(), agentUID); err != nil {
+				http.Error(w, "managed agent not found", http.StatusNotFound)
+				return
+			}
+			latest, err := latestAssignmentForAgent(r.Context(), assignmentStore, agentUID)
+			effective := adapter.EffectiveConfig(agentUID)
+			if errors.Is(err, storage.ErrAssignmentNotFound) {
+				writeJSON(w, http.StatusOK, configs.CompareDesiredEffective("", effective))
+				return
+			}
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			desired, err := configStore.Get(r.Context(), latest.ConfigurationID)
+			if err != nil {
+				http.Error(w, "desired configuration not found", http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, configs.CompareDesiredEffective(desired.Content, effective))
+			return
+		}
+
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[1] == "rollback" {
+			agentUID, targetConfigID := parts[0], parts[2]
+			if _, err := agentStore.Get(r.Context(), agentUID); err != nil {
+				http.Error(w, "managed agent not found", http.StatusNotFound)
+				return
+			}
+			latest, err := latestAssignmentForAgent(r.Context(), assignmentStore, agentUID)
+			if errors.Is(err, storage.ErrAssignmentNotFound) {
+				http.Error(w, "agent has no desired configuration to roll back from", http.StatusConflict)
+				return
+			}
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			current, err := configStore.Get(r.Context(), latest.ConfigurationID)
+			if err != nil {
+				http.Error(w, "current desired configuration not found", http.StatusInternalServerError)
+				return
+			}
+			target, err := configStore.Get(r.Context(), targetConfigID)
+			if err != nil {
+				http.Error(w, "rollback configuration not found", http.StatusNotFound)
+				return
+			}
+			if err := configs.ValidateRollbackTarget(current, target); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			validation := validator.Validate(r.Context(), target.Content)
+			if !validation.Valid {
+				writeJSON(w, http.StatusUnprocessableEntity, validation)
+				return
+			}
+			assignment, deliveryErr := deliverConfiguration(r.Context(), agentUID, target, assignmentStore, adapter)
+			response := rollbackResponse{Action: "rollback", FromConfigurationID: current.ID, TargetConfiguration: target, Assignment: assignment}
+			if deliveryErr != nil {
+				status := http.StatusInternalServerError
+				if errors.Is(deliveryErr, fleetopamp.ErrRemoteConfigUnsupported) || errors.Is(deliveryErr, fleetopamp.ErrAgentNotConnected) {
+					status = http.StatusConflict
+				}
+				writeJSON(w, status, response)
+				return
+			}
+			writeJSON(w, http.StatusAccepted, response)
+			return
+		}
+
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/agents/"), "/"), "/")
 		if len(parts) != 3 || parts[1] != "configurations" {
 			http.NotFound(w, r)
 			return
@@ -369,24 +527,15 @@ func registerConfigRoutes(mux *http.ServeMux, configStore *memory.ConfigStore, a
 			writeJSON(w, http.StatusUnprocessableEntity, validation)
 			return
 		}
-		assignment := &configs.Assignment{AgentInstanceUID: agentUID, ConfigurationID: configID, ConfigurationHash: configuration.Hash, Status: configs.DeliveryPending, UpdatedAt: time.Now().UTC()}
-		_ = assignmentStore.Upsert(r.Context(), assignment)
-		err = adapter.SendRemoteConfig(r.Context(), agentUID, configuration)
-		if err != nil {
-			assignment.Error = err.Error()
-			assignment.UpdatedAt = time.Now().UTC()
-			if errors.Is(err, fleetopamp.ErrRemoteConfigUnsupported) {
-				assignment.Status = configs.DeliveryUnsupported
-			} else {
-				assignment.Status = configs.DeliveryFailed
+		assignment, deliveryErr := deliverConfiguration(r.Context(), agentUID, configuration, assignmentStore, adapter)
+		if deliveryErr != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(deliveryErr, fleetopamp.ErrRemoteConfigUnsupported) || errors.Is(deliveryErr, fleetopamp.ErrAgentNotConnected) {
+				status = http.StatusConflict
 			}
-			_ = assignmentStore.Upsert(r.Context(), assignment)
-			writeJSON(w, http.StatusConflict, assignment)
+			writeJSON(w, status, assignment)
 			return
 		}
-		assignment.Status = configs.DeliverySent
-		assignment.UpdatedAt = time.Now().UTC()
-		_ = assignmentStore.Upsert(r.Context(), assignment)
 		writeJSON(w, http.StatusAccepted, assignment)
 	})
 }
@@ -438,7 +587,9 @@ body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;margin:0;
 <div class="head"><div><h1>{{.Agent.Name}}</h1><div class="muted"><code>{{.Agent.InstanceUID}}</code></div></div><div class="chips"><span class="chip {{if .Agent.Connected}}ok{{else}}bad{{end}}">Connected: {{.Agent.Connected}}</span><span class="chip {{if .Agent.Healthy}}ok{{else}}bad{{end}}">Healthy: {{.Agent.Healthy}}</span></div></div>
 <div class="grid"><section class="card"><h2>Overview</h2><div class="kv"><span>Type</span><span>{{.Agent.Type}}</span><span>Version</span><span>{{.Agent.Version}}</span><span>Hostname</span><span>{{.Agent.Hostname}}</span><span>Runtime</span><span>{{.Agent.Deployment.Runtime}}</span><span>Cluster</span><span>{{.Agent.Deployment.Cluster}}</span><span>Last seen</span><span>{{.Agent.LastSeen}}</span></div></section>
 <section class="card"><h2>Capabilities</h2><div class="chips">{{range .Agent.Capabilities}}<span class="chip">{{.}}</span>{{end}}</div><p class="{{if .RemoteConfigSupported}}ok{{else}}warn{{end}}">Remote config: {{if .RemoteConfigSupported}}supported{{else}}not advertised by this agent{{end}}</p></section>
-<section class="card"><h2>Latest assignment</h2>{{if .Assignment}}<div class="kv"><span>Status</span><span>{{.Assignment.Status}}</span><span>Config ID</span><span><code>{{.Assignment.ConfigurationID}}</code></span><span>Hash</span><span><code>{{.Assignment.ConfigurationHash}}</code></span><span>Updated</span><span>{{.Assignment.UpdatedAt}}</span>{{if .Assignment.Error}}<span>Error</span><span class="bad">{{.Assignment.Error}}</span>{{end}}</div>{{else}}<p class="muted">No FleetAMP configuration has been assigned.</p>{{end}}</section></div>
+<section class="card"><h2>Latest assignment</h2>{{if .Assignment}}<div class="kv"><span>Status</span><span>{{.Assignment.Status}}</span><span>Config ID</span><span><code>{{.Assignment.ConfigurationID}}</code></span><span>Hash</span><span><code>{{.Assignment.ConfigurationHash}}</code></span><span>Updated</span><span>{{.Assignment.UpdatedAt}}</span>{{if .Assignment.Error}}<span>Error</span><span class="bad">{{.Assignment.Error}}</span>{{end}}</div>{{else}}<p class="muted">No FleetAMP configuration has been assigned.</p>{{end}}</section>
+<section class="card"><h2>Configuration drift</h2><div class="kv"><span>Status</span><span class="{{if .Drift.InSync}}ok{{else if eq .Drift.Status "drift"}}bad{{else}}warn{{end}}">{{.Drift.Status}}</span>{{if .Drift.Reason}}<span>Reason</span><span>{{.Drift.Reason}}</span>{{end}}</div>{{if .Drift.Differences}}<div style="margin-top:12px">{{range .Drift.Differences}}<div style="margin:8px 0;padding:10px;background:#0b1220;border-radius:8px"><code>{{.Path}}</code> <span class="warn">{{.Kind}}</span><br><span class="muted">Desired:</span> <code>{{printf "%v" .Desired}}</code><br><span class="muted">Effective:</span> <code>{{printf "%v" .Effective}}</code></div>{{end}}</div>{{end}}</section></div>
 <div class="configgrid"><section class="card"><h2>Desired configuration</h2>{{if .DesiredConfig}}<p class="muted">{{.DesiredConfig.Name}} · version {{.DesiredConfig.Version}}</p><pre>{{.DesiredConfig.Content}}</pre>{{else}}<p class="muted">No desired FleetAMP configuration.</p>{{end}}</section>
 <section class="card"><h2>Effective configuration</h2><p class="muted">Reported by the managed agent through OpAMP.</p>{{if .EffectiveConfig}}<pre>{{.EffectiveConfig}}</pre>{{else}}<p class="muted">No effective configuration has been reported yet.</p>{{end}}</section></div>
+{{if .ConfigurationHistory}}<section class="card" style="margin-top:16px"><h2>Configuration history</h2><table style="width:100%;border-collapse:collapse"><thead><tr><th>Version</th><th>Created</th><th>Hash</th><th>Config ID</th></tr></thead><tbody>{{range .ConfigurationHistory}}<tr><td>{{.Version}}</td><td>{{.CreatedAt}}</td><td><code>{{.Hash}}</code></td><td><code>{{.ID}}</code></td></tr>{{end}}</tbody></table></section>{{end}}
 </body></html>`))

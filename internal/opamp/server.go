@@ -117,6 +117,9 @@ func (a *Adapter) onMessage(_ context.Context, conn servertypes.Connection, msg 
 	}
 	a.byConn[conn] = cloneManagedAgent(agent)
 	a.byUID[agent.InstanceUID] = conn
+	if effective := effectiveConfigString(msg.GetEffectiveConfig()); effective != "" {
+		a.effective[agent.InstanceUID] = effective
+	}
 	a.mu.Unlock()
 	eventType := management.EventUpdated
 	if !existed {

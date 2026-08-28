@@ -26,7 +26,7 @@ FleetAMP is designed to use standard Linux locations:
 /etc/fleetamp/
 └── fleetamp.yaml        # future configuration file
 
-/var/lib/fleetamp/       # future persistent state
+/var/lib/fleetamp/       # persistent state (including fleetamp.db)
 /var/log/fleetamp/       # future service logs
 ```
 
@@ -83,7 +83,7 @@ go run ./cmd/fleetamp
 
 ## Current limitations
 
-The current implementation uses an in-memory agent store. Fleet inventory is therefore lost when FleetAMP restarts. Persistent storage, packaged RPM/DEB artifacts, a systemd unit, configuration-file loading, TLS termination, authentication, and production hardening are planned work rather than current guarantees.
+FleetAMP now persists configuration artifacts and assignments in embedded SQLite, while agent snapshots and lifecycle events use the existing file-backed persistence. Packaged RPM/DEB artifacts, a systemd unit, configuration-file loading, TLS termination, authentication, HA/PostgreSQL, and production hardening remain planned work rather than current guarantees.
 
 ## Run FleetAMP on another Linux system
 
@@ -112,7 +112,10 @@ For source-based development FleetAMP defaults to `./data`. A Linux service inst
 
 ```bash
 export FLEETAMP_DATA_DIR=/var/lib/fleetamp
+export FLEETAMP_DATABASE_PATH=/var/lib/fleetamp/fleetamp.db
 export FLEETAMP_RETIRE_AFTER=24h
 ```
+
+`FLEETAMP_DATABASE_PATH` defaults to `<FLEETAMP_DATA_DIR>/fleetamp.db`. FleetAMP uses an embedded, CGo-free SQLite driver, so users do **not** need to install a separate SQLite server or package for normal operation. The database and schema are created automatically on first start.
 
 `FLEETAMP_RETIRE_AFTER` controls how long a disconnected agent remains in the recent fleet before FleetAMP marks it `retired`.
