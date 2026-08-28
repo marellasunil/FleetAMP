@@ -1,9 +1,9 @@
 ---
-sidebar_position: 4
-title: Connect a Kubernetes Gateway
+sidebar_position: 3
+title: Connect OTel Collector to OpAMP
 ---
 
-# Connect an OpenTelemetry Gateway
+# Connect an OTel Collector to FleetAMP with OpAMP
 
 This guide shows the first verified FleetAMP integration path: an OpenTelemetry Collector gateway running in Kubernetes connects to FleetAMP over OpAMP.
 
@@ -50,12 +50,17 @@ Enable useful reporting capabilities and descriptive metadata:
         collector.role: gateway
         cluster.name: docker-desktop
         deployment.environment: personal-lab
+        team: payments
+        environment: prod
+        application: payment-api
 
 service:
   extensions: [opamp]
 ```
 
 `host.docker.internal` is appropriate for the verified Docker Desktop Kubernetes lab because FleetAMP runs on the host machine. Other Kubernetes environments need a routable FleetAMP address appropriate for that environment.
+
+The values under `agent_description.non_identifying_attributes` are reported metadata. FleetAMP displays them under **Reported OTel attributes**, and they can satisfy group selectors automatically. FleetAMP-managed labels remain a separate operator-owned override layer.
 
 ## Verify the connection
 

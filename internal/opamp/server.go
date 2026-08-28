@@ -219,16 +219,20 @@ func managedAgentFromMessage(msg *protobufs.AgentToServer) *agents.ManagedAgent 
 		healthy = msg.GetHealth().GetHealthy()
 	}
 
+	reportedGroup, reportedLabels, unknownGroup := splitFleetAMPMetadata(attrs)
 	agent := &agents.ManagedAgent{
-		InstanceUID:  uid,
-		Type:         agents.AgentTypeOTelCollector,
-		Name:         name,
-		Hostname:     attrs["host.name"],
-		Version:      attrs["service.version"],
-		Connected:    true,
-		Healthy:      healthy,
-		Attributes:   attrs,
-		Capabilities: capabilityNames(msg.GetCapabilities()),
+		InstanceUID:         uid,
+		Type:                agents.AgentTypeOTelCollector,
+		Name:                name,
+		Hostname:            attrs["host.name"],
+		Version:             attrs["service.version"],
+		Connected:           true,
+		Healthy:             healthy,
+		Attributes:          attrs,
+		ReportedGroupFields: reportedGroup,
+		ReportedLabels:      reportedLabels,
+		UnknownGroupFields:  unknownGroup,
+		Capabilities:        capabilityNames(msg.GetCapabilities()),
 	}
 	agent.Deployment = deploymentFromAttributes(attrs)
 	agent.Touch()
@@ -259,6 +263,43 @@ func mergeAgent(current, previous *agents.ManagedAgent) {
 	if current.Labels == nil {
 		current.Labels = previous.Labels
 	}
+	if current.GroupFields == nil {
+		current.GroupFields = previous.GroupFields
+	}
+	if current.ReportedGroupFields == nil {
+		current.ReportedGroupFields = previous.ReportedGroupFields
+	}
+	if current.ReportedLabels == nil {
+		current.ReportedLabels = previous.ReportedLabels
+	}
+	if current.UnknownGroupFields == nil {
+		current.UnknownGroupFields = previous.UnknownGroupFields
+	}
+}
+
+func splitFleetAMPMetadata(attrs map[string]string) (map[string]string, map[string]string, map[string]string) {
+	groupFields, labels, unknown := map[string]string{}, map[string]string{}, map[string]string{}
+	for key, value := range attrs {
+		if strings.HasPrefix(key, "fleetamp.group.") {
+			field := strings.TrimPrefix(key, "fleetamp.group.")
+			switch field {
+			case "application", "environment", "place":
+				groupFields[field] = value
+			default:
+				unknown[field] = value
+			}
+		}
+		if strings.HasPrefix(key, "fleetamp.label.") {
+			labels[strings.TrimPrefix(key, "fleetamp.label.")] = value
+		}
+	}
+	// Backward-compatible aliases used by early FleetAMP prototypes.
+	for _, field := range []string{"application", "environment", "place"} {
+		if groupFields[field] == "" && attrs[field] != "" {
+			groupFields[field] = attrs[field]
+		}
+	}
+	return groupFields, labels, unknown
 }
 
 // deploymentFromAttributes maps protocol-reported metadata into FleetAMP deployment
@@ -350,6 +391,17 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func cloneStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 func cloneManagedAgent(agent *agents.ManagedAgent) *agents.ManagedAgent {
 	if agent == nil {
 		return nil
@@ -367,6 +419,10 @@ func cloneManagedAgent(agent *agents.ManagedAgent) *agents.ManagedAgent {
 			clone.Labels[k] = v
 		}
 	}
+	clone.GroupFields = cloneStringMap(agent.GroupFields)
+	clone.ReportedGroupFields = cloneStringMap(agent.ReportedGroupFields)
+	clone.ReportedLabels = cloneStringMap(agent.ReportedLabels)
+	clone.UnknownGroupFields = cloneStringMap(agent.UnknownGroupFields)
 	clone.Capabilities = append([]string(nil), agent.Capabilities...)
 	return &clone
 }

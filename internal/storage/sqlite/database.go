@@ -3,7 +3,7 @@
 // Purpose:
 //
 //	Opens the embedded FleetAMP database and owns schema initialization for
-//	configuration artifacts and per-agent assignments.
+//	configuration artifacts, current assignments, and append-only deployment history.
 //
 // Packaging:
 //
@@ -45,6 +45,8 @@ func Open(ctx context.Context, path string) (*Database, error) {
 func (d *Database) Close() error                  { return d.db.Close() }
 func (d *Database) Configurations() *ConfigStore  { return &ConfigStore{db: d.db} }
 func (d *Database) Assignments() *AssignmentStore { return &AssignmentStore{db: d.db} }
+func (d *Database) Deployments() *DeploymentStore { return &DeploymentStore{db: d.db} }
+func (d *Database) Groups() *GroupStore           { return &GroupStore{db: d.db} }
 
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -66,6 +68,22 @@ func (d *Database) initialize(ctx context.Context) error {
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_assignments_agent_hash ON assignments(agent_instance_uid, configuration_hash)`,
 		`CREATE INDEX IF NOT EXISTS idx_assignments_updated_at ON assignments(updated_at)`,
+		`CREATE TABLE IF NOT EXISTS deployments (
+            id TEXT PRIMARY KEY, agent_instance_uid TEXT NOT NULL,
+            configuration_id TEXT NOT NULL, configuration_name TEXT NOT NULL,
+            configuration_version TEXT NOT NULL, configuration_hash TEXT NOT NULL,
+            action TEXT NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL, sent_at TEXT, applying_at TEXT, applied_at TEXT,
+            failed_at TEXT, updated_at TEXT NOT NULL,
+            FOREIGN KEY(configuration_id) REFERENCES configurations(id)
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_deployments_agent_created ON deployments(agent_instance_uid, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_deployments_agent_hash ON deployments(agent_instance_uid, configuration_hash, created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS groups (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '',
+            selector TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)`,
 	}
 	for _, statement := range statements {
 		if _, err := d.db.ExecContext(ctx, statement); err != nil {

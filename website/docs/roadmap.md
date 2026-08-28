@@ -29,11 +29,21 @@ FleetAMP is evolving incrementally. This page separates capabilities that are wo
 - Pre-deployment configuration validation (YAML plus optional Collector `validate`)
 - Desired vs effective configuration drift detection with `in_sync`, `drift`, and `unknown` states
 - Safe per-agent rollback to older immutable configuration history with validation and normal OpAMP delivery lifecycle
+- Append-only per-agent deployment history with deploy/rollback action, version, status, and lifecycle timestamps
+- Agent Details view with latest 10 FleetAMP configuration deployments
+- Fleet inventory OS, architecture, OTel version, runtime, health, and last-seen visibility
 - Path-level drift diagnostics with desired/effective values
 - Immutable configuration version history exposed by configuration name
 
+- Derived per-agent deployment summary: current deployed version, last deployment duration, and last successful deployment
+- FleetAMP-owned agent labels preserved across OpAMP updates and restarts
+- Persistent SQLite-backed dynamic groups with exact-match selectors
+- Groups REST API, member resolution, Groups UI, and Agent Details group visibility
+
 ## Next milestone
 
+- Group-based configuration deployment using dynamic selector membership
+- Group deployment status and per-agent result aggregation
 - Improve agent identity and deployment metadata for Supervisor-managed Collectors
 - Rollback workflow using persisted configuration history
 - Continue persistence consolidation by moving agent/event state behind the database abstraction
@@ -42,7 +52,7 @@ FleetAMP is evolving incrementally. This page separates capabilities that are wo
 
 - SQLite persistence for configurations and assignments ✅
 - PostgreSQL implementation for multi-instance/HA FleetAMP
-- Labels, groups and selectors
+- Labels, groups and selectors ✅
 - Group-based configuration deployment
 - Rollout and rollback status
 

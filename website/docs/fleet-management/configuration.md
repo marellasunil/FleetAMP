@@ -45,6 +45,38 @@ curl http://localhost:8080/api/v1/assignments
 
 Statuses currently include `pending`, `sent`, `applying`, `applied`, `failed`, and `unsupported`.
 
+## Deployment history
+
+FleetAMP stores every configuration deployment attempt as a separate append-only record. This is intentionally different from `assignments`: an assignment answers **what configuration should this agent have now**, while a deployment answers **what happened each time FleetAMP attempted to deploy configuration**.
+
+Each deployment records the agent, configuration name/version/hash, action (`deploy` or `rollback`), status, error, and timestamps for created, sent, applying, applied, or failed state. Re-deploying the same immutable version creates another deployment record rather than overwriting an earlier attempt.
+
+List the latest deployments for one managed agent:
+
+```bash
+curl 'http://localhost:8080/api/v1/agents/<INSTANCE_UID>/deployments?limit=10'
+```
+
+The Agent Details page shows the latest 10 FleetAMP configuration deployments. FleetAMP also prevents overlapping `pending`, `sent`, or `applying` deployments for the same agent so OpAMP status reports can be correlated safely with the current deployment attempt.
+
+
+## Deployment summary
+
+FleetAMP derives a compact operational summary from the append-only deployment history rather than storing duplicate summary columns. For each managed agent it can show:
+
+- **Current deployed version** — the version from the most recent successfully `applied` deployment
+- **Last deployment** — the newest deployment attempt, regardless of success or failure
+- **Last deployment duration** — elapsed time from `sent` to `applied` or `failed`
+- **Last successful deployment** — the most recent deployment whose status reached `applied`
+
+Query the summary directly:
+
+```bash
+curl http://localhost:8080/api/v1/agents/<INSTANCE_UID>/deployment-summary
+```
+
+A failed newer deployment does not change the current deployed version. For example, if v7 was applied and a later v8 deployment failed, FleetAMP reports current deployed version `7`, last deployment `v8 / failed`, and last successful deployment `v7`. Deployments still in `pending`, `sent`, or `applying` state have no final duration yet.
+
 ## Safe rollback
 
 Rollback reuses an older immutable configuration artifact; FleetAMP never edits or overwrites configuration history. The rollback endpoint is:
@@ -95,7 +127,7 @@ export FLEETAMP_DATABASE_PATH=/var/lib/fleetamp/fleetamp.db
 
 This means a FleetAMP restart no longer loses the configuration artifact or the record of which configuration was assigned to an agent. When a Supervisor reconnects and reports remote-configuration status, FleetAMP can correlate that status with the persisted assignment. No standalone SQLite installation or database service is required.
 
-Current SQLite tables are `configurations` and `assignments`. Agent snapshots and lifecycle events continue to use the existing file-backed persistence during this incremental migration. PostgreSQL remains a future storage backend for multi-instance/HA FleetAMP deployments.
+Current SQLite tables include `configurations`, `assignments`, `deployments`, and `groups`. Agent snapshots and lifecycle events continue to use the existing file-backed persistence during this incremental migration. PostgreSQL remains a future storage backend for multi-instance/HA FleetAMP deployments.
 
 ## Pre-deployment validation
 
