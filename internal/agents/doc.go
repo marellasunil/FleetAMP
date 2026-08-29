@@ -1,3 +1,2 @@
+// Package agents defines FleetAMP managed-agent inventory and observed fleet state.
 package agents
-
-// Package agents manages Collector inventory and observed fleet state.

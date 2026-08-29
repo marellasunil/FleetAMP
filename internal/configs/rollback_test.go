@@ -1,3 +1,4 @@
+// Tests rollback safety rules for immutable configuration history.
 package configs
 
 import (

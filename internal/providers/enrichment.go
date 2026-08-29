@@ -1,3 +1,9 @@
+// Vendor-neutral managed-agent enrichment provider contract.
+//
+// Purpose:
+//
+//	Allows external inventory/CMDB systems to add metadata without coupling
+//	FleetAMP core domain objects to a specific enterprise product.
 package providers
 
 import (

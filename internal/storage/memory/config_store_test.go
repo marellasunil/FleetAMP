@@ -1,3 +1,4 @@
+// Tests in-memory immutable configuration artifact persistence.
 package memory
 
 import (

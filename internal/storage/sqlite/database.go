@@ -81,7 +81,7 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_deployments_agent_hash ON deployments(agent_instance_uid, configuration_hash, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS groups (
             id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '',
-            selector TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            selector TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)`,
 	}
@@ -90,5 +90,32 @@ func (d *Database) initialize(ctx context.Context) error {
 			return fmt.Errorf("initialize sqlite schema: %w", err)
 		}
 	}
+	if err := d.ensureGroupEnabledColumn(ctx); err != nil {
+		return err
+	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureGroupEnabledColumn(ctx context.Context) error {
+	rows, err := d.db.QueryContext(ctx, `PRAGMA table_info(groups)`)
+	if err != nil {
+		return fmt.Errorf("inspect groups schema: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == "enabled" {
+			return nil
+		}
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE groups ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`); err != nil {
+		return fmt.Errorf("add groups.enabled column: %w", err)
+	}
+	return nil
 }

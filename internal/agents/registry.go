@@ -1,3 +1,9 @@
+// Legacy in-memory Collector registry retained for simple agent inventory helpers.
+//
+// Purpose:
+//
+//	Provides concurrency-safe upsert/list operations around the ManagedAgent
+//	compatibility alias. Runtime persistence is handled through storage stores.
 package agents
 
 import "sync"

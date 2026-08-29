@@ -279,8 +279,10 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		view := agentDetailView{Agent: agent, EffectiveConfig: adapter.EffectiveConfig(uid), RemoteConfigSupported: hasCapability(agent.Capabilities, "accepts_remote_config"), TargetingMetadata: groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent), EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields, Error: r.URL.Query().Get("error")}
 		view.Deployments, _ = deploymentStore.ListByAgent(r.Context(), uid, 10)
 		if allGroups, groupErr := groupStore.List(r.Context()); groupErr == nil {
-			view.AllGroups = allGroups
 			for _, group := range allGroups {
+				if group.Enabled {
+					view.AllGroups = append(view.AllGroups, group)
+				}
 				if groups.Matches(group, agent) {
 					view.Groups = append(view.Groups, group)
 				}

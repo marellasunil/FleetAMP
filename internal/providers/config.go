@@ -1,3 +1,9 @@
+// Vendor-neutral external configuration provider contracts.
+//
+// Purpose:
+//
+//	Defines references and fetch behavior for future GitHub, Azure DevOps,
+//	GitLab, filesystem, or other desired-configuration sources.
 package providers
 
 import "context"

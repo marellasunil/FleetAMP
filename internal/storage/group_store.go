@@ -1,3 +1,9 @@
+// Storage contract for FleetAMP controlled group definitions.
+//
+// Purpose:
+//
+//	Abstracts create/update/read/list/delete persistence for group identity so
+//	group business logic is independent of SQLite or a future shared database.
 package storage
 
 import (

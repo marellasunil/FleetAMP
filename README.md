@@ -185,3 +185,7 @@ FleetAMP intends to build on and interoperate with the OpenTelemetry ecosystem, 
 - `open-telemetry/opamp-go`
 - OpenTelemetry OpAMP Supervisor
 - OpenTelemetry Collector / `otelcol-contrib`
+
+## Program structure
+
+For a source-code map and explanation of how FleetAMP components fit together, see [`docs/PROGRAM_STRUCTURE.md`](docs/PROGRAM_STRUCTURE.md).

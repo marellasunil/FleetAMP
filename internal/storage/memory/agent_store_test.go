@@ -1,3 +1,4 @@
+// Tests concurrency-safe in-memory ManagedAgent persistence behavior.
 package memory
 
 import (

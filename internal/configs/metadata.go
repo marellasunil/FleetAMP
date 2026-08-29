@@ -1,3 +1,9 @@
+// Managed FleetAMP metadata merge helpers for Collector configuration.
+//
+// Purpose:
+//
+//	Safely injects FleetAMP group and label keys into service.telemetry.resource
+//	while preserving the rest of the desired OpenTelemetry Collector YAML.
 package configs
 
 import (

@@ -1,3 +1,4 @@
+// Tests SQLite schema persistence for configurations, assignments, deployments, and groups.
 package sqlite
 
 import (

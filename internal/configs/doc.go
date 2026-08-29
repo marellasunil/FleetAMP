@@ -1,3 +1,2 @@
+// Package configs manages immutable configuration, validation, deployment, drift, and rollback.
 package configs
-
-// Package configs manages versioned OpenTelemetry Collector configurations.

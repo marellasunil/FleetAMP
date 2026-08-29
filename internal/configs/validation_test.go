@@ -1,3 +1,4 @@
+// Tests YAML and optional Collector-binary configuration validation.
 package configs
 
 import (

@@ -1,3 +1,9 @@
+// SQLite-backed implementation of the FleetAMP GroupStore.
+//
+// Purpose:
+//
+//	Persists controlled group selectors and enabled state, including safe
+//	serialization of Application/Environment/Place identity into SQLite.
 package sqlite
 
 import (
@@ -19,8 +25,8 @@ func (s *GroupStore) Create(ctx context.Context, group *groups.Group) error {
 	if err != nil {
 		return fmt.Errorf("encode group selector: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO groups(id,name,description,selector,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
-		group.ID, group.Name, group.Description, string(selector), group.CreatedAt.Format(time.RFC3339Nano), group.UpdatedAt.Format(time.RFC3339Nano))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO groups(id,name,description,selector,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,
+		group.ID, group.Name, group.Description, string(selector), boolToInt(group.Enabled), group.CreatedAt.Format(time.RFC3339Nano), group.UpdatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("create group: %w", err)
 	}
@@ -32,8 +38,8 @@ func (s *GroupStore) Update(ctx context.Context, group *groups.Group) error {
 	if err != nil {
 		return fmt.Errorf("encode group selector: %w", err)
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE groups SET name=?,description=?,selector=?,updated_at=? WHERE id=?`,
-		group.Name, group.Description, string(selector), group.UpdatedAt.Format(time.RFC3339Nano), group.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE groups SET name=?,description=?,selector=?,enabled=?,updated_at=? WHERE id=?`,
+		group.Name, group.Description, string(selector), boolToInt(group.Enabled), group.UpdatedAt.Format(time.RFC3339Nano), group.ID)
 	if err != nil {
 		return fmt.Errorf("update group: %w", err)
 	}
@@ -82,16 +88,18 @@ func (s *GroupStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-const groupSelect = `SELECT id,name,description,selector,created_at,updated_at FROM groups`
+const groupSelect = `SELECT id,name,description,selector,enabled,created_at,updated_at FROM groups`
 
 type scanner interface{ Scan(dest ...any) error }
 
 func scanGroup(s scanner) (*groups.Group, error) {
 	var g groups.Group
 	var selector, createdAt, updatedAt string
-	if err := s.Scan(&g.ID, &g.Name, &g.Description, &selector, &createdAt, &updatedAt); err != nil {
+	var enabled int
+	if err := s.Scan(&g.ID, &g.Name, &g.Description, &selector, &enabled, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
+	g.Enabled = enabled != 0
 	if err := json.Unmarshal([]byte(selector), &g.Selector); err != nil {
 		return nil, fmt.Errorf("decode group selector: %w", err)
 	}
@@ -105,6 +113,13 @@ func scanGroup(s scanner) (*groups.Group, error) {
 		return nil, err
 	}
 	return &g, nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 var _ storage.GroupStore = (*GroupStore)(nil)

@@ -1,3 +1,4 @@
+// Tests semantic desired/effective configuration drift detection and diagnostics.
 package configs
 
 import "testing"

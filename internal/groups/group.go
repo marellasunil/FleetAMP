@@ -19,6 +19,7 @@ type Group struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description,omitempty"`
 	Selector    map[string]string `json:"selector"`
+	Enabled     bool              `json:"enabled"`
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 }
@@ -29,10 +30,19 @@ func New(name, description string, selector map[string]string) (*Group, error) {
 		return nil, err
 	}
 	now := time.Now().UTC()
-	return &Group{ID: id, Name: name, Description: description, Selector: cloneMap(selector), CreatedAt: now, UpdatedAt: now}, nil
+	return &Group{ID: id, Name: name, Description: description, Selector: cloneMap(selector), Enabled: true, CreatedAt: now, UpdatedAt: now}, nil
 }
 
 func Matches(group *Group, agent *agents.ManagedAgent) bool {
+	if group == nil || !group.Enabled {
+		return false
+	}
+	return MatchesIdentity(group, agent)
+}
+
+// MatchesIdentity checks assignment identity even when a group is disabled.
+// It is used for safety checks such as preventing deletion of assigned groups.
+func MatchesIdentity(group *Group, agent *agents.ManagedAgent) bool {
 	if group == nil || agent == nil || len(group.Selector) == 0 {
 		return false
 	}
