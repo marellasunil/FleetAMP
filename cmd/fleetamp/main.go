@@ -29,7 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -56,6 +56,8 @@ type healthResponse struct {
 }
 
 func main() {
+	closeLog := configureLogging()
+	defer closeLog()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -65,16 +67,16 @@ func main() {
 	dataDir := envOrDefault("FLEETAMP_DATA_DIR", "./data")
 	eventStore, err := filestore.NewEventStore(dataDir)
 	if err != nil {
-		log.Fatalf("initialize event store: %v", err)
+		fatalLog("initialize event store", err)
 	}
 	if err := loadAgentSnapshot(ctx, agentStore, dataDir); err != nil {
-		log.Fatalf("load agent snapshot: %v", err)
+		fatalLog("load agent snapshot", err)
 	}
 	retireAfter := durationEnvOrDefault("FLEETAMP_RETIRE_AFTER", 24*time.Hour)
 	databasePath := envOrDefault("FLEETAMP_DATABASE_PATH", dataDir+"/fleetamp.db")
 	database, err := sqlitestore.Open(ctx, databasePath)
 	if err != nil {
-		log.Fatalf("initialize sqlite database: %v", err)
+		fatalLog("initialize sqlite database", err)
 	}
 	defer database.Close()
 	configStore := database.Configurations()
@@ -86,7 +88,7 @@ func main() {
 
 	go func() {
 		if err := adapter.Start(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("OpAMP server stopped with error: %v", err)
+			slog.Error("OpAMP server stopped", "component", "opamp", "event", "server_stopped", "error", err)
 			stop()
 		}
 	}()
@@ -122,9 +124,9 @@ func main() {
 					event.Agent.FirstSeen = now
 				}
 				if err := agentStore.Upsert(ctx, event.Agent); err != nil && ctx.Err() == nil {
-					log.Printf("store agent %s: %v", event.Agent.InstanceUID, err)
+					slog.Error("failed to store agent", "component", "agents", "event", "store_failed", "agent_uid", event.Agent.InstanceUID, "error", err)
 				} else if err := saveAgentSnapshot(ctx, agentStore, dataDir); err != nil && ctx.Err() == nil {
-					log.Printf("save agent snapshot: %v", err)
+					slog.Error("failed to save agent snapshot", "component", "agents", "event", "snapshot_save_failed", "error", err)
 				}
 				if event.Type == "connected" || event.Type == "disconnected" {
 					_ = eventStore.Append(ctx, &events.AgentEvent{AgentInstanceUID: event.Agent.InstanceUID, AgentName: event.Agent.Name, Type: events.Type(event.Type), Timestamp: now})
@@ -132,9 +134,9 @@ func main() {
 				if previous != nil && previous.Healthy != event.Agent.Healthy {
 					_ = eventStore.Append(ctx, &events.AgentEvent{AgentInstanceUID: event.Agent.InstanceUID, AgentName: event.Agent.Name, Type: events.HealthChanged, Timestamp: now, Metadata: map[string]string{"healthy": fmt.Sprintf("%t", event.Agent.Healthy)}})
 				}
-				log.Printf("agent event=%s id=%s name=%s connected=%t healthy=%t status=%s",
-					event.Type, event.Agent.InstanceUID, event.Agent.Name,
-					event.Agent.Connected, event.Agent.Healthy, event.Agent.Status)
+				slog.Info("agent state changed", "component", "agents", "event", event.Type,
+					"agent_uid", event.Agent.InstanceUID, "agent_name", event.Agent.Name,
+					"connected", event.Agent.Connected, "healthy", event.Agent.Healthy, "status", event.Agent.Status)
 			}
 		}
 	}()
@@ -146,10 +148,10 @@ func main() {
 				return
 			case report := <-adapter.ConfigEvents():
 				if err := assignmentStore.UpdateByAgentHash(ctx, report.AgentInstanceUID, report.ConfigurationHash, report.Status, report.Error); err != nil && ctx.Err() == nil {
-					log.Printf("update config status agent=%s hash=%s: %v", report.AgentInstanceUID, report.ConfigurationHash, err)
+					slog.Error("failed to update configuration status", "component", "config", "event", "status_update_failed", "agent_uid", report.AgentInstanceUID, "config_hash", report.ConfigurationHash, "error", err)
 				}
 				if err := deploymentStore.UpdateLatestByAgentHash(ctx, report.AgentInstanceUID, report.ConfigurationHash, report.Status, report.Error); err != nil && !errors.Is(err, storage.ErrDeploymentNotFound) && ctx.Err() == nil {
-					log.Printf("update deployment status agent=%s hash=%s: %v", report.AgentInstanceUID, report.ConfigurationHash, err)
+					slog.Error("failed to update deployment status", "component", "deployment", "event", "status_update_failed", "agent_uid", report.AgentInstanceUID, "config_hash", report.ConfigurationHash, "error", err)
 				}
 			}
 		}
@@ -165,9 +167,9 @@ func main() {
 
 	httpServer := &http.Server{Addr: httpAddr, Handler: mux}
 	go func() {
-		log.Printf("FleetAMP HTTP server listening on %s", httpAddr)
+		slog.Info("FleetAMP HTTP server listening", "component", "http", "event", "server_started", "address", httpAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP server stopped with error: %v", err)
+			slog.Error("HTTP server stopped", "component", "http", "event", "server_stopped", "error", err)
 			stop()
 		}
 	}()
@@ -246,7 +248,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := agentsPage.Execute(w, view); err != nil {
-			log.Printf("render agents page: %v", err)
+			slog.Error("failed to render agents page", "component", "http", "event", "render_failed", "page", "agents", "error", err)
 		}
 	})
 
@@ -314,7 +316,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := agentDetailPage.Execute(w, view); err != nil {
-			log.Printf("render agent detail page: %v", err)
+			slog.Error("failed to render agent detail page", "component", "http", "event", "render_failed", "page", "agent_detail", "error", err)
 		}
 	})
 

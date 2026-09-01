@@ -23,7 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -87,7 +87,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	log.Printf("FleetAMP OpAMP server listening on %s/v1/opamp", a.listenEndpoint)
+	slog.Info("FleetAMP OpAMP server listening", "component", "opamp", "event", "server_started", "address", a.listenEndpoint+"/v1/opamp")
 	<-ctx.Done()
 	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -95,7 +95,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 }
 
 func (a *Adapter) onConnected(_ context.Context, _ servertypes.Connection) {
-	log.Printf("OpAMP transport connected")
+	slog.Info("OpAMP transport connected", "component", "opamp", "event", "transport_connected")
 }
 
 // onMessage converts incremental OpAMP messages into a complete normalized agent
@@ -103,7 +103,7 @@ func (a *Adapter) onConnected(_ context.Context, _ servertypes.Connection) {
 func (a *Adapter) onMessage(_ context.Context, conn servertypes.Connection, msg *protobufs.AgentToServer) *protobufs.ServerToAgent {
 	agent := managedAgentFromMessage(msg)
 	if agent.InstanceUID == "" {
-		log.Printf("OpAMP message ignored: missing/invalid instance UID")
+		slog.Warn("OpAMP message ignored", "component", "opamp", "event", "message_ignored", "reason", "missing_or_invalid_instance_uid")
 		return nil
 	}
 
@@ -194,7 +194,7 @@ func (a *Adapter) onConnectionClose(conn servertypes.Connection) {
 	agent.Connected = false
 	agent.Touch()
 	a.events <- management.Event{Type: management.EventDisconnected, Agent: agent}
-	log.Printf("OpAMP agent disconnected: %s", agent.InstanceUID)
+	slog.Info("OpAMP agent disconnected", "component", "opamp", "event", "agent_disconnected", "agent_uid", agent.InstanceUID)
 }
 
 func managedAgentFromMessage(msg *protobufs.AgentToServer) *agents.ManagedAgent {
@@ -501,11 +501,11 @@ func parseInstanceUID(value string) ([]byte, error) {
 type stdLogger struct{}
 
 func (stdLogger) Debugf(_ context.Context, format string, v ...interface{}) {
-	log.Printf("opamp: "+format, v...)
+	slog.Debug(fmt.Sprintf(format, v...), "component", "opamp", "source", "opamp-go")
 }
 
 func (stdLogger) Errorf(_ context.Context, format string, v ...interface{}) {
-	log.Printf("opamp error: "+format, v...)
+	slog.Error(fmt.Sprintf(format, v...), "component", "opamp", "source", "opamp-go")
 }
 
 var _ management.Adapter = (*Adapter)(nil)

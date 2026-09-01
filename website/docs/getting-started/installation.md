@@ -9,10 +9,11 @@ FleetAMP is currently an early-development community project. The supported inst
 
 ## Requirements
 
-- Linux x86_64 or another platform supported by Go
-- Go version required by `go.mod`
-- Git
-- Network access from managed agents to the FleetAMP OpAMP listener
+For source builds, FleetAMP requires Go **1.24+**, Git, and network access from managed agents to the OpAMP listener. A prebuilt binary does not require Go or Git on the target host.
+
+A practical small-instance starting baseline is **1 CPU core, 256 MB RAM minimum (512 MB+ recommended), and at least 100 MB free disk plus capacity for runtime state and logs**. These are initial deployment guidelines, not benchmark-derived hard limits.
+
+Linux is the currently validated long-running service platform. FleetAMP core code is intended to remain portable to other operating systems supported by its Go dependency set. See [OS Deployment and Minimum Requirements](../operations/os-deployment.md).
 
 ## Production-style filesystem layout
 
@@ -24,10 +25,11 @@ FleetAMP is designed to use standard Linux locations:
     └── fleetamp
 
 /etc/fleetamp/
-└── fleetamp.yaml        # future configuration file
+└── fleetamp.env         # systemd environment configuration
 
 /var/lib/fleetamp/       # persistent state (including fleetamp.db)
-/var/log/fleetamp/       # future service logs
+
+# logs are written to stdout/stderr and captured by journald
 ```
 
 ## Build and install
@@ -48,10 +50,16 @@ sudo cp fleetamp /opt/fleetamp/bin/fleetamp
 sudo chmod 0755 /opt/fleetamp/bin/fleetamp
 ```
 
-Run FleetAMP:
+For a long-running Linux installation, use the reference systemd files under `deploy/systemd/`:
 
 ```bash
-/opt/fleetamp/bin/fleetamp
+sudo useradd --system --home-dir /var/lib/fleetamp --shell /sbin/nologin fleetamp
+sudo install -d -o fleetamp -g fleetamp /opt/fleetamp/bin /etc/fleetamp /var/lib/fleetamp
+sudo install -m 0755 fleetamp /opt/fleetamp/bin/fleetamp
+sudo install -m 0644 deploy/systemd/fleetamp.env.example /etc/fleetamp/fleetamp.env
+sudo install -m 0644 deploy/systemd/fleetamp.service /etc/systemd/system/fleetamp.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now fleetamp
 ```
 
 By default FleetAMP currently listens on:
@@ -81,9 +89,21 @@ For local development, installation under `/opt` is not required:
 go run ./cmd/fleetamp
 ```
 
+## Service logs
+
+FleetAMP writes operational logs to stdout/stderr. A systemd installation captures these logs in journald:
+
+```bash
+journalctl -u fleetamp
+journalctl -u fleetamp --since "1 hour ago"
+journalctl -u fleetamp -f
+```
+
+Log retention is managed by the operating system rather than FleetAMP. Configure journald age/size limits according to the host policy.
+
 ## Current limitations
 
-FleetAMP now persists configuration artifacts and assignments in embedded SQLite, while agent snapshots and lifecycle events use the existing file-backed persistence. Packaged RPM/DEB artifacts, a systemd unit, configuration-file loading, TLS termination, authentication, HA/PostgreSQL, and production hardening remain planned work rather than current guarantees.
+FleetAMP now persists configuration artifacts and assignments in embedded SQLite, while agent snapshots and lifecycle events use file-backed persistence. The reference systemd deployment is available and locally validated. Packaged RPM/DEB artifacts, configuration-file loading, TLS termination, authentication, HA/PostgreSQL, and stronger production hardening remain planned work rather than current guarantees.
 
 ## Run FleetAMP on another Linux system
 
@@ -119,3 +139,15 @@ export FLEETAMP_RETIRE_AFTER=24h
 `FLEETAMP_DATABASE_PATH` defaults to `<FLEETAMP_DATA_DIR>/fleetamp.db`. FleetAMP uses an embedded, CGo-free SQLite driver, so users do **not** need to install a separate SQLite server or package for normal operation. The database and schema are created automatically on first start.
 
 `FLEETAMP_RETIRE_AFTER` controls how long a disconnected agent remains in the recent fleet before FleetAMP marks it `retired`.
+
+## Structured application logging
+
+For a systemd installation, enable JSON logs in `/etc/fleetamp/fleetamp.env`:
+
+```bash
+FLEETAMP_LOG_LEVEL=info
+FLEETAMP_LOG_FORMAT=json
+FLEETAMP_LOG_FILE=/var/log/fleetamp/fleetamp.log
+```
+
+FleetAMP continues to write the same structured records to stdout, so `journalctl -u fleetamp` remains available. The deployment package includes a logrotate policy and timer for daily/10 MB rotation with three retained backups.

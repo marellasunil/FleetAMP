@@ -24,3 +24,16 @@ coverage.out
 .idea/
 .DS_Store
 Thumbs.db
+
+# Runtime logs and local process state
+*.log
+*.log.*
+*.pid
+*.pid.lock
+/log/
+/logs/
+
+# Local temporary/runtime state
+/tmp/
+*.tmp
+*.bak

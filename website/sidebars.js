@@ -10,7 +10,7 @@ module.exports = {
       'fleet-management/configuration', 'configuration/deploy', 'configuration/drift', 'configuration/rollback',
     ]},
     { type: 'category', label: 'Operations', items: [
-      'operations/operations-guide', 'operations/production-deployment', 'operations/troubleshooting',
+      'operations/operations-guide', 'operations/production-deployment', 'operations/os-deployment', 'operations/troubleshooting',
     ]},
     { type: 'category', label: 'Reference', items: [
       'reference/api', 'reference/architecture', 'roadmap',

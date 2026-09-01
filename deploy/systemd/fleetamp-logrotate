@@ -1,0 +1,12 @@
+/var/log/fleetamp/fleetamp.log {
+    daily
+    maxsize 10M
+    rotate 3
+    maxage 3
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    create 0640 fleetamp fleetamp
+}

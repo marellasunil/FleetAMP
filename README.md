@@ -132,6 +132,7 @@ FleetAMP/
 ├── internal/api/          # REST API
 ├── internal/storage/      # persistence abstractions and implementations
 ├── web/                   # web UI
+├── deploy/                # deployment assets, including systemd
 ├── docs/                  # architecture and project documentation
 └── examples/              # sample configurations
 ```
@@ -155,6 +156,21 @@ Expected response:
 ```json
 {"status":"ok","service":"fleetamp"}
 ```
+
+## Running as a Linux service
+
+FleetAMP includes a reference systemd deployment under [`deploy/systemd/`](deploy/systemd/). The service uses a dedicated `fleetamp` account, `/opt/fleetamp/bin/fleetamp` for the binary, `/etc/fleetamp/fleetamp.env` for environment configuration, and `/var/lib/fleetamp` for persistent state.
+
+FleetAMP writes operational logs to stdout/stderr. When run with systemd these logs are captured by journald:
+
+```bash
+journalctl -u fleetamp
+journalctl -u fleetamp -f
+```
+
+See [`deploy/systemd/README.md`](deploy/systemd/README.md) for build, installation, verification, upgrade, and log-retention guidance.
+
+For OS-specific deployment models and initial sizing requirements, see [`website/docs/operations/os-deployment.md`](website/docs/operations/os-deployment.md). Linux/systemd is currently validated; macOS/Windows guidance is documented but not yet release-tested.
 
 ## Roadmap
 

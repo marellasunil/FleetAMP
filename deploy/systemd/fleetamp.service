@@ -1,0 +1,28 @@
+[Unit]
+Description=FleetAMP OpenTelemetry Fleet Management Control Plane
+Documentation=https://github.com/marellasunil/FleetAMP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fleetamp
+Group=fleetamp
+EnvironmentFile=/etc/fleetamp/fleetamp.env
+WorkingDirectory=/var/lib/fleetamp
+StateDirectory=fleetamp
+LogsDirectory=fleetamp
+ExecStart=/opt/fleetamp/bin/fleetamp
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# Basic service hardening. FleetAMP requires write access only to its data directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fleetamp /var/log/fleetamp
+
+[Install]
+WantedBy=multi-user.target

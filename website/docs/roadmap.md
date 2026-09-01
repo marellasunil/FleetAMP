@@ -39,6 +39,8 @@ FleetAMP is evolving incrementally. This page separates capabilities that are wo
 - FleetAMP-owned agent labels preserved across OpAMP updates and restarts
 - Persistent SQLite-backed dynamic groups with exact-match selectors
 - Groups REST API, member resolution, Groups UI, and Agent Details group visibility
+- Reference Linux systemd service deployment with dedicated service account, persistent paths, restart policy, and basic hardening
+- FleetAMP service logging through stdout/stderr and journald, with OS-managed age/size retention
 
 ## Next milestone
 
