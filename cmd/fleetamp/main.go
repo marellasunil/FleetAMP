@@ -164,6 +164,7 @@ func main() {
 	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter)
 	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter)
 	registerGroupRoutes(mux, groupStore, agentStore, dataDir)
+	registerUIRoutes(mux)
 
 	httpServer := &http.Server{Addr: httpAddr, Handler: mux}
 	go func() {
@@ -230,7 +231,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 				}
 			}
 		}
-		view := agentListView{Range: rangeKey, Groups: allGroups, SelectedGroup: selectedGroup, Items: make([]agentListItem, 0, len(agentsList))}
+		view := agentListView{Page: "fleet", Range: rangeKey, Groups: allGroups, SelectedGroup: selectedGroup, Items: make([]agentListItem, 0, len(agentsList))}
 		for _, agent := range agentsList {
 			if selected != nil && !groups.Matches(selected, agent) {
 				continue
@@ -245,6 +246,15 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 				item.LastDeployment = deployments[0]
 			}
 			view.Items = append(view.Items, item)
+			view.Total++
+			if agent.Connected && agent.Healthy {
+				view.Healthy++
+			} else {
+				view.Attention++
+			}
+		}
+		if view.Total > 0 {
+			view.HealthyPercent = view.Healthy * 100 / view.Total
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := agentsPage.Execute(w, view); err != nil {
@@ -278,7 +288,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			return
 		}
 
-		view := agentDetailView{Agent: agent, EffectiveConfig: adapter.EffectiveConfig(uid), RemoteConfigSupported: hasCapability(agent.Capabilities, "accepts_remote_config"), TargetingMetadata: groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent), EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields, Error: r.URL.Query().Get("error")}
+		view := agentDetailView{Page: "fleet", Agent: agent, EffectiveConfig: adapter.EffectiveConfig(uid), RemoteConfigSupported: hasCapability(agent.Capabilities, "accepts_remote_config"), TargetingMetadata: groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent), EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields, Error: r.URL.Query().Get("error")}
 		view.Deployments, _ = deploymentStore.ListByAgent(r.Context(), uid, 10)
 		if allGroups, groupErr := groupStore.List(r.Context()); groupErr == nil {
 			for _, group := range allGroups {
@@ -326,6 +336,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 }
 
 type agentDetailView struct {
+	Page                  string
 	Agent                 *agents.ManagedAgent
 	Assignment            *configs.Assignment
 	DesiredConfig         *configs.Configuration
@@ -725,24 +736,7 @@ func durationEnvOrDefault(key string, fallback time.Duration) time.Duration {
 	return fallback
 }
 
-var agentsPage = template.Must(template.New("agents").Parse(`<!doctype html>
-<html><head><meta charset="utf-8"><title>FleetAMP Agents</title>
-<style>
-body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;margin:0;padding:32px}
-h1{margin-bottom:8px}.sub{color:#94a3b8;margin-bottom:24px}
-table{width:100%;border-collapse:collapse;background:#111827;border-radius:12px;overflow:hidden}
-th,td{padding:14px 16px;text-align:left;border-bottom:1px solid #1f2937}th{color:#93c5fd}
-.ok{color:#86efac}.bad{color:#fca5a5}.empty{padding:24px;background:#111827;border-radius:12px;color:#94a3b8}
-code{color:#c4b5fd}a{color:#93c5fd;text-decoration:none}a:hover{text-decoration:none}.topbar{text-align:center;margin-bottom:24px}.brand{font-size:30px;font-weight:800;color:#f8fafc}.tagline{margin-top:6px;color:#94a3b8;font-size:14px}.tabs{display:flex;gap:6px;border-bottom:1px solid #1f2937;margin-bottom:28px}.tab{padding:11px 18px;color:#94a3b8;border-bottom:2px solid transparent}.tab.active{color:#e5e7eb;border-bottom-color:#60a5fa;background:#111827;border-radius:8px 8px 0 0}.pagehead{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:22px}.pagehead h1{margin:0}.pagehead .sub{margin:6px 0 0}
-</style></head><body>
-<div class="topbar"><div class="brand">FleetAMP</div><div class="tagline">Manage OpenTelemetry Collectors, groups, configuration deployments and fleet health.</div></div><nav class="tabs"><a class="tab active" href="/agents">Managed Agents</a><a class="tab" href="/groups">Groups</a></nav><div class="pagehead"><div><h1>Managed Agents</h1><div class="sub">Fleet inventory, health, groups and deployment state.</div></div></div>
-<form method="get" action="/agents" style="margin-bottom:18px;display:flex;gap:18px;align-items:center;flex-wrap:wrap"><label for="range">Time range: <select id="range" name="range" onchange="this.form.submit()"><option value="active" {{if eq .Range "active"}}selected{{end}}>Active / recent</option><option value="15m" {{if eq .Range "15m"}}selected{{end}}>Last 15 minutes</option><option value="1h" {{if eq .Range "1h"}}selected{{end}}>Last 1 hour</option><option value="24h" {{if eq .Range "24h"}}selected{{end}}>Last 24 hours</option><option value="7d" {{if eq .Range "7d"}}selected{{end}}>Last 7 days</option><option value="30d" {{if eq .Range "30d"}}selected{{end}}>Last 30 days</option><option value="all" {{if eq .Range "all"}}selected{{end}}>All known</option></select></label><label for="group">Group: <select id="group" name="group" onchange="this.form.submit()"><option value="">All groups</option>{{range .Groups}}<option value="{{.ID}}" {{if eq $.SelectedGroup .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label></form>
-{{if .Items}}<table><thead><tr><th>Name</th><th>Group</th><th>Collector Type</th><th>Version</th><th>OS / Arch</th><th>Runtime</th><th>Status</th><th>Health</th><th>Last Deployment Status</th><th>Last Deployment Time</th><th>Last Seen</th></tr></thead><tbody>
-{{range .Items}}<tr><td><a href="/agents/{{.Agent.InstanceUID}}">{{.Agent.Name}}</a><br><code>{{.Agent.InstanceUID}}</code></td><td>{{if .Groups}}{{range .Groups}}<a href="/groups/{{.ID}}">{{.Name}}</a><br>{{end}}{{else}}—{{end}}</td><td>{{if eq .Agent.Type "otel_collector"}}OTel Collector{{else if eq .Agent.Type "grafana_alloy"}}Grafana Alloy{{else}}{{.Agent.Type}}{{end}}</td><td>{{.Agent.Version}}</td><td>{{index .Agent.Attributes "os.type"}} / {{index .Agent.Attributes "host.arch"}}</td><td>{{.Agent.Deployment.Runtime}}</td><td><span class="{{if .Agent.Connected}}ok{{else}}bad{{end}}">{{.Agent.Status}}</span></td><td><span class="{{if .Agent.Healthy}}ok{{else}}bad{{end}}">{{if .Agent.Healthy}}Healthy{{else}}Unhealthy{{end}}</span></td><td>{{if .LastDeployment}}<span class="{{if eq .LastDeployment.Status "applied"}}ok{{else if eq .LastDeployment.Status "failed"}}bad{{else}}warn{{end}}">{{.LastDeployment.Status}}</span><br><span class="sub" style="margin:0">{{.LastDeployment.ConfigurationName}} v{{.LastDeployment.ConfigurationVersion}}</span>{{else}}<span class="sub" style="margin:0">No deployment</span>{{end}}</td><td>{{if .LastDeployment}}{{.LastDeployment.UpdatedAt}}{{else}}—{{end}}</td><td>{{.Agent.LastSeen}}</td></tr>{{end}}
-</tbody></table>{{else}}<div class="empty">No managed agents found for this time range.</div>{{end}}
-</body></html>`))
-
-var agentDetailPage = template.Must(template.New("agent-detail").Parse(`<!doctype html>
+var legacyAgentDetailPage = template.Must(template.New("agent-detail").Parse(`<!doctype html>
 <html><head><meta charset="utf-8"><title>FleetAMP Agent</title><style>
 body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;margin:0;padding:32px;max-width:1400px}a{color:#93c5fd;text-decoration:none}.back{display:inline-block;margin-bottom:22px}.head{display:flex;justify-content:space-between;gap:24px;align-items:flex-start}.muted{color:#94a3b8}.chips{display:flex;gap:8px;flex-wrap:wrap}.chip{background:#1f2937;border-radius:999px;padding:5px 10px;font-size:13px}.ok{color:#86efac}.bad{color:#fca5a5}.warn{color:#fde68a}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:24px 0}.card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:18px}.card h2{margin-top:0;font-size:18px}.kv{display:grid;grid-template-columns:130px 1fr;gap:8px 12px}.kv span:nth-child(odd){color:#94a3b8}pre{white-space:pre-wrap;overflow:auto;background:#060b14;border:1px solid #1f2937;border-radius:10px;padding:16px;max-height:520px}code{color:#c4b5fd}.configgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:900px){.configgrid{grid-template-columns:1fr}}
 </style></head><body>

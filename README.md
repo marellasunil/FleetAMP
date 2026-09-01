@@ -170,6 +170,8 @@ journalctl -u fleetamp -f
 
 See [`deploy/systemd/README.md`](deploy/systemd/README.md) for build, installation, verification, upgrade, and log-retention guidance.
 
+For upgrading the upstream OpAMP Go dependency, see [`website/docs/operations/opamp-upgrade.md`](website/docs/operations/opamp-upgrade.md).
+
 For OS-specific deployment models and initial sizing requirements, see [`website/docs/operations/os-deployment.md`](website/docs/operations/os-deployment.md). Linux/systemd is currently validated; macOS/Windows guidance is documented but not yet release-tested.
 
 ## Roadmap
