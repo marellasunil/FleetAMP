@@ -1,0 +1,23 @@
+[Unit]
+Description=FleetAMP local development service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/FleetAMP
+Environment=FLEETAMP_HTTP_ADDR=:8080
+Environment=FLEETAMP_OPAMP_ADDR=:4320
+Environment=FLEETAMP_DATA_DIR=%h/FleetAMP/data
+Environment=FLEETAMP_DATABASE_PATH=%h/FleetAMP/data/fleetamp.db
+Environment=FLEETAMP_RETIRE_AFTER=24h
+Environment=FLEETAMP_LOG_LEVEL=info
+Environment=FLEETAMP_LOG_FORMAT=json
+Environment=FLEETAMP_LOG_FILE=%h/.local/state/fleetamp/log/fleetamp.log
+ExecStart=%h/.local/bin/fleetamp
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=default.target

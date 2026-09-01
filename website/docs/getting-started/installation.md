@@ -62,6 +62,68 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now fleetamp
 ```
 
+## Fedora/Linux user-level systemd example
+
+For a local development machine, FleetAMP can instead run as a user-level
+systemd service. This is the model currently validated on the FleetAMP Fedora
+development laptop. It explains why `systemctl --user status fleetamp` finds
+the service while `sudo systemctl status fleetamp` does not.
+
+Copy `deploy/systemd/fleetamp-user.service` to
+`~/.config/systemd/user/fleetamp.service`. The supplied example contains:
+
+```ini
+[Unit]
+Description=FleetAMP local development service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/FleetAMP
+Environment=FLEETAMP_HTTP_ADDR=:8080
+Environment=FLEETAMP_OPAMP_ADDR=:4320
+Environment=FLEETAMP_DATA_DIR=%h/FleetAMP/data
+Environment=FLEETAMP_DATABASE_PATH=%h/FleetAMP/data/fleetamp.db
+Environment=FLEETAMP_RETIRE_AFTER=24h
+Environment=FLEETAMP_LOG_LEVEL=info
+Environment=FLEETAMP_LOG_FORMAT=json
+Environment=FLEETAMP_LOG_FILE=%h/.local/state/fleetamp/log/fleetamp.log
+ExecStart=%h/.local/bin/fleetamp
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=default.target
+```
+
+`%h` resolves to the home directory of the user running the service. Adjust
+`WorkingDirectory`, `FLEETAMP_DATA_DIR`, and
+`FLEETAMP_DATABASE_PATH` if the repository is not cloned to `~/FleetAMP`.
+
+Install and start it:
+
+```bash
+cd ~/FleetAMP
+go build -o fleetamp ./cmd/fleetamp
+install -D -m 0755 fleetamp ~/.local/bin/fleetamp
+install -d ~/.config/systemd/user ~/.local/state/fleetamp/log
+install -m 0644 deploy/systemd/fleetamp-user.service \
+  ~/.config/systemd/user/fleetamp.service
+systemctl --user daemon-reload
+systemctl --user enable --now fleetamp
+```
+
+Check status and logs without `sudo`:
+
+```bash
+systemctl --user status fleetamp
+systemctl --user is-enabled fleetamp
+journalctl --user -u fleetamp -f
+systemctl --user show fleetamp -p FragmentPath
+```
+
 By default FleetAMP currently listens on:
 
 - HTTP/UI/API: `0.0.0.0:8080`

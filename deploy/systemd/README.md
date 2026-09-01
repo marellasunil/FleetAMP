@@ -26,6 +26,58 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now fleetamp
 ```
 
+## Local development as a user service
+
+For a single-user Fedora/Linux development machine, FleetAMP can run through the
+user's systemd manager. This does not require a root-owned unit or a dedicated
+system account. The example in `fleetamp-user.service` is based on the
+service validated on the FleetAMP Fedora development laptop.
+
+The example assumes:
+
+```text
+%h/FleetAMP                         repository and working directory
+%h/.local/bin/fleetamp              installed FleetAMP binary
+%h/.local/state/fleetamp/log/        application log directory
+```
+
+`%h` is a systemd specifier for the current user's home directory. Change the
+working directory and data paths if the repository is stored elsewhere.
+
+Build and install the binary and unit:
+
+```bash
+cd ~/FleetAMP
+go build -o fleetamp ./cmd/fleetamp
+install -D -m 0755 fleetamp ~/.local/bin/fleetamp
+install -d ~/.config/systemd/user ~/.local/state/fleetamp/log
+install -m 0644 deploy/systemd/fleetamp-user.service \
+  ~/.config/systemd/user/fleetamp.service
+systemctl --user daemon-reload
+systemctl --user enable --now fleetamp
+```
+
+Verify and manage the user service without `sudo`:
+
+```bash
+systemctl --user status fleetamp
+systemctl --user is-enabled fleetamp
+systemctl --user restart fleetamp
+journalctl --user -u fleetamp -f
+curl http://127.0.0.1:8080/health
+```
+
+Inspect which unit file systemd loaded:
+
+```bash
+systemctl --user show fleetamp -p FragmentPath
+systemctl --user cat fleetamp
+```
+
+A command such as `sudo systemctl status fleetamp` checks the system service
+manager and will report that the unit is missing when FleetAMP is installed only
+as a user service.
+
 ## Verify
 
 ```bash
