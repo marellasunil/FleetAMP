@@ -44,18 +44,18 @@ The example assumes:
 `%h` is a systemd specifier for the current user's home directory. Change the
 working directory and data paths if the repository is stored elsewhere.
 
-Build and install the binary and unit:
+Install or upgrade the binary and unit with the repository script:
 
 ```bash
-cd ~/FleetAMP
-go build -o fleetamp ./cmd/fleetamp
-install -D -m 0755 fleetamp ~/.local/bin/fleetamp
-install -d ~/.config/systemd/user ~/.local/state/fleetamp/log
-install -m 0644 deploy/systemd/fleetamp-user.service \
-  ~/.config/systemd/user/fleetamp.service
-systemctl --user daemon-reload
-systemctl --user enable --now fleetamp
+./scripts/install-user.sh install
+# For later releases:
+./scripts/install-user.sh upgrade
 ```
+
+The script runs the Go tests and build before stopping the current service. It
+then creates a consistent data backup, installs the new binary and unit,
+restarts FleetAMP, and checks the HTTP health endpoint. A failed health check
+automatically restores the previous binary and service files.
 
 Verify and manage the user service without `sudo`:
 
@@ -88,15 +88,30 @@ journalctl -u fleetamp -f
 
 The OpAMP endpoint uses the address configured by `FLEETAMP_OPAMP_ADDR` (default `:4320`) and the `/v1/opamp` WebSocket path.
 
-## Upgrade
+## Upgrade and rollback
 
-Build or download the replacement binary, stop the service, replace `/opt/fleetamp/bin/fleetamp`, then start the service again. FleetAMP state remains under `/var/lib/fleetamp`.
+For a user-level installation, pull or check out the intended source revision
+and run:
 
 ```bash
-sudo systemctl stop fleetamp
-sudo install -m 0755 fleetamp /opt/fleetamp/bin/fleetamp
-sudo systemctl start fleetamp
+./scripts/install-user.sh upgrade
 ```
+
+Backups are stored under
+`~/.local/state/fleetamp/backups/<UTC-timestamp>/`. To restore the newest
+backup, including the earlier binary and service files:
+
+```bash
+./scripts/install-user.sh rollback
+```
+
+Pass a backup directory as the second argument to restore a specific backup.
+The data archive is retained for disaster recovery and is not automatically
+restored during a binary rollback, avoiding unintended overwrites of live data.
+
+For a system-wide installation, build or download the replacement binary,
+back up `/var/lib/fleetamp`, replace `/opt/fleetamp/bin/fleetamp`, restart
+the service, and verify `/health`.
 
 ## Logging and retention
 

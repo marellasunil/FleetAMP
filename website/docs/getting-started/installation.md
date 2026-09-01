@@ -102,18 +102,16 @@ WantedBy=default.target
 `WorkingDirectory`, `FLEETAMP_DATA_DIR`, and
 `FLEETAMP_DATABASE_PATH` if the repository is not cloned to `~/FleetAMP`.
 
-Install and start it:
+Install and start it with the automated user-service workflow:
 
 ```bash
-cd ~/FleetAMP
-go build -o fleetamp ./cmd/fleetamp
-install -D -m 0755 fleetamp ~/.local/bin/fleetamp
-install -d ~/.config/systemd/user ~/.local/state/fleetamp/log
-install -m 0644 deploy/systemd/fleetamp-user.service \
-  ~/.config/systemd/user/fleetamp.service
-systemctl --user daemon-reload
-systemctl --user enable --now fleetamp
+cd /path/to/FleetAMP
+./scripts/install-user.sh install
 ```
+
+The installer detects the repository's actual absolute path and adds a systemd
+drop-in for the working and data directories. The repository therefore does
+not need to be cloned directly under `~/FleetAMP`.
 
 Check status and logs without `sudo`:
 
@@ -128,6 +126,30 @@ By default FleetAMP currently listens on:
 
 - HTTP/UI/API: `0.0.0.0:8080`
 - OpAMP WebSocket: `0.0.0.0:4320/v1/opamp`
+
+## Safe user-service upgrades
+
+After checking out the intended FleetAMP revision, run:
+
+```bash
+./scripts/install-user.sh upgrade
+```
+
+Tests and compilation complete before downtime begins. The script then stops
+FleetAMP, stores the current binary, unit files, and a compressed data snapshot
+under `~/.local/state/fleetamp/backups/<UTC-timestamp>/`, installs the new
+binary, starts the service, and waits for `/health`. If verification fails,
+the previous binary and service files are restored automatically.
+
+Restore the newest binary/unit backup manually with:
+
+```bash
+./scripts/install-user.sh rollback
+```
+
+To select an older backup, pass its directory as the second argument. Data
+archives are retained for disaster recovery but are not restored automatically,
+because overwriting live SQLite data must be an explicit recovery decision.
 
 ## Verify the service
 
