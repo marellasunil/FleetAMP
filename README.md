@@ -6,6 +6,10 @@ FleetAMP is a lightweight, self-hosted, open-source fleet management control pla
 
 FleetAMP is an independent community project and is not an official OpenTelemetry or Grafana project.
 
+Documentation: [fleetamp.marellasunil.com](https://fleetamp.marellasunil.com)
+
+Documentation source: [marellasunil/FleetAMP-docs](https://github.com/marellasunil/FleetAMP-docs)
+
 ## Vision
 
 FleetAMP aims to provide a vendor-neutral management layer for telemetry-agent fleets while keeping protocol, storage, source-control, CMDB, identity, and UI concerns isolated behind stable interfaces.
@@ -64,7 +68,7 @@ opamp-go / OpAMP protobufs
 
 Only the OpAMP adapter should understand OpAMP-specific wire types. The rest of FleetAMP uses protocol-independent domain models.
 
-See [`docs/architecture.md`](docs/architecture.md) for the detailed design.
+See the [detailed architecture documentation](https://fleetamp.marellasunil.com/docs/development/internal-architecture).
 
 ## Managed agent model
 
@@ -131,10 +135,10 @@ FleetAMP/
 ├── internal/configs/      # versioned configurations
 ├── internal/api/          # REST API
 ├── internal/storage/      # persistence abstractions and implementations
-├── web/                   # web UI
-├── deploy/                # deployment assets, including systemd
-├── docs/                  # architecture and project documentation
-└── examples/              # sample configurations
+├── deploy/                # runtime deployment assets, including systemd
+├── scripts/               # installation and upgrade automation
+├── go.mod                 # Go module definition
+└── go.sum                 # locked dependency checksums
 ```
 
 ## Running the current skeleton
@@ -170,9 +174,9 @@ journalctl -u fleetamp -f
 
 See [`deploy/systemd/README.md`](deploy/systemd/README.md) for build, installation, verification, upgrade, and log-retention guidance.
 
-For upgrading the upstream OpAMP Go dependency, see [`website/docs/operations/opamp-upgrade.md`](website/docs/operations/opamp-upgrade.md).
+For upgrading the upstream OpAMP Go dependency, see the [OpAMP upgrade guide](https://fleetamp.marellasunil.com/docs/operations/opamp-upgrade).
 
-For OS-specific deployment models and initial sizing requirements, see [`website/docs/operations/os-deployment.md`](website/docs/operations/os-deployment.md). Linux/systemd is currently validated; macOS/Windows guidance is documented but not yet release-tested.
+For OS-specific deployment models and initial sizing requirements, see the [OS deployment guide](https://fleetamp.marellasunil.com/docs/operations/os-deployment). Linux/systemd is currently validated; macOS/Windows guidance is documented but not yet release-tested.
 
 ## Roadmap
 
@@ -206,4 +210,4 @@ FleetAMP intends to build on and interoperate with the OpenTelemetry ecosystem, 
 
 ## Program structure
 
-For a source-code map and explanation of how FleetAMP components fit together, see [`docs/PROGRAM_STRUCTURE.md`](docs/PROGRAM_STRUCTURE.md).
+For a source-code map and explanation of how FleetAMP components fit together, see the [program structure guide](https://fleetamp.marellasunil.com/docs/development/program-structure).
