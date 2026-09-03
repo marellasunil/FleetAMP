@@ -143,7 +143,7 @@ FleetAMP/
 
 ## Running the current skeleton
 
-Requires Go 1.24+.
+Requires Go 1.25+.
 
 ```bash
 go run ./cmd/fleetamp
@@ -173,6 +173,23 @@ journalctl -u fleetamp -f
 ```
 
 See [`deploy/systemd/README.md`](deploy/systemd/README.md) for build, installation, verification, upgrade, and log-retention guidance.
+
+## Security
+
+FleetAMP listens on localhost by default. The first administrator is created
+through a one-time `/setup` flow. Passwords are stored as Argon2id verifiers
+bound to a per-server pepper, which can be protected by TPM-backed systemd
+credentials. Remote OpAMP access requires a bearer token unless
+`FLEETAMP_ALLOW_INSECURE=true` is explicitly set for an isolated development
+environment. Protect the web UI/API and OpAMP traffic with FleetAMP native
+TLS or explicit TLS termination at a trusted proxy/load balancer. Optional
+OpAMP mTLS verifies agent client certificates. Never commit credentials or
+private keys. See the
+[security hardening guide](https://fleetamp.marellasunil.com/docs/operations/security-hardening)
+and [TLS guide](https://fleetamp.marellasunil.com/docs/operations/transport-tls).
+
+Security checks run tests, the race detector, `go vet`, and `govulncheck` in
+GitHub Actions. Dependabot monitors Go modules and workflow actions.
 
 For upgrading the upstream OpAMP Go dependency, see the [OpAMP upgrade guide](https://fleetamp.marellasunil.com/docs/operations/opamp-upgrade).
 

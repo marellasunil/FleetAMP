@@ -10,6 +10,9 @@ UNIT_PATH="$UNIT_DIR/fleetamp.service"
 OVERRIDE_DIR="$UNIT_DIR/fleetamp.service.d"
 OVERRIDE_PATH="$OVERRIDE_DIR/10-local-paths.conf"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/fleetamp"
+CREDENTIAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/fleetamp/credentials"
+TLS_DIR="${FLEETAMP_TLS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/fleetamp/tls}"
+PEPPER_CREDENTIAL="$CREDENTIAL_DIR/fleetamp-server-pepper.cred"
 BACKUP_ROOT="$STATE_DIR/backups"
 HEALTH_URL="${FLEETAMP_HEALTH_URL:-http://127.0.0.1:8080/health}"
 HEALTH_TIMEOUT="${FLEETAMP_HEALTH_TIMEOUT:-30}"
@@ -25,6 +28,23 @@ require_command() {
 systemctl_user() {
   systemctl --user "$@"
 }
+
+ensure_server_pepper() {
+  [[ -f "$PEPPER_CREDENTIAL" ]] && return 0
+  mkdir -p "$CREDENTIAL_DIR"
+  chmod 0700 "$CREDENTIAL_DIR"
+  local key_mode="host"
+  if command -v systemd-analyze >/dev/null 2>&1 &&
+    [[ "$(systemd-analyze has-tpm2 2>/dev/null | head -n 1)" == "yes" ]]; then
+    key_mode="host+tpm2"
+  fi
+  log "Creating server-bound encrypted credential ($key_mode)"
+  head -c 48 /dev/urandom | base64 |
+    systemd-creds encrypt --user --with-key="$key_mode" \
+      --name=fleetamp-server-pepper - "$PEPPER_CREDENTIAL"
+  chmod 0600 "$PEPPER_CREDENTIAL"
+}
+
 wait_for_health() {
   local deadline=$((SECONDS + HEALTH_TIMEOUT))
   while (( SECONDS < deadline )); do
@@ -75,6 +95,10 @@ require_command curl
 require_command systemctl
 require_command install
 require_command tar
+require_command base64
+require_command systemd-creds
+
+ensure_server_pepper
 
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
@@ -86,7 +110,8 @@ log "Building FleetAMP"
 (cd "$REPO_ROOT" && go build -trimpath -o "$BUILD_DIR/fleetamp" ./cmd/fleetamp)
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="$BACKUP_ROOT/$TIMESTAMP"
-mkdir -p "$BACKUP_DIR" "$UNIT_DIR" "$OVERRIDE_DIR" "$STATE_DIR/log"
+mkdir -p "$BACKUP_DIR" "$UNIT_DIR" "$OVERRIDE_DIR" "$STATE_DIR/log" "$TLS_DIR"
+chmod 0700 "$TLS_DIR"
 
 SERVICE_WAS_ACTIVE=false
 if systemctl_user is-active --quiet "$SERVICE_NAME"; then

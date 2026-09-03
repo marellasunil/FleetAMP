@@ -7,6 +7,7 @@ This directory contains the reference systemd deployment for running FleetAMP as
 ```text
 /opt/fleetamp/bin/fleetamp       FleetAMP binary
 /etc/fleetamp/fleetamp.env       Service configuration
+/etc/fleetamp/tls/                Default TLS certificate directory
 /var/lib/fleetamp/               Persistent FleetAMP state
 /etc/systemd/system/fleetamp.service
 ```
@@ -19,8 +20,14 @@ FleetAMP writes application output to stdout/stderr. Under systemd this is captu
 go build -o fleetamp ./cmd/fleetamp
 sudo useradd --system --home-dir /var/lib/fleetamp --shell /sbin/nologin fleetamp
 sudo install -d -o fleetamp -g fleetamp /opt/fleetamp/bin /etc/fleetamp /var/lib/fleetamp
+sudo install -d -o fleetamp -g fleetamp -m 0700 /etc/fleetamp/tls
 sudo install -m 0755 fleetamp /opt/fleetamp/bin/fleetamp
-sudo install -m 0644 deploy/systemd/fleetamp.env.example /etc/fleetamp/fleetamp.env
+sudo install -m 0600 deploy/systemd/fleetamp.env.example /etc/fleetamp/fleetamp.env
+sudo install -d -m 0700 /etc/credstore.encrypted
+head -c 48 /dev/urandom | base64 | sudo systemd-creds encrypt \
+  --with-key=host+tpm2 --name=fleetamp-server-pepper \
+  - /etc/credstore.encrypted/fleetamp-server-pepper
+sudo chmod 0600 /etc/credstore.encrypted/fleetamp-server-pepper
 sudo install -m 0644 deploy/systemd/fleetamp.service /etc/systemd/system/fleetamp.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now fleetamp
@@ -86,7 +93,58 @@ curl http://127.0.0.1:8080/health
 journalctl -u fleetamp -f
 ```
 
-The OpAMP endpoint uses the address configured by `FLEETAMP_OPAMP_ADDR` (default `:4320`) and the `/v1/opamp` WebSocket path.
+The OpAMP endpoint uses `FLEETAMP_OPAMP_ADDR` (secure default `127.0.0.1:4320`) and the `/v1/opamp` WebSocket path.
+
+## Security configuration
+
+FleetAMP listens only on localhost by default. On its first start it creates a
+short-lived, one-time administrator setup token. Retrieve it and open `/setup`:
+
+```bash
+journalctl -u fleetamp -g bootstrap_token --since "15 minutes ago"
+```
+
+The submitted password is converted to an Argon2id verifier using a unique salt
+and the server pepper. FleetAMP never stores or decrypts the password. After a
+successful setup, the token is erased and `/setup` cannot create another admin.
+Unused tokens are held only in memory, so a restart invalidates the previous
+token and creates a replacement. Sessions use `HttpOnly`, `SameSite=Strict`
+cookies; set `FLEETAMP_SECURE_COOKIES=true` whenever the public endpoint uses
+HTTPS.
+
+On Fedora, a local browser or forwarding layer can sometimes submit
+`Origin: null`. FleetAMP accepts that value only for a loopback target, a
+loopback network peer, and a browser request reported as same-origin or
+same-site. Diagnose rejected requests without exposing secrets:
+
+```bash
+journalctl --user -u fleetamp --since "10 minutes ago" -o cat | \
+  grep origin_rejected | tail
+```
+
+The encrypted `fleetamp-server-pepper` credential is bound to the local systemd
+host key and TPM2. Copying it and the SQLite database to another server will not
+produce a usable login. If TPM2 is unavailable, use `--with-key=host`; this is
+still OS-installation-specific but does not provide hardware binding. Never
+copy the plaintext pepper or include it in a backup with the database.
+
+Configure the independent OpAMP bearer token and browser origin in the mode
+`0600` environment file:
+
+```bash
+FLEETAMP_OPAMP_TOKEN=<at-least-32-random-characters>
+FLEETAMP_ALLOWED_ORIGINS=https://fleetamp.example.com
+FLEETAMP_SECURE_COOKIES=true
+```
+
+Use FleetAMP native TLS or terminate HTTPS/WSS at a trusted reverse proxy or
+load balancer. When TLS is terminated upstream, explicitly set
+`FLEETAMP_HTTP_TLS_TERMINATED=true` and `FLEETAMP_OPAMP_TLS_TERMINATED=true`.
+For native TLS, use the certificate options documented in
+`fleetamp.env.example`. Keep `/health` and `/ready` restricted by firewall rules
+even though they intentionally do not require login. `FLEETAMP_ALLOW_INSECURE=true` remains a development-only escape
+hatch. Environment-based Basic Auth is retained temporarily for migration and
+should not be used for a new installation.
 
 ## Upgrade and rollback
 

@@ -79,11 +79,11 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 			agent.GroupFields[key] = value
 		}
 		if err := agentStore.Upsert(r.Context(), agent); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
@@ -105,11 +105,11 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 		agent.Labels = labels
 		if err := agentStore.Upsert(r.Context(), agent); err != nil {
-			http.Error(w, err.Error(), 500)
+			internalServerError(w, err)
 			return
 		}
 		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
-			http.Error(w, err.Error(), 500)
+			internalServerError(w, err)
 			return
 		}
 		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
@@ -138,11 +138,11 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 		agent.Labels[key] = value
 		if err := agentStore.Upsert(r.Context(), agent); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
@@ -185,11 +185,11 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 		agent.Labels = next
 		if err := agentStore.Upsert(r.Context(), agent); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, agent)
@@ -200,7 +200,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		case http.MethodGet:
 			items, err := groupStore.List(r.Context())
 			if err != nil {
-				http.Error(w, err.Error(), 500)
+				internalServerError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, items)
@@ -239,7 +239,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		if len(parts) == 2 && parts[1] == "members" && r.Method == http.MethodGet {
 			members, err := membersForGroupIdentity(r.Context(), group, agentStore)
 			if err != nil {
-				http.Error(w, err.Error(), 500)
+				internalServerError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, members)
@@ -268,7 +268,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				group.Enabled = *req.Enabled
 			}
 			if err := groupStore.Update(r.Context(), group); err != nil {
-				http.Error(w, err.Error(), 500)
+				internalServerError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, group)
@@ -283,7 +283,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				return
 			}
 			if err := groupStore.Delete(r.Context(), group.ID); err != nil {
-				http.Error(w, err.Error(), 500)
+				internalServerError(w, err)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
@@ -406,7 +406,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		groupsList, err := groupStore.List(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), 500)
+			internalServerError(w, err)
 			return
 		}
 		view := groupsView{Page: "groups", Items: make([]groupListItem, 0, len(groupsList))}
@@ -438,7 +438,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			if action == "delete" {
 				members, err := membersForGroupIdentity(r.Context(), group, agentStore)
 				if err != nil {
-					http.Error(w, err.Error(), 500)
+					internalServerError(w, err)
 					return
 				}
 				if len(members) > 0 {
@@ -446,7 +446,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					return
 				}
 				if err := groupStore.Delete(r.Context(), group.ID); err != nil {
-					http.Error(w, err.Error(), 500)
+					internalServerError(w, err)
 					return
 				}
 				http.Redirect(w, r, "/groups", http.StatusSeeOther)
@@ -456,7 +456,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				group.Enabled = action == "enable"
 				group.UpdatedAt = time.Now().UTC()
 				if err := groupStore.Update(r.Context(), group); err != nil {
-					http.Error(w, err.Error(), 500)
+					internalServerError(w, err)
 					return
 				}
 				http.Redirect(w, r, "/groups/"+group.ID, http.StatusSeeOther)
@@ -487,7 +487,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		members, err := membersForGroupIdentity(r.Context(), group, agentStore)
 		if err != nil {
-			http.Error(w, err.Error(), 500)
+			internalServerError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -529,5 +529,5 @@ func parseSelectorText(input string) (map[string]string, error) {
 var legacyGroupDetailPage = template.Must(template.New("group-detail").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>FleetAMP Group</title><style>
 body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;margin:0;padding:32px;max-width:1400px}a{color:#93c5fd;text-decoration:none}.nav{display:flex;gap:16px;margin-bottom:22px}.card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:18px;margin-bottom:18px}table{width:100%;border-collapse:collapse}th,td{padding:12px;text-align:left;border-bottom:1px solid #1f2937}th{color:#93c5fd}code{color:#c4b5fd}.muted{color:#94a3b8}.ok{color:#86efac}.bad{color:#fca5a5}input{background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:7px;padding:9px;margin:4px;min-width:220px}button{padding:9px 14px;border-radius:7px;border:0;cursor:pointer}.danger{background:#7f1d1d;color:white}.warning{background:#422006;border:1px solid #92400e;color:#fde68a}.status{display:inline-block;padding:4px 9px;border-radius:999px;font-size:12px;font-weight:700}.enabled{background:#14532d;color:#bbf7d0}.disabled{background:#3f3f46;color:#d4d4d8}.actionrow{display:flex;gap:8px;flex-wrap:wrap}.iconaction{display:inline-flex;gap:7px;align-items:center}
 </style></head><body><div class="nav"><a href="/agents">Agents</a><a href="/groups">Groups</a></div><h1>{{.Group.Name}}</h1><p>{{if .Group.Enabled}}<span class="status enabled">Enabled</span>{{else}}<span class="status disabled">Disabled</span>{{end}}</p>{{if .Error}}<section class="card warning"><strong>⚠️ {{.Error}}</strong></section>{{end}}
-<section class="card"><h2>✏️ Edit group</h2><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="update"><label>Application<br><input name="application" value="{{index .Group.Selector "application"}}" required></label><label>Environment<br><input name="environment" value="{{index .Group.Selector "environment"}}" required></label><label>Place<br><input name="place" value="{{index .Group.Selector "place"}}" required></label><p class="muted">Group name is regenerated automatically from Application, Environment and Place.</p><button type="submit">💾 Update group</button></form><div class="actionrow" style="margin-top:14px"><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="{{if .Group.Enabled}}disable{{else}}enable{{end}}"><button type="submit" class="iconaction">{{if .Group.Enabled}}⏸️ Disable group{{else}}▶️ Enable group{{end}}</button></form><form method="post" action="/groups/{{.Group.ID}}" onsubmit="return confirm('Delete this group? FleetAMP will block deletion if agents are still assigned.')"><input type="hidden" name="action" value="delete"><button class="danger iconaction" type="submit">🗑️ Delete group</button></form></div>{{if .Members}}<p class="muted" style="margin-top:12px">Delete protection is active: {{len .Members}} agent(s) currently match this group identity. Unassign them before deleting the group.</p>{{end}}</section>
+<section class="card"><h2>✏️ Edit group</h2><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="update"><label>Application<br><input name="application" value="{{index .Group.Selector "application"}}" required></label><label>Environment<br><input name="environment" value="{{index .Group.Selector "environment"}}" required></label><label>Place<br><input name="place" value="{{index .Group.Selector "place"}}" required></label><p class="muted">Group name is regenerated automatically from Application, Environment and Place.</p><button type="submit">💾 Update group</button></form><div class="actionrow" style="margin-top:14px"><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="{{if .Group.Enabled}}disable{{else}}enable{{end}}"><button type="submit" class="iconaction">{{if .Group.Enabled}}⏸️ Disable group{{else}}▶️ Enable group{{end}}</button></form><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="delete"><button class="danger iconaction" type="submit">🗑️ Delete group</button></form></div>{{if .Members}}<p class="muted" style="margin-top:12px">Delete protection is active: {{len .Members}} agent(s) currently match this group identity. Unassign them before deleting the group.</p>{{end}}</section>
 <section class="card"><h2>Assigned agents ({{len .Members}})</h2>{{if .Members}}<table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Health</th><th>Managed labels</th></tr></thead><tbody>{{range .Members}}<tr><td><a href="/agents/{{.InstanceUID}}">{{.Name}}</a></td><td>{{.Type}}</td><td>{{.Status}}</td><td class="{{if .Healthy}}ok{{else}}bad{{end}}">{{if .Healthy}}Healthy{{else}}Unhealthy{{end}}</td><td>{{range $k,$v := .Labels}}<code>{{$k}}={{$v}}</code> {{end}}</td></tr>{{end}}</tbody></table>{{else}}<p class="muted">No agents currently match this group identity.</p>{{end}}</section></body></html>`))

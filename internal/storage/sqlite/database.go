@@ -47,6 +47,7 @@ func (d *Database) Configurations() *ConfigStore  { return &ConfigStore{db: d.db
 func (d *Database) Assignments() *AssignmentStore { return &AssignmentStore{db: d.db} }
 func (d *Database) Deployments() *DeploymentStore { return &DeploymentStore{db: d.db} }
 func (d *Database) Groups() *GroupStore           { return &GroupStore{db: d.db} }
+func (d *Database) Authentication() *AuthStore    { return &AuthStore{db: d.db} }
 
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -84,6 +85,12 @@ func (d *Database) initialize(ctx context.Context) error {
             selector TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)`,
+		`CREATE TABLE IF NOT EXISTS administrators (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            username TEXT NOT NULL UNIQUE, password_salt BLOB NOT NULL,
+            password_hash BLOB NOT NULL, created_at TEXT NOT NULL,
+            password_changed_at TEXT NOT NULL
+        )`,
 	}
 	for _, statement := range statements {
 		if _, err := d.db.ExecContext(ctx, statement); err != nil {

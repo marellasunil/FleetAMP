@@ -61,8 +61,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	httpAddr := envOrDefault("FLEETAMP_HTTP_ADDR", ":8080")
-	opampAddr := envOrDefault("FLEETAMP_OPAMP_ADDR", ":4320")
+	httpAddr := envOrDefault("FLEETAMP_HTTP_ADDR", "127.0.0.1:8080")
+	opampAddr := envOrDefault("FLEETAMP_OPAMP_ADDR", "127.0.0.1:4320")
+	security, err := loadSecurityConfig(httpAddr, opampAddr)
+	if err != nil {
+		fatalLog("validate security configuration", err)
+	}
+	transportTLS, err := loadTransportTLSConfig()
+	if err != nil {
+		fatalLog("load TLS configuration", err)
+	}
 	agentStore := memory.NewAgentStore()
 	dataDir := envOrDefault("FLEETAMP_DATA_DIR", "./data")
 	eventStore, err := filestore.NewEventStore(dataDir)
@@ -79,12 +87,16 @@ func main() {
 		fatalLog("initialize sqlite database", err)
 	}
 	defer database.Close()
+	auth, err := newAuthManager(ctx, database.Authentication(), dataDir, httpAddr)
+	if err != nil {
+		fatalLog("initialize authentication", err)
+	}
 	configStore := database.Configurations()
 	assignmentStore := database.Assignments()
 	deploymentStore := database.Deployments()
 	groupStore := database.Groups()
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
-	adapter := fleetopamp.NewAdapter(opampAddr)
+	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
 
 	go func() {
 		if err := adapter.Start(ctx); err != nil && ctx.Err() == nil {
@@ -160,17 +172,36 @@ func main() {
 	go runRetirementLoop(ctx, agentStore, eventStore, retireAfter, dataDir)
 
 	mux := http.NewServeMux()
+	auth.registerRoutes(mux)
 	registerHealthRoutes(mux)
 	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter)
 	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter)
 	registerGroupRoutes(mux, groupStore, agentStore, dataDir)
 	registerUIRoutes(mux)
 
-	httpServer := &http.Server{Addr: httpAddr, Handler: mux}
+	httpServer := &http.Server{
+		Addr:              httpAddr,
+		Handler:           securityMiddleware(security, auth, mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+		TLSConfig:         transportTLS.HTTP.Config,
+	}
 	go func() {
-		slog.Info("FleetAMP HTTP server listening", "component", "http", "event", "server_started", "address", httpAddr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("HTTP server stopped", "component", "http", "event", "server_stopped", "error", err)
+		scheme := "http"
+		var serveErr error
+		if transportTLS.HTTP.Enabled {
+			scheme = "https"
+			slog.Info("FleetAMP HTTPS server listening", "component", "http", "event", "server_started", "address", httpAddr, "tls", true)
+			serveErr = httpServer.ListenAndServeTLS(transportTLS.HTTP.CertFile, transportTLS.HTTP.KeyFile)
+		} else {
+			slog.Info("FleetAMP HTTP server listening", "component", "http", "event", "server_started", "address", httpAddr, "tls", false)
+			serveErr = httpServer.ListenAndServe()
+		}
+		if serveErr != nil && serveErr != http.ErrServerClosed {
+			slog.Error("HTTP server stopped", "component", "http", "event", "server_stopped", "scheme", scheme, "error", serveErr)
 			stop()
 		}
 	}()
@@ -200,7 +231,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		agentsList, err := agentStore.List(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, agentsList)
@@ -217,7 +248,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		}
 		agentsList, err := selectAgentsForRange(r.Context(), agentStore, eventStore, rangeKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		selectedGroup := r.URL.Query().Get("group")
@@ -266,7 +297,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		since := timeRangeStart(r.URL.Query().Get("range"))
 		items, err := eventStore.ListSince(r.Context(), since)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, items)
@@ -515,7 +546,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 		case http.MethodGet:
 			items, err := configStore.List(r.Context())
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				internalServerError(w, err)
 				return
 			}
 			name := strings.TrimSpace(r.URL.Query().Get("name"))
@@ -546,7 +577,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 			}
 			configuration := configs.NewConfiguration(request.Name, request.Version, request.Content, request.ContentType)
 			if err := configStore.Put(r.Context(), configuration); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				internalServerError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusCreated, configuration)
@@ -562,7 +593,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 		}
 		items, err := assignmentStore.List(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalServerError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, items)
@@ -578,7 +609,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 			}
 			items, err := deploymentStore.ListByAgent(r.Context(), agentUID, 100)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				internalServerError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, summarizeDeployments(items))
@@ -599,7 +630,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 			}
 			items, err := deploymentStore.ListByAgent(r.Context(), agentUID, limit)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				internalServerError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, items)
@@ -618,7 +649,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 				return
 			}
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				internalServerError(w, err)
 				return
 			}
 			desired, err := configStore.Get(r.Context(), latest.ConfigurationID)
@@ -642,7 +673,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 				return
 			}
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				internalServerError(w, err)
 				return
 			}
 			current, err := configStore.Get(r.Context(), latest.ConfigurationID)

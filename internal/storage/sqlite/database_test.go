@@ -148,3 +148,35 @@ func TestGroupPersistence(t *testing.T) {
 		t.Fatalf("group mismatch: %#v", got)
 	}
 }
+
+func TestAdministratorPersistence(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "auth.db")
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := Administrator{
+		Username: "admin", PasswordSalt: []byte("0123456789abcdef"),
+		PasswordHash: []byte("stored-password-verifier"),
+	}
+	if err := db.Authentication().Create(ctx, admin); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, err := reopened.Authentication().Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Username != admin.Username ||
+		string(got.PasswordHash) != string(admin.PasswordHash) {
+		t.Fatalf("administrator mismatch: %#v", got)
+	}
+}

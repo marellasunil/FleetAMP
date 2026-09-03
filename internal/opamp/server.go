@@ -20,6 +20,9 @@ package opamp
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -39,6 +42,8 @@ import (
 
 type Adapter struct {
 	listenEndpoint string
+	authToken      string
+	tlsConfig      *tls.Config
 	events         chan management.Event
 	configEvents   chan configs.StatusReport
 	server         server.OpAMPServer
@@ -49,9 +54,13 @@ type Adapter struct {
 }
 
 // NewAdapter creates an OpAMP adapter bound to the configured WebSocket listener.
-func NewAdapter(listenEndpoint string) *Adapter {
+// When authToken is set, clients must send it as an Authorization Bearer token.
+// When tlsConfig is non-nil, the listener accepts secure WebSocket connections.
+func NewAdapter(listenEndpoint, authToken string, tlsConfig *tls.Config) *Adapter {
 	return &Adapter{
 		listenEndpoint: listenEndpoint,
+		authToken:      authToken,
+		tlsConfig:      tlsConfig,
 		events:         make(chan management.Event, 128),
 		configEvents:   make(chan configs.StatusReport, 128),
 		byConn:         make(map[servertypes.Connection]*agents.ManagedAgent),
@@ -67,7 +76,17 @@ func (a *Adapter) ConfigEvents() <-chan configs.StatusReport { return a.configEv
 // Start runs the opamp-go server until context cancellation or a listener error.
 func (a *Adapter) Start(ctx context.Context) error {
 	callbacks := servertypes.Callbacks{
-		OnConnecting: func(_ *http.Request) servertypes.ConnectionResponse {
+		OnConnecting: func(request *http.Request) servertypes.ConnectionResponse {
+			if !a.authorized(request) {
+				slog.Warn("OpAMP connection rejected", "component", "opamp", "event", "authentication_failed")
+				return servertypes.ConnectionResponse{
+					Accept:         false,
+					HTTPStatusCode: http.StatusUnauthorized,
+					HTTPResponseHeader: map[string]string{
+						"WWW-Authenticate": `Bearer realm="FleetAMP OpAMP"`,
+					},
+				}
+			}
 			return servertypes.ConnectionResponse{
 				Accept: true,
 				ConnectionCallbacks: servertypes.ConnectionCallbacks{
@@ -84,14 +103,29 @@ func (a *Adapter) Start(ctx context.Context) error {
 		Settings:       server.Settings{Callbacks: callbacks},
 		ListenEndpoint: a.listenEndpoint,
 		ListenPath:     "/v1/opamp",
+		TLSConfig:      a.tlsConfig,
 	}); err != nil {
 		return err
 	}
-	slog.Info("FleetAMP OpAMP server listening", "component", "opamp", "event", "server_started", "address", a.listenEndpoint+"/v1/opamp")
+	slog.Info("FleetAMP OpAMP server listening", "component", "opamp", "event", "server_started", "address", a.listenEndpoint+"/v1/opamp", "tls", a.tlsConfig != nil, "client_cert_required", a.tlsConfig != nil && a.tlsConfig.ClientAuth == tls.RequireAndVerifyClientCert)
 	<-ctx.Done()
 	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return a.server.Stop(stopCtx)
+}
+
+func (a *Adapter) authorized(request *http.Request) bool {
+	if a.authToken == "" {
+		return true
+	}
+	const prefix = "Bearer "
+	header := request.Header.Get("Authorization")
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	expected := sha256.Sum256([]byte(a.authToken))
+	actual := sha256.Sum256([]byte(strings.TrimSpace(strings.TrimPrefix(header, prefix))))
+	return subtle.ConstantTimeCompare(actual[:], expected[:]) == 1
 }
 
 func (a *Adapter) onConnected(_ context.Context, _ servertypes.Connection) {

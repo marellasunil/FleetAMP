@@ -8,7 +8,9 @@ Wants=network-online.target
 Type=simple
 User=fleetamp
 Group=fleetamp
+Environment=FLEETAMP_TLS_DIR=/etc/fleetamp/tls
 EnvironmentFile=/etc/fleetamp/fleetamp.env
+LoadCredentialEncrypted=fleetamp-server-pepper:/etc/credstore.encrypted/fleetamp-server-pepper
 WorkingDirectory=/var/lib/fleetamp
 StateDirectory=fleetamp
 LogsDirectory=fleetamp
@@ -17,11 +19,29 @@ Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 
-# Basic service hardening. FleetAMP requires write access only to its data directory.
+# FleetAMP requires write access only to its state and log directories.
+UMask=0077
 NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
 ReadWritePaths=/var/lib/fleetamp /var/log/fleetamp
 
 [Install]
