@@ -241,17 +241,19 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		writeJSON(w, http.StatusOK, agentsList)
 	})
 
-	// /agents is the fleet overview page with lifecycle ranges and optional group filtering.
+	// /agents is the fleet overview page with lifecycle-status and optional group filtering.
 	mux.HandleFunc("/agents", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/agents" {
 			http.NotFound(w, r)
 			return
 		}
-		rangeKey := r.URL.Query().Get("range")
-		if rangeKey == "" {
-			rangeKey = "active"
+		statusFilter := r.URL.Query().Get("status")
+		switch statusFilter {
+		case "all", "active", "offline", "retired":
+		default:
+			statusFilter = "all"
 		}
-		agentsList, err := selectAgentsForRange(r.Context(), agentStore, eventStore, rangeKey)
+		agentsList, err := selectAgentsForStatus(r.Context(), agentStore, statusFilter)
 		if err != nil {
 			internalServerError(w, err)
 			return
@@ -267,7 +269,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 				}
 			}
 		}
-		view := agentListView{Page: "fleet", Range: rangeKey, Groups: allGroups, SelectedGroup: selectedGroup, Items: make([]agentListItem, 0, len(agentsList))}
+		view := agentListView{Page: "fleet", StatusFilter: statusFilter, Groups: allGroups, SelectedGroup: selectedGroup, Items: make([]agentListItem, 0, len(agentsList))}
 		for _, agent := range agentsList {
 			if selected != nil && !groups.Matches(selected, agent) {
 				continue
@@ -289,6 +291,8 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 				view.Attention++
 			}
 		}
+		populateLifecycleCounts(r.Context(), &view, agentStore, selected)
+		populateLastConnected(r.Context(), &view, eventStore)
 		if view.Total > 0 {
 			view.HealthyPercent = view.Healthy * 100 / view.Total
 		}

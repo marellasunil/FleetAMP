@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -42,15 +43,22 @@ type agentListItem struct {
 }
 
 type agentListView struct {
-	Page           string
-	Items          []agentListItem
-	Range          string
-	Groups         []*groups.Group
-	SelectedGroup  string
-	Total          int
-	Healthy        int
-	Attention      int
-	HealthyPercent int
+	Page               string
+	Items              []agentListItem
+	Range              string
+	StatusFilter       string
+	Groups             []*groups.Group
+	SelectedGroup      string
+	Total              int
+	Known              int
+	Active             int
+	Offline            int
+	Retired            int
+	Healthy            int
+	Attention          int
+	HealthyPercent     int
+	LastConnectedAgent string
+	LastConnectedGroup string
 }
 
 // runRetirementLoop evaluates disconnected agents once per minute and moves
@@ -203,4 +211,104 @@ func saveAgentSnapshot(ctx context.Context, store *memory.AgentStore, dataDir st
 		return err
 	}
 	return os.Rename(tmp, dst)
+}
+
+// populateLastConnected finds the newest persisted connection event among the
+// agents visible in the current filtered view and adds its agent/group context.
+// The timestamp is used only for ordering and is intentionally not displayed.
+func populateLastConnected(ctx context.Context, view *agentListView, eventStore interface {
+	ListSince(context.Context, time.Time) ([]*events.AgentEvent, error)
+}) {
+	visible := make(map[string]agentListItem, len(view.Items))
+	for _, item := range view.Items {
+		visible[item.Agent.InstanceUID] = item
+	}
+	history, err := eventStore.ListSince(ctx, time.Time{})
+	if err != nil {
+		return
+	}
+	var latest *events.AgentEvent
+	for _, event := range history {
+		if event.Type != events.Connected {
+			continue
+		}
+		if _, ok := visible[event.AgentInstanceUID]; !ok {
+			continue
+		}
+		if latest == nil || event.Timestamp.After(latest.Timestamp) {
+			latest = event
+		}
+	}
+	if latest == nil {
+		return
+	}
+	item := visible[latest.AgentInstanceUID]
+	view.LastConnectedAgent = item.Agent.Name
+	if view.LastConnectedAgent == "" {
+		view.LastConnectedAgent = latest.AgentName
+	}
+	if len(item.Groups) == 0 {
+		view.LastConnectedGroup = "Unassigned"
+		return
+	}
+	view.LastConnectedGroup = item.Groups[0].Name
+	if len(item.Groups) > 1 {
+		view.LastConnectedGroup += fmt.Sprintf(" +%d", len(item.Groups)-1)
+	}
+}
+
+// populateLifecycleCounts summarizes every known agent, optionally restricted
+// to the selected group. Counts are independent of the table's time filter so
+// retired agents remain visible in the summary while the default table stays concise.
+func populateLifecycleCounts(ctx context.Context, view *agentListView, store *memory.AgentStore, selected *groups.Group) {
+	items, err := store.List(ctx)
+	if err != nil {
+		return
+	}
+	for _, agent := range items {
+		if selected != nil && !groups.Matches(selected, agent) {
+			continue
+		}
+		view.Known++
+		switch agent.Status {
+		case agents.LifecycleConnected:
+			view.Active++
+		case agents.LifecycleDisconnected:
+			view.Offline++
+		case agents.LifecycleRetired:
+			view.Retired++
+		}
+	}
+}
+
+// selectAgentsForStatus filters the current inventory by lifecycle state for
+// the Managed Agents dropdown. Unlike historical ranges, it does not depend on timestamps.
+func selectAgentsForStatus(ctx context.Context, store *memory.AgentStore, status string) ([]*agents.ManagedAgent, error) {
+	items, err := store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*agents.ManagedAgent, 0, len(items))
+	for _, agent := range items {
+		include := false
+		switch status {
+		case "all":
+			include = true
+		case "active":
+			include = agent.Status == agents.LifecycleConnected
+		case "offline":
+			include = agent.Status == agents.LifecycleDisconnected
+		case "retired":
+			include = agent.Status == agents.LifecycleRetired
+		default:
+			return nil, fmt.Errorf("unsupported agent status filter %q", status)
+		}
+		if include {
+			filtered = append(filtered, agent)
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].LastSeen.After(filtered[j].LastSeen)
+	})
+	return filtered, nil
 }
