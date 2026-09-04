@@ -156,6 +156,14 @@ func (a *Adapter) onMessage(_ context.Context, conn servertypes.Connection, msg 
 			agent.Healthy = previous.Healthy
 		}
 	}
+	// A replacement connection with the same stable InstanceUID takes ownership.
+	// Once that happens, late messages from the superseded connection must not
+	// reclaim the UID or overwrite the replacement's current state.
+	if current, owned := a.byUID[agent.InstanceUID]; existed && owned && current != conn {
+		a.byConn[conn] = cloneManagedAgent(agent)
+		a.mu.Unlock()
+		return nil
+	}
 	a.byConn[conn] = cloneManagedAgent(agent)
 	a.byUID[agent.InstanceUID] = conn
 	if effective := effectiveConfigString(msg.GetEffectiveConfig()); effective != "" {
@@ -223,14 +231,19 @@ func effectiveConfigString(e *protobufs.EffectiveConfig) string {
 func (a *Adapter) onConnectionClose(conn servertypes.Connection) {
 	a.mu.Lock()
 	agent, ok := a.byConn[conn]
+	isCurrent := false
 	if ok {
 		delete(a.byConn, conn)
 		if current, exists := a.byUID[agent.InstanceUID]; exists && current == conn {
 			delete(a.byUID, agent.InstanceUID)
+			isCurrent = true
 		}
 	}
 	a.mu.Unlock()
-	if !ok {
+	// A rolling replacement may connect with the same stable InstanceUID before
+	// the old socket closes. Only the current indexed connection owns liveness;
+	// closing a superseded socket must not mark the replacement disconnected.
+	if !ok || !isCurrent {
 		return
 	}
 	agent = cloneManagedAgent(agent)
