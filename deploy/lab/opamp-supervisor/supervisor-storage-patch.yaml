@@ -1,0 +1,6 @@
+- op: replace
+  path: /spec/template/spec/volumes/2
+  value:
+    name: supervisor-storage
+    persistentVolumeClaim:
+      claimName: otel-supervisor-storage

@@ -117,6 +117,13 @@ func main() {
 				}
 				now := time.Now().UTC()
 				previous, _ := agentStore.Get(ctx, event.Agent.InstanceUID)
+				if previous == nil && (event.Type == "connected" || event.Type == "updated") {
+					if sourceUID, inherited := inheritManagedMetadataByStableID(ctx, agentStore, event.Agent); inherited {
+						slog.Info("agent managed metadata reassociated", "component", "agents", "event", "identity_reassociated",
+							"source_agent_uid", sourceUID, "agent_uid", event.Agent.InstanceUID,
+							"stable_agent_id", event.Agent.Attributes[stableAgentIDAttribute])
+					}
+				}
 				switch event.Type {
 				case "connected", "updated":
 					event.Agent.Status = agents.LifecycleConnected

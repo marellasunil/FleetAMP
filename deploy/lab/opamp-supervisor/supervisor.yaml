@@ -12,6 +12,9 @@ agent:
   executable: /agent/otelcol-contrib
   config_files:
     - /etc/otelcol/base.yaml
+  description:
+    non_identifying_attributes:
+      fleetamp.agent.id: otel-gateway-personal-lab
 
 storage:
   directory: /var/lib/otel-supervisor

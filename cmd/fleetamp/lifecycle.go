@@ -36,6 +36,8 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/storage/memory"
 )
 
+const stableAgentIDAttribute = "fleetamp.agent.id"
+
 type agentListItem struct {
 	Agent          *agents.ManagedAgent
 	LastDeployment *configs.Deployment
@@ -211,6 +213,43 @@ func saveAgentSnapshot(ctx context.Context, store *memory.AgentStore, dataDir st
 		return err
 	}
 	return os.Rename(tmp, dst)
+}
+
+// inheritManagedMetadataByStableID preserves FleetAMP-owned group identity and
+// labels when an agent reconnects with a different protocol InstanceUID. The
+// explicit fleetamp.agent.id attribute must match exactly one disconnected or
+// retired record; ambiguous or concurrently active matches are rejected.
+func inheritManagedMetadataByStableID(ctx context.Context, store *memory.AgentStore, incoming *agents.ManagedAgent) (string, bool) {
+	if incoming == nil || incoming.Attributes == nil {
+		return "", false
+	}
+	stableID := incoming.Attributes[stableAgentIDAttribute]
+	if stableID == "" {
+		return "", false
+	}
+	items, err := store.List(ctx)
+	if err != nil {
+		return "", false
+	}
+	var match *agents.ManagedAgent
+	for _, candidate := range items {
+		if candidate.InstanceUID == incoming.InstanceUID || candidate.Connected || candidate.Type != incoming.Type {
+			continue
+		}
+		if candidate.Attributes[stableAgentIDAttribute] != stableID {
+			continue
+		}
+		if match != nil {
+			return "", false
+		}
+		match = candidate
+	}
+	if match == nil {
+		return "", false
+	}
+	incoming.GroupFields = copyStringMap(match.GroupFields)
+	incoming.Labels = copyStringMap(match.Labels)
+	return match.InstanceUID, true
 }
 
 // populateLastConnected finds the newest persisted connection event among the
