@@ -55,6 +55,7 @@ type healthResponse struct {
 	Time    string `json:"time"`
 }
 
+// main assembles FleetAMP's stores, authentication, OpAMP adapter, HTTP pages/APIs, background workers, and graceful shutdown.
 func main() {
 	closeLog := configureLogging()
 	defer closeLog()
@@ -212,6 +213,7 @@ func main() {
 	_ = httpServer.Shutdown(shutdownCtx)
 }
 
+// registerHealthRoutes exposes unauthenticated liveness (/health) and readiness (/ready) probes for service managers and load balancers.
 func registerHealthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -225,9 +227,11 @@ func registerHealthRoutes(mux *http.ServeMux) {
 	})
 }
 
+// registerAgentRoutes serves fleet inventory, agent detail, effective configuration, drift, deployment history, and per-agent deployment actions.
 func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, groupStore storage.GroupStore, eventStore interface {
 	ListSince(context.Context, time.Time) ([]*events.AgentEvent, error)
 }, adapter *fleetopamp.Adapter) {
+	// /api/v1/agents returns the current normalized inventory for automation clients.
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		agentsList, err := agentStore.List(r.Context())
 		if err != nil {
@@ -237,6 +241,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		writeJSON(w, http.StatusOK, agentsList)
 	})
 
+	// /agents is the fleet overview page with lifecycle ranges and optional group filtering.
 	mux.HandleFunc("/agents", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/agents" {
 			http.NotFound(w, r)
@@ -293,6 +298,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		}
 	})
 
+	// /api/v1/agent-events returns lifecycle events inside a requested time range.
 	mux.HandleFunc("/api/v1/agent-events", func(w http.ResponseWriter, r *http.Request) {
 		since := timeRangeStart(r.URL.Query().Get("range"))
 		items, err := eventStore.ListSince(r.Context(), since)
@@ -303,6 +309,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		writeJSON(w, http.StatusOK, items)
 	})
 
+	// /agents/{uid} is the agent detail page; nested paths expose effective config, drift, deployments, and deploy/rollback actions.
 	mux.HandleFunc("/agents/", func(w http.ResponseWriter, r *http.Request) {
 		uid := strings.Trim(strings.TrimPrefix(r.URL.Path, "/agents/"), "/")
 		if uid == "" {
@@ -361,6 +368,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		}
 	})
 
+	// / redirects to the fleet overview and rejects unknown top-level paths.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/agents", http.StatusTemporaryRedirect)
 	})
@@ -386,6 +394,7 @@ type agentDetailView struct {
 	Error                 string
 }
 
+// hasCapability performs a case-insensitive capability lookup for UI and deployment eligibility checks.
 func hasCapability(capabilities []string, wanted string) bool {
 	for _, capability := range capabilities {
 		if capability == wanted {
@@ -402,6 +411,7 @@ type deploymentSummary struct {
 	LastSuccessful         *configs.Deployment `json:"last_successful_deployment,omitempty"`
 }
 
+// summarizeDeployments reduces deployment records into status counters displayed on an agent detail page.
 func summarizeDeployments(items []*configs.Deployment) deploymentSummary {
 	var summary deploymentSummary
 	if len(items) == 0 {
@@ -422,6 +432,7 @@ func summarizeDeployments(items []*configs.Deployment) deploymentSummary {
 	return summary
 }
 
+// deploymentDuration formats the elapsed time between a deployment's start and completion, failure, or current time.
 func deploymentDuration(d *configs.Deployment) string {
 	if d == nil || d.SentAt == nil {
 		return ""
@@ -453,6 +464,7 @@ type rollbackResponse struct {
 	Deployment          *configs.Deployment    `json:"deployment,omitempty"`
 }
 
+// latestAssignmentForAgent finds the newest desired configuration assignment for one managed agent.
 func latestAssignmentForAgent(ctx context.Context, store storage.AssignmentStore, agentUID string) (*configs.Assignment, error) {
 	assignments, err := store.List(ctx)
 	if err != nil {
@@ -470,6 +482,7 @@ func latestAssignmentForAgent(ctx context.Context, store storage.AssignmentStore
 	return latest, nil
 }
 
+// deliverConfiguration records desired state and deployment history, sends remote configuration through OpAMP, and persists success or failure.
 func deliverConfiguration(ctx context.Context, agentUID string, configuration *configs.Configuration, action configs.DeploymentAction, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) (*configs.Assignment, *configs.Deployment, error) {
 	if recent, err := deploymentStore.ListByAgent(ctx, agentUID, 1); err != nil {
 		return nil, nil, err
@@ -522,7 +535,9 @@ func deliverConfiguration(ctx context.Context, agentUID string, configuration *c
 // registerConfigRoutes exposes configuration artifact, validation, and
 // assignment APIs. Validation occurs both before artifact creation and again
 // immediately before delivery to protect against unsafe desired state.
+// registerConfigRoutes serves configuration CRUD/listing pages, validation, direct deployment, rollback, and group rollout actions.
 func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter) {
+	// /api/v1/configurations/validate checks Collector YAML without storing or deploying it.
 	mux.HandleFunc("/api/v1/configurations/validate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -541,6 +556,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 		writeJSON(w, status, result)
 	})
 
+	// /api/v1/configurations creates and lists versioned desired configurations.
 	mux.HandleFunc("/api/v1/configurations", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -586,6 +602,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 		}
 	})
 
+	// /api/v1/assignments lists desired-state assignments and their latest delivery status.
 	mux.HandleFunc("/api/v1/assignments", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -599,6 +616,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 		writeJSON(w, http.StatusOK, items)
 	})
 
+	// /api/v1/agents/{uid}/config deploys a configuration directly to one connected, capable agent.
 	mux.HandleFunc("/api/v1/agents/", func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/agents/"), "/"), "/")
 		if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "deployment-summary" {
@@ -745,12 +763,14 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 	})
 }
 
+// writeJSON sends a JSON response with the supplied status and consistent content type.
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
 
+// envOrDefault returns a trimmed environment value or its fallback when unset.
 func envOrDefault(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -758,6 +778,7 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
+// durationEnvOrDefault parses a duration environment variable and falls back after logging invalid input.
 func durationEnvOrDefault(key string, fallback time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil {

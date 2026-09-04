@@ -23,14 +23,17 @@ type AssignmentStore struct {
 	assignments map[string]*configs.Assignment
 }
 
+// NewAssignmentStore creates an empty volatile desired-state assignment store.
 func NewAssignmentStore() *AssignmentStore {
 	return &AssignmentStore{assignments: make(map[string]*configs.Assignment)}
 }
 
+// assignmentKey creates the compound map key for one agent and configuration pair.
 func assignmentKey(agentUID, configID string) string {
 	return agentUID + "|" + configID
 }
 
+// Upsert inserts or replaces an assignment for an agent and configuration.
 func (s *AssignmentStore) Upsert(ctx context.Context, assignment *configs.Assignment) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -42,6 +45,7 @@ func (s *AssignmentStore) Upsert(ctx context.Context, assignment *configs.Assign
 	return nil
 }
 
+// Get retrieves one assignment by its agent and configuration identifiers.
 func (s *AssignmentStore) Get(ctx context.Context, agentUID, configID string) (*configs.Assignment, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -56,6 +60,7 @@ func (s *AssignmentStore) Get(ctx context.Context, agentUID, configID string) (*
 	return &clone, nil
 }
 
+// List returns all volatile assignments.
 func (s *AssignmentStore) List(ctx context.Context) ([]*configs.Assignment, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -70,6 +75,7 @@ func (s *AssignmentStore) List(ctx context.Context) ([]*configs.Assignment, erro
 	return result, nil
 }
 
+// UpdateByAgentHash applies an agent status report to the matching desired configuration hash.
 func (s *AssignmentStore) UpdateByAgentHash(ctx context.Context, agentUID, configHash string, status configs.DeliveryStatus, errText string) error {
 	if err := ctx.Err(); err != nil {
 		return err

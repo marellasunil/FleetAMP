@@ -24,6 +24,7 @@ type Group struct {
 	UpdatedAt   time.Time         `json:"updated_at"`
 }
 
+// New validates input, assigns an identifier, and creates an enabled selector-based group.
 func New(name, description string, selector map[string]string) (*Group, error) {
 	id, err := newID()
 	if err != nil {
@@ -33,6 +34,7 @@ func New(name, description string, selector map[string]string) (*Group, error) {
 	return &Group{ID: id, Name: name, Description: description, Selector: cloneMap(selector), Enabled: true, CreatedAt: now, UpdatedAt: now}, nil
 }
 
+// Matches evaluates a group selector against the agent's effective targeting metadata.
 func Matches(group *Group, agent *agents.ManagedAgent) bool {
 	if group == nil || !group.Enabled {
 		return false
@@ -96,6 +98,7 @@ func TargetingMetadata(agent *agents.ManagedAgent) map[string]string {
 	return out
 }
 
+// newID creates a random group identifier for stable URLs and persistence.
 func newID() (string, error) {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
@@ -104,6 +107,7 @@ func newID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// cloneMap copies selector or label maps to preserve domain object ownership.
 func cloneMap(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {

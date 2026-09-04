@@ -74,6 +74,7 @@ func CompareDesiredEffective(desired, effective string) DriftResult {
 	}
 }
 
+// collectDifferences recursively records structural YAML differences between desired and effective configuration values.
 func collectDifferences(path string, want, got any, differences *[]DriftDifference) {
 	switch w := want.(type) {
 	case map[string]any:
@@ -119,6 +120,7 @@ func collectDifferences(path string, want, got any, differences *[]DriftDifferen
 	}
 }
 
+// joinPath builds a dotted field path for a nested drift result.
 func joinPath(parent, key string) string {
 	if parent == "" {
 		return key
@@ -126,6 +128,7 @@ func joinPath(parent, key string) string {
 	return parent + "." + key
 }
 
+// displayPath returns a readable root marker when a drift difference applies to the whole document.
 func displayPath(path string) string {
 	if path == "" {
 		return "$"

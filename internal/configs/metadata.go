@@ -54,6 +54,7 @@ func MergeManagedMetadata(content string, groupFields, labels map[string]string)
 	return string(out), nil
 }
 
+// ensureMap returns an existing nested YAML map or creates it when absent.
 func ensureMap(parent map[string]any, key string) map[string]any {
 	if current, ok := parent[key].(map[string]any); ok {
 		return current

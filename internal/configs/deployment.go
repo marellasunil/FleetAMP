@@ -42,6 +42,7 @@ type Deployment struct {
 	UpdatedAt            time.Time        `json:"updated_at"`
 }
 
+// NewDeployment creates a pending delivery-history record for a configuration action against one agent.
 func NewDeployment(agentUID string, configuration *Configuration, action DeploymentAction) (*Deployment, error) {
 	if configuration == nil {
 		return nil, fmt.Errorf("configuration is required")
@@ -59,6 +60,7 @@ func NewDeployment(agentUID string, configuration *Configuration, action Deploym
 	}, nil
 }
 
+// newDeploymentID generates a random identifier suitable for persistent deployment records.
 func newDeploymentID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -67,6 +69,7 @@ func newDeploymentID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// SetStatus advances a deployment and records timing and error details appropriate to the new state.
 func (d *Deployment) SetStatus(status DeliveryStatus, errText string, at time.Time) {
 	at = at.UTC()
 	d.Status, d.Error, d.UpdatedAt = status, errText, at

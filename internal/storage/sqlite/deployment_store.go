@@ -14,6 +14,7 @@ import (
 
 type DeploymentStore struct{ db *sql.DB }
 
+// Create inserts an immutable deployment attempt before transport delivery begins.
 func (s *DeploymentStore) Create(ctx context.Context, d *configs.Deployment) error {
 	if d == nil {
 		return fmt.Errorf("deployment is required")
@@ -29,11 +30,13 @@ func (s *DeploymentStore) Create(ctx context.Context, d *configs.Deployment) err
 	return nil
 }
 
+// Get loads one deployment by its unique identifier.
 func (s *DeploymentStore) Get(ctx context.Context, id string) (*configs.Deployment, error) {
 	row := s.db.QueryRowContext(ctx, deploymentSelect+` WHERE id=?`, id)
 	return scanDeployment(row)
 }
 
+// ListByAgent returns the newest deployment attempts for one agent, optionally limited.
 func (s *DeploymentStore) ListByAgent(ctx context.Context, agentUID string, limit int) ([]*configs.Deployment, error) {
 	if limit <= 0 {
 		limit = 10
@@ -60,6 +63,7 @@ func (s *DeploymentStore) ListByAgent(ctx context.Context, agentUID string, limi
 	return result, nil
 }
 
+// UpdateLatestByAgentHash applies an OpAMP status report to the newest matching deployment attempt.
 func (s *DeploymentStore) UpdateLatestByAgentHash(ctx context.Context, agentUID, configHash string, status configs.DeliveryStatus, errText string) error {
 	now := time.Now().UTC()
 	var sent, applying, applied, failed any
@@ -94,6 +98,7 @@ const deploymentSelect = `SELECT id,agent_instance_uid,configuration_id,configur
 
 type deploymentScanner interface{ Scan(dest ...any) error }
 
+// scanDeployment converts a SQL row, including nullable timestamps, into the deployment model.
 func scanDeployment(scanner deploymentScanner) (*configs.Deployment, error) {
 	var d configs.Deployment
 	var action, status, created, updated string
@@ -127,13 +132,18 @@ func scanDeployment(scanner deploymentScanner) (*configs.Deployment, error) {
 	return &d, nil
 }
 
+// formatTime serializes timestamps consistently at nanosecond precision for SQLite.
 func formatTime(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+
+// formatTimePtr converts an optional timestamp into a nullable SQL value.
 func formatTimePtr(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
 	return formatTime(*t)
 }
+
+// parseTime restores a required RFC3339-nanosecond timestamp from SQLite.
 func parseTime(value string) (time.Time, error) {
 	t, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
@@ -141,6 +151,8 @@ func parseTime(value string) (time.Time, error) {
 	}
 	return t, nil
 }
+
+// parseNullTime restores an optional timestamp from a nullable SQL column.
 func parseNullTime(value sql.NullString) (*time.Time, error) {
 	if !value.Valid {
 		return nil, nil

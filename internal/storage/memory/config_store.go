@@ -22,10 +22,12 @@ type ConfigStore struct {
 	configs map[string]*configs.Configuration
 }
 
+// NewConfigStore creates an empty volatile configuration store.
 func NewConfigStore() *ConfigStore {
 	return &ConfigStore{configs: make(map[string]*configs.Configuration)}
 }
 
+// Put stores an independent copy of a versioned configuration by ID.
 func (s *ConfigStore) Put(ctx context.Context, config *configs.Configuration) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -36,6 +38,7 @@ func (s *ConfigStore) Put(ctx context.Context, config *configs.Configuration) er
 	return nil
 }
 
+// Get returns a configuration copy or storage.ErrConfigurationNotFound.
 func (s *ConfigStore) Get(ctx context.Context, id string) (*configs.Configuration, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -49,6 +52,7 @@ func (s *ConfigStore) Get(ctx context.Context, id string) (*configs.Configuratio
 	return cloneConfig(config), nil
 }
 
+// List returns copies of all configurations in the volatile store.
 func (s *ConfigStore) List(ctx context.Context) ([]*configs.Configuration, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -62,6 +66,7 @@ func (s *ConfigStore) List(ctx context.Context) ([]*configs.Configuration, error
 	return result, nil
 }
 
+// cloneConfig copies a configuration before storing or returning it.
 func cloneConfig(config *configs.Configuration) *configs.Configuration {
 	if config == nil {
 		return nil

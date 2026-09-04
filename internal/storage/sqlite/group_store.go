@@ -20,6 +20,7 @@ import (
 
 type GroupStore struct{ db *sql.DB }
 
+// Create persists a new selector-based group.
 func (s *GroupStore) Create(ctx context.Context, group *groups.Group) error {
 	selector, err := json.Marshal(group.Selector)
 	if err != nil {
@@ -33,6 +34,7 @@ func (s *GroupStore) Create(ctx context.Context, group *groups.Group) error {
 	return nil
 }
 
+// Update replaces a group's editable fields and enabled state.
 func (s *GroupStore) Update(ctx context.Context, group *groups.Group) error {
 	selector, err := json.Marshal(group.Selector)
 	if err != nil {
@@ -50,6 +52,7 @@ func (s *GroupStore) Update(ctx context.Context, group *groups.Group) error {
 	return nil
 }
 
+// Get loads one group by ID.
 func (s *GroupStore) Get(ctx context.Context, id string) (*groups.Group, error) {
 	row := s.db.QueryRowContext(ctx, groupSelect+` WHERE id=?`, id)
 	group, err := scanGroup(row)
@@ -59,6 +62,7 @@ func (s *GroupStore) Get(ctx context.Context, id string) (*groups.Group, error) 
 	return group, err
 }
 
+// List loads all groups in stable name order.
 func (s *GroupStore) List(ctx context.Context) ([]*groups.Group, error) {
 	rows, err := s.db.QueryContext(ctx, groupSelect+` ORDER BY name ASC`)
 	if err != nil {
@@ -76,6 +80,7 @@ func (s *GroupStore) List(ctx context.Context) ([]*groups.Group, error) {
 	return result, rows.Err()
 }
 
+// Delete removes one group without deleting its member agents.
 func (s *GroupStore) Delete(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM groups WHERE id=?`, id)
 	if err != nil {
@@ -92,6 +97,7 @@ const groupSelect = `SELECT id,name,description,selector,enabled,created_at,upda
 
 type scanner interface{ Scan(dest ...any) error }
 
+// scanGroup decodes selector JSON and constructs a group from a SQL row.
 func scanGroup(s scanner) (*groups.Group, error) {
 	var g groups.Group
 	var selector, createdAt, updatedAt string
@@ -115,6 +121,7 @@ func scanGroup(s scanner) (*groups.Group, error) {
 	return &g, nil
 }
 
+// boolToInt converts Go booleans to SQLite's integer representation.
 func boolToInt(v bool) int {
 	if v {
 		return 1

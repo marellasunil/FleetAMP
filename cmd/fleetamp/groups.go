@@ -48,6 +48,7 @@ type groupDetailView struct {
 
 const maxManagedLabels = 5
 
+// copyStringMap returns an independent map so request updates cannot mutate stored agent metadata by aliasing.
 func copyStringMap(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
@@ -56,7 +57,9 @@ func copyStringMap(in map[string]string) map[string]string {
 	return out
 }
 
+// registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
 func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, dataDir string) {
+	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
 	mux.HandleFunc("/agents/{uid}/group", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -88,6 +91,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
 	})
+	// /agents/{uid}/labels replaces the complete operator-label set submitted by the agent detail form.
 	mux.HandleFunc("/agents/{uid}/labels", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -114,6 +118,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
 	})
+	// /agents/{uid}/label adds or removes one label without replacing unrelated labels.
 	mux.HandleFunc("/agents/{uid}/label", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -148,6 +153,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
 	})
 
+	// /api/v1/agents/{uid}/labels provides JSON label replacement for automation clients.
 	mux.HandleFunc("/api/v1/agents/{uid}/labels", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut && r.Method != http.MethodPatch {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -195,6 +201,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		writeJSON(w, http.StatusOK, agent)
 	})
 
+	// /api/v1/groups lists groups or creates a validated selector-based group.
 	mux.HandleFunc("/api/v1/groups", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -225,6 +232,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 	})
 
+	// /api/v1/groups/{id} reads, updates, deletes, or previews membership for one group.
 	mux.HandleFunc("/api/v1/groups/", func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/groups/"), "/"), "/")
 		if len(parts) == 0 || parts[0] == "" {
@@ -295,6 +303,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 	registerGroupUI(mux, groupStore, agentStore)
 }
 
+// newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
 func newValidatedGroup(req groupRequest) (*groups.Group, error) {
 	req.Name = strings.TrimSpace(req.Name)
 	req.Description = strings.TrimSpace(req.Description)
@@ -306,6 +315,7 @@ func newValidatedGroup(req groupRequest) (*groups.Group, error) {
 	return groups.New(req.Name, req.Description, req.Selector)
 }
 
+// validateGroupSelector rejects empty keys and values that cannot safely target agents.
 func validateGroupSelector(selector map[string]string) error {
 	if strings.TrimSpace(selector["application"]) == "" {
 		return errors.New("application selector is required")
@@ -319,6 +329,7 @@ func validateGroupSelector(selector map[string]string) error {
 	return nil
 }
 
+// canonicalGroupName derives a stable display name from a selector when the request omits one.
 func canonicalGroupName(selector map[string]string) string {
 	parts := []string{selector["application"], selector["environment"], selector["place"]}
 	for i, part := range parts {
@@ -339,6 +350,7 @@ func canonicalGroupName(selector map[string]string) string {
 	return strings.Join(parts, "-")
 }
 
+// cleanSelector trims selector keys and values and drops empty pairs before validation.
 func cleanSelector(in map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range in {
@@ -350,6 +362,7 @@ func cleanSelector(in map[string]string) map[string]string {
 	return out
 }
 
+// membersForGroup returns agents whose effective targeting metadata matches the group's selector.
 func membersForGroup(ctx context.Context, group *groups.Group, store *memory.AgentStore) ([]*agents.ManagedAgent, error) {
 	if group != nil && !group.Enabled {
 		return []*agents.ManagedAgent{}, nil
@@ -357,10 +370,12 @@ func membersForGroup(ctx context.Context, group *groups.Group, store *memory.Age
 	return membersByMatcher(ctx, group, store, groups.Matches)
 }
 
+// membersForGroupIdentity previews membership using agent-reported identity fields before operator labels are considered.
 func membersForGroupIdentity(ctx context.Context, group *groups.Group, store *memory.AgentStore) ([]*agents.ManagedAgent, error) {
 	return membersByMatcher(ctx, group, store, groups.MatchesIdentity)
 }
 
+// membersByMatcher centralizes agent listing and filtering for the two supported membership semantics.
 func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.AgentStore, matcher func(*groups.Group, *agents.ManagedAgent) bool) ([]*agents.ManagedAgent, error) {
 	all, err := store.List(ctx)
 	if err != nil {
@@ -376,7 +391,9 @@ func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.Ag
 	return result, nil
 }
 
+// registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
 func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore) {
+	// /groups displays all groups and accepts creation form submissions.
 	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/groups" {
 			http.NotFound(w, r)
@@ -418,6 +435,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		_ = groupsPage.Execute(w, view)
 	})
 
+	// /groups/new renders the creation form; /groups/{id} shows details, editing, membership, and deletion.
 	mux.HandleFunc("/groups/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/groups/"), "/")
 		if id == "" {
@@ -495,6 +513,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 	})
 }
 
+// parseGroupSelectorForm accepts structured form fields and converts them into a normalized selector map.
 func parseGroupSelectorForm(r *http.Request) (map[string]string, error) {
 	selector := map[string]string{
 		"application": strings.TrimSpace(r.FormValue("application")),
@@ -507,6 +526,7 @@ func parseGroupSelectorForm(r *http.Request) (map[string]string, error) {
 	return selector, nil
 }
 
+// parseSelectorText parses one key=value selector per line and reports malformed or duplicate entries.
 func parseSelectorText(input string) (map[string]string, error) {
 	result := map[string]string{}
 	for _, part := range strings.Split(input, ",") {

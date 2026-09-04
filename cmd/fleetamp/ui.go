@@ -34,6 +34,7 @@ const upcomingHTML = `<!doctype html><html><head><meta charset="utf-8"><meta nam
 
 var upcomingPage = template.Must(template.New("upcoming").Parse(upcomingHTML))
 
+// registerUIRoutes serves the dashboard and informational placeholder pages that are not backed by dedicated resource handlers.
 func registerUIRoutes(mux *http.ServeMux) {
 	pages := map[string]upcomingView{
 		"/deployments": {Page: "deployments", Title: "Deployments", Subtitle: "Configuration rollout, safety gates and audit history", Current: "Per-agent configuration validation, delivery status, deployment history, drift and rollback are available from agent details.", Upcoming: "Fleet-wide and group deployment orchestration, canary stages, health gates, approvals and automatic rollback are Upcoming."},

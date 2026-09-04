@@ -14,6 +14,7 @@ import (
 
 type ConfigStore struct{ db *sql.DB }
 
+// Put inserts or updates a versioned desired configuration.
 func (s *ConfigStore) Put(ctx context.Context, config *configs.Configuration) error {
 	if config == nil {
 		return fmt.Errorf("configuration is required")
@@ -28,11 +29,13 @@ func (s *ConfigStore) Put(ctx context.Context, config *configs.Configuration) er
 	return nil
 }
 
+// Get loads one configuration or storage.ErrConfigurationNotFound.
 func (s *ConfigStore) Get(ctx context.Context, id string) (*configs.Configuration, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT id,name,version,content,content_type,hash,created_at FROM configurations WHERE id=?`, id)
 	return scanConfiguration(row)
 }
 
+// List loads configurations in newest-first order for API and UI consumers.
 func (s *ConfigStore) List(ctx context.Context) ([]*configs.Configuration, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id,name,version,content,content_type,hash,created_at FROM configurations ORDER BY created_at DESC, id`)
 	if err != nil {
@@ -55,6 +58,7 @@ func (s *ConfigStore) List(ctx context.Context) ([]*configs.Configuration, error
 
 type configScanner interface{ Scan(dest ...any) error }
 
+// scanConfiguration converts a SQL row into the configuration domain model.
 func scanConfiguration(scanner configScanner) (*configs.Configuration, error) {
 	var config configs.Configuration
 	var created string

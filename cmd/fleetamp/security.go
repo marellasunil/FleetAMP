@@ -28,6 +28,7 @@ type securityConfig struct {
 	OpAMPNativeTLS     bool
 }
 
+// loadSecurityConfig validates authentication, origin, request-size, and remote-listener protection settings before startup.
 func loadSecurityConfig(httpAddr, opampAddr string) (securityConfig, error) {
 	cfg := securityConfig{
 		HTTPUsername:       strings.TrimSpace(os.Getenv("FLEETAMP_AUTH_USERNAME")),
@@ -74,11 +75,13 @@ func loadSecurityConfig(httpAddr, opampAddr string) (securityConfig, error) {
 	return cfg, nil
 }
 
+// boolEnv parses a boolean environment variable; invalid or missing values are treated as false.
 func boolEnv(name string) bool {
 	value, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv(name)))
 	return value
 }
 
+// isLoopbackListener reports whether an address is explicitly bound to localhost or a loopback IP.
 func isLoopbackListener(address string) bool {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
@@ -91,6 +94,8 @@ func isLoopbackListener(address string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
+
+// parseAllowedOrigins normalizes a comma-separated origin allowlist for constant-time map lookup.
 func parseAllowedOrigins(raw string) map[string]struct{} {
 	result := make(map[string]struct{})
 	for _, item := range strings.Split(raw, ",") {
@@ -102,6 +107,7 @@ func parseAllowedOrigins(raw string) map[string]struct{} {
 	return result
 }
 
+// securityMiddleware applies headers, authentication, origin checks, method restrictions, body limits, and panic recovery to every route.
 func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w)
@@ -143,6 +149,8 @@ func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler
 		next.ServeHTTP(w, r)
 	})
 }
+
+// setSecurityHeaders adds browser hardening and disables caching of authenticated FleetAMP responses.
 func setSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -152,6 +160,7 @@ func setSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 }
 
+// allowedMethod restricts requests to the HTTP verbs used by FleetAMP pages and APIs.
 func allowedMethod(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
@@ -162,10 +171,12 @@ func allowedMethod(method string) bool {
 	}
 }
 
+// isUnsafeMethod identifies state-changing requests that require origin validation and body limits.
 func isUnsafeMethod(method string) bool {
 	return method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
 }
 
+// validBasicAuth verifies the legacy migration credentials using constant-time digest comparison.
 func validBasicAuth(r *http.Request, cfg securityConfig) bool {
 	username, password, ok := r.BasicAuth()
 	if !ok {
@@ -178,11 +189,14 @@ func validBasicAuth(r *http.Request, cfg securityConfig) bool {
 	return subtle.ConstantTimeCompare(actualUser[:], expectedUser[:]) == 1 &&
 		subtle.ConstantTimeCompare(actualPassword[:], expectedPassword[:]) == 1
 }
+
+// internalServerError logs the detailed error server-side while returning a generic response to the client.
 func internalServerError(w http.ResponseWriter, err error) {
 	slog.Error("HTTP request failed", "component", "http", "event", "internal_error", "error", err)
 	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
+// validRequestOrigin permits configured origins, the request's own origin, and safe equivalent loopback aliases.
 func validRequestOrigin(r *http.Request, allowed map[string]struct{}) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
@@ -205,6 +219,7 @@ func validRequestOrigin(r *http.Request, allowed map[string]struct{}) bool {
 	return equivalentLoopbackOrigin(parsed, r.Host)
 }
 
+// validLoopbackNullOrigin handles Fedora's Origin:null behavior only for same-site requests that remain entirely on loopback.
 func validLoopbackNullOrigin(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.Host)
 	if err != nil {
@@ -219,6 +234,7 @@ func validLoopbackNullOrigin(r *http.Request) bool {
 		(fetchSite == "same-origin" || fetchSite == "same-site")
 }
 
+// equivalentLoopbackOrigin treats localhost and loopback IP names as equivalent only when their effective ports match.
 func equivalentLoopbackOrigin(origin *url.URL, requestHost string) bool {
 	host, port, err := net.SplitHostPort(requestHost)
 	if err != nil {
@@ -239,6 +255,7 @@ func equivalentLoopbackOrigin(origin *url.URL, requestHost string) bool {
 	return loopbackHost(origin.Hostname()) && loopbackHost(host) && originPort == port
 }
 
+// loopbackHost reports whether a host name or address represents the local loopback interface.
 func loopbackHost(host string) bool {
 	host = strings.Trim(strings.TrimSpace(host), "[]")
 	return strings.EqualFold(host, "localhost") || (net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback())

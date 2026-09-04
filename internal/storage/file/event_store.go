@@ -39,6 +39,7 @@ type EventStore struct {
 
 // NewEventStore prepares the FleetAMP data directory and uses agent-events.jsonl
 // as the append-only history file.
+// NewEventStore prepares the append-only JSON event file beneath the configured data directory.
 func NewEventStore(dataDir string) (*EventStore, error) {
 	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return nil, err
@@ -48,6 +49,7 @@ func NewEventStore(dataDir string) (*EventStore, error) {
 
 // Append serializes one lifecycle event as a single JSONL record. Writes are
 // mutex-protected so concurrent management events cannot interleave bytes.
+// Append serializes one lifecycle event while holding the file store lock.
 func (s *EventStore) Append(ctx context.Context, event *events.AgentEvent) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -64,6 +66,7 @@ func (s *EventStore) Append(ctx context.Context, event *events.AgentEvent) error
 
 // ListSince scans persisted JSONL history and returns events at or after the
 // supplied UTC timestamp. Corrupt records are surfaced instead of silently ignored.
+// ListSince scans persisted events and returns those at or after the requested time.
 func (s *EventStore) ListSince(ctx context.Context, since time.Time) ([]*events.AgentEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

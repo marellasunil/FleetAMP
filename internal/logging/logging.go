@@ -18,6 +18,7 @@ type Config struct {
 	File   string
 }
 
+// Setup configures FleetAMP's global structured logger and returns a function that flushes and closes file output.
 func Setup(cfg Config) (func() error, error) {
 	level, err := parseLevel(cfg.Level)
 	if err != nil {
@@ -54,6 +55,7 @@ func Setup(cfg Config) (func() error, error) {
 	}, nil
 }
 
+// parseLevel translates a configured level name into the corresponding slog threshold.
 func parseLevel(value string) (slog.Level, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "info":
@@ -69,6 +71,7 @@ func parseLevel(value string) (slog.Level, error) {
 	}
 }
 
+// dir returns the parent directory that must exist before opening a configured log file.
 func dir(path string) string {
 	idx := strings.LastIndex(path, string(os.PathSeparator))
 	if idx <= 0 {

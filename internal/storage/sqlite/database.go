@@ -23,6 +23,7 @@ import (
 
 type Database struct{ db *sql.DB }
 
+// Open creates the SQLite connection, applies safe connection settings, and initializes or migrates the schema.
 func Open(ctx context.Context, path string) (*Database, error) {
 	if path == "" {
 		return nil, fmt.Errorf("sqlite database path is required")
@@ -42,13 +43,25 @@ func Open(ctx context.Context, path string) (*Database, error) {
 	return database, nil
 }
 
-func (d *Database) Close() error                  { return d.db.Close() }
-func (d *Database) Configurations() *ConfigStore  { return &ConfigStore{db: d.db} }
-func (d *Database) Assignments() *AssignmentStore { return &AssignmentStore{db: d.db} }
-func (d *Database) Deployments() *DeploymentStore { return &DeploymentStore{db: d.db} }
-func (d *Database) Groups() *GroupStore           { return &GroupStore{db: d.db} }
-func (d *Database) Authentication() *AuthStore    { return &AuthStore{db: d.db} }
+// Close releases the underlying SQLite connection.
+func (d *Database) Close() error { return d.db.Close() }
 
+// Configurations returns the SQLite-backed configuration repository.
+func (d *Database) Configurations() *ConfigStore { return &ConfigStore{db: d.db} }
+
+// Assignments returns the SQLite-backed desired-state assignment repository.
+func (d *Database) Assignments() *AssignmentStore { return &AssignmentStore{db: d.db} }
+
+// Deployments returns the SQLite-backed delivery-history repository.
+func (d *Database) Deployments() *DeploymentStore { return &DeploymentStore{db: d.db} }
+
+// Groups returns the SQLite-backed group repository.
+func (d *Database) Groups() *GroupStore { return &GroupStore{db: d.db} }
+
+// Authentication returns the SQLite-backed singleton administrator repository.
+func (d *Database) Authentication() *AuthStore { return &AuthStore{db: d.db} }
+
+// initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
 		`PRAGMA foreign_keys = ON`,
@@ -103,6 +116,7 @@ func (d *Database) initialize(ctx context.Context) error {
 	return d.db.PingContext(ctx)
 }
 
+// ensureGroupEnabledColumn migrates older group tables that predate the enabled flag.
 func (d *Database) ensureGroupEnabledColumn(ctx context.Context) error {
 	rows, err := d.db.QueryContext(ctx, `PRAGMA table_info(groups)`)
 	if err != nil {

@@ -51,6 +51,7 @@ type authManager struct {
 	sessions         map[string]authSession
 }
 
+// newAuthManager loads the server-bound pepper, determines secure-cookie behavior, and starts first-login setup when needed.
 func newAuthManager(ctx context.Context, store administratorStore, dataDir, httpAddr string) (*authManager, error) {
 	pepper, source, err := loadServerPepper(dataDir, httpAddr)
 	if err != nil {
@@ -75,6 +76,8 @@ func newAuthManager(ctx context.Context, store administratorStore, dataDir, http
 	}
 	return manager, nil
 }
+
+// loadServerPepper reads the systemd credential or configured pepper file, falling back to a local development file only on loopback.
 func loadServerPepper(dataDir, httpAddr string) ([]byte, string, error) {
 	if directory := strings.TrimSpace(os.Getenv("CREDENTIALS_DIRECTORY")); directory != "" {
 		path := filepath.Join(directory, serverPepperCredential)
@@ -106,6 +109,8 @@ func loadServerPepper(dataDir, httpAddr string) ([]byte, string, error) {
 	}
 	return createLocalPepper(path)
 }
+
+// validatePepper trims and checks pepper material before it participates in password derivation.
 func validatePepper(value []byte, source string) ([]byte, string, error) {
 	value = []byte(strings.TrimSpace(string(value)))
 	if decoded, err := base64.RawURLEncoding.DecodeString(string(value)); err == nil {
@@ -117,6 +122,7 @@ func validatePepper(value []byte, source string) ([]byte, string, error) {
 	return value, source, nil
 }
 
+// createLocalPepper generates a restricted development pepper file without exposing its value in logs.
 func createLocalPepper(path string) ([]byte, string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, "", fmt.Errorf("create pepper directory: %w", err)
@@ -147,6 +153,8 @@ func createLocalPepper(path string) ([]byte, string, error) {
 	slog.Warn("using file-backed development pepper; configure TPM-backed systemd credentials before remote deployment", "component", "auth")
 	return value, "local development file", nil
 }
+
+// issueBootstrapToken creates an in-memory, time-limited token used exactly once to create the first administrator.
 func (a *authManager) issueBootstrapToken() error {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -162,10 +170,12 @@ func (a *authManager) issueBootstrapToken() error {
 	return nil
 }
 
+// configured reports whether the singleton administrator record already exists.
 func (a *authManager) configured(ctx context.Context) (bool, error) {
 	return a.store.Exists(ctx)
 }
 
+// validBootstrapToken checks token expiry and value using a constant-time digest comparison.
 func (a *authManager) validBootstrapToken(token string) bool {
 	if token == "" || !a.now().Before(a.bootstrapExpires) {
 		return false
@@ -174,12 +184,15 @@ func (a *authManager) validBootstrapToken(token string) bool {
 	return subtle.ConstantTimeCompare(actual[:], a.bootstrapDigest[:]) == 1
 }
 
+// passwordDigest derives the stored Argon2id verifier from the password, per-user salt, and server-specific pepper.
 func passwordDigest(password string, pepper, salt []byte) []byte {
 	mac := hmac.New(sha256.New, pepper)
 	_, _ = mac.Write([]byte(password))
 	material := mac.Sum(nil)
 	return argon2.IDKey(material, salt, 3, 64*1024, 2, 32)
 }
+
+// newSalt returns cryptographically random salt material for a new administrator verifier.
 func newSalt() ([]byte, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
@@ -188,6 +201,7 @@ func newSalt() ([]byte, error) {
 	return salt, nil
 }
 
+// createAdministrator validates the one-time setup request and atomically stores the first administrator verifier.
 func (a *authManager) createAdministrator(ctx context.Context, username, password, token string) error {
 	username = strings.TrimSpace(username)
 	if len(username) < 3 || len(username) > 64 {
@@ -221,6 +235,8 @@ func (a *authManager) createAdministrator(ctx context.Context, username, passwor
 	slog.Info("administrator created", "component", "auth", "event", "administrator_created", "username", username)
 	return nil
 }
+
+// authenticate derives and compares the supplied password without revealing whether an account lookup failed.
 func (a *authManager) authenticate(ctx context.Context, username, password string) bool {
 	admin, err := a.store.Get(ctx)
 	if err != nil {
@@ -233,6 +249,7 @@ func (a *authManager) authenticate(ctx context.Context, username, password strin
 		subtle.ConstantTimeCompare(actualHash, admin.PasswordHash) == 1
 }
 
+// createSession creates an opaque browser token while storing only its digest in the in-memory session table.
 func (a *authManager) createSession(username string) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -246,10 +263,13 @@ func (a *authManager) createSession(username string) (string, error) {
 	return token, nil
 }
 
+// sessionKey hashes a raw session token so plaintext tokens are never retained server-side.
 func sessionKey(token string) string {
 	digest := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(digest[:])
 }
+
+// validSession verifies the cookie-backed session and removes it when it has expired.
 func (a *authManager) validSession(r *http.Request) bool {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil || cookie.Value == "" {
@@ -271,6 +291,7 @@ func (a *authManager) validSession(r *http.Request) bool {
 	return true
 }
 
+// setSessionCookie writes a restricted HttpOnly, SameSite cookie and enables Secure when HTTPS is expected.
 func (a *authManager) setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: token, Path: "/",
@@ -279,6 +300,7 @@ func (a *authManager) setSessionCookie(w http.ResponseWriter, token string) {
 	})
 }
 
+// clearSession deletes the server-side session and expires the corresponding browser cookie.
 func (a *authManager) clearSession(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
 		a.mu.Lock()
@@ -290,6 +312,8 @@ func (a *authManager) clearSession(w http.ResponseWriter, r *http.Request) {
 		Secure: a.secureCookies, SameSite: http.SameSiteStrictMode, MaxAge: -1,
 	})
 }
+
+// authorize permits a valid application session or legacy Basic Auth and otherwise returns an HTML redirect or API 401.
 func (a *authManager) authorize(w http.ResponseWriter, r *http.Request, legacy securityConfig) bool {
 	if a.validSession(r) {
 		return true
@@ -319,6 +343,7 @@ func (a *authManager) authorize(w http.ResponseWriter, r *http.Request, legacy s
 	return false
 }
 
+// acceptsHTML distinguishes browser navigation from API clients for redirect-versus-JSON authentication behavior.
 func acceptsHTML(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "text/html") ||
 		(!strings.HasPrefix(r.URL.Path, "/api/") && r.Header.Get("Accept") == "")
@@ -353,12 +378,14 @@ const authPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 
 var authPage = template.Must(template.New("auth").Parse(authPageHTML))
 
+// registerRoutes exposes the first-login setup, normal login, and logout endpoints.
 func (a *authManager) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/setup", a.handleSetup)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
 }
 
+// handleSetup renders the first-administrator page on GET and processes the one-time setup form on POST.
 func (a *authManager) handleSetup(w http.ResponseWriter, r *http.Request) {
 	configured, err := a.configured(r.Context())
 	if err != nil {
@@ -400,6 +427,7 @@ func (a *authManager) handleSetup(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/agents", http.StatusSeeOther)
 }
 
+// handleLogin renders the sign-in page on GET and creates an authenticated session after a valid POST.
 func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 	configured, err := a.configured(r.Context())
 	if err != nil {
@@ -434,6 +462,7 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/agents", http.StatusSeeOther)
 }
 
+// handleLogout invalidates the current session and returns the browser to the login page.
 func (a *authManager) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -443,6 +472,7 @@ func (a *authManager) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
+// renderAuthPage executes the shared authentication template with a safe generic error model.
 func (a *authManager) renderAuthPage(w http.ResponseWriter, data authPageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

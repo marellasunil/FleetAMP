@@ -13,12 +13,14 @@ type Registry struct {
 	collectors map[string]*Collector
 }
 
+// NewRegistry creates a concurrency-safe in-memory registry for basic Collector records.
 func NewRegistry() *Registry {
 	return &Registry{
 		collectors: make(map[string]*Collector),
 	}
 }
 
+// Upsert inserts or replaces a Collector by instance UID.
 func (r *Registry) Upsert(c *Collector) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -26,6 +28,7 @@ func (r *Registry) Upsert(c *Collector) {
 	r.collectors[c.InstanceUID] = c
 }
 
+// List returns the current Collectors as a new slice.
 func (r *Registry) List() []*Collector {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

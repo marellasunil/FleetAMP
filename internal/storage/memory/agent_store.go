@@ -26,6 +26,7 @@ type AgentStore struct {
 	agents map[string]*agents.ManagedAgent
 }
 
+// NewAgentStore creates an empty concurrency-safe volatile agent inventory.
 func NewAgentStore() *AgentStore {
 	return &AgentStore{agents: make(map[string]*agents.ManagedAgent)}
 }
@@ -50,6 +51,7 @@ func (s *AgentStore) Upsert(ctx context.Context, agent *agents.ManagedAgent) err
 	return nil
 }
 
+// Get returns a deep copy of one agent or storage.ErrAgentNotFound.
 func (s *AgentStore) Get(ctx context.Context, instanceUID string) (*agents.ManagedAgent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -63,6 +65,7 @@ func (s *AgentStore) Get(ctx context.Context, instanceUID string) (*agents.Manag
 	return cloneAgent(agent), nil
 }
 
+// List returns deep copies of all agents without exposing the store's internal maps.
 func (s *AgentStore) List(ctx context.Context) ([]*agents.ManagedAgent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -76,6 +79,7 @@ func (s *AgentStore) List(ctx context.Context) ([]*agents.ManagedAgent, error) {
 	return result, nil
 }
 
+// Delete removes an agent from volatile inventory.
 func (s *AgentStore) Delete(ctx context.Context, instanceUID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -89,6 +93,7 @@ func (s *AgentStore) Delete(ctx context.Context, instanceUID string) error {
 	return nil
 }
 
+// cloneAgent deep-copies mutable fields before values cross the store boundary.
 func cloneAgent(agent *agents.ManagedAgent) *agents.ManagedAgent {
 	if agent == nil {
 		return nil

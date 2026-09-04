@@ -23,6 +23,7 @@ type transportTLSConfig struct {
 	OpAMP listenerTLSConfig
 }
 
+// loadTransportTLSConfig builds independent TLS settings for the web and OpAMP listeners.
 func loadTransportTLSConfig() (transportTLSConfig, error) {
 	httpTLS, err := loadListenerTLSConfig("FLEETAMP_HTTP_TLS", false)
 	if err != nil {
@@ -35,6 +36,7 @@ func loadTransportTLSConfig() (transportTLSConfig, error) {
 	return transportTLSConfig{HTTP: httpTLS, OpAMP: opampTLS}, nil
 }
 
+// loadListenerTLSConfig validates one listener's certificate, key, protocol floor, and optional client CA.
 func loadListenerTLSConfig(prefix string, allowClientAuth bool) (listenerTLSConfig, error) {
 	certFile := strings.TrimSpace(os.Getenv(prefix + "_CERT_FILE"))
 	keyFile := strings.TrimSpace(os.Getenv(prefix + "_KEY_FILE"))
@@ -100,6 +102,7 @@ func loadListenerTLSConfig(prefix string, allowClientAuth bool) (listenerTLSConf
 	return cfg, nil
 }
 
+// defaultTLSDirectory returns the customer override or the platform user configuration directory for FleetAMP certificates.
 func defaultTLSDirectory() (string, error) {
 	if configured := strings.TrimSpace(os.Getenv("FLEETAMP_TLS_DIR")); configured != "" {
 		return configured, nil

@@ -9,6 +9,7 @@ import (
 	fleetlogging "github.com/marellasunil/FleetAMP/internal/logging"
 )
 
+// configureLogging initializes structured logging from FleetAMP environment variables and returns a cleanup function.
 func configureLogging() func() {
 	closeLog, err := fleetlogging.Setup(fleetlogging.Config{
 		Level:  envOrDefault("FLEETAMP_LOG_LEVEL", "info"),
@@ -23,6 +24,7 @@ func configureLogging() func() {
 	return func() { _ = closeLog() }
 }
 
+// fatalLog records an unrecoverable startup error and terminates the process.
 func fatalLog(message string, err error) {
 	slog.Error(message, "component", "startup", "event", "startup_failed", "error", err)
 	os.Exit(1)

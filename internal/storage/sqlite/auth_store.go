@@ -21,6 +21,7 @@ type Administrator struct {
 
 type AuthStore struct{ db *sql.DB }
 
+// Exists reports whether first-login setup has already created the singleton administrator.
 func (s *AuthStore) Exists(ctx context.Context) (bool, error) {
 	var count int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM administrators`).Scan(&count); err != nil {
@@ -28,6 +29,8 @@ func (s *AuthStore) Exists(ctx context.Context) (bool, error) {
 	}
 	return count > 0, nil
 }
+
+// Get loads the administrator name, salt, verifier, and derivation parameters.
 func (s *AuthStore) Get(ctx context.Context) (*Administrator, error) {
 	var admin Administrator
 	var createdAt, changedAt string
@@ -51,6 +54,8 @@ func (s *AuthStore) Get(ctx context.Context) (*Administrator, error) {
 	}
 	return &admin, nil
 }
+
+// Create inserts the first administrator and fails when setup was already completed.
 func (s *AuthStore) Create(ctx context.Context, admin Administrator) error {
 	now := time.Now().UTC()
 	if admin.CreatedAt.IsZero() {
@@ -71,6 +76,7 @@ func (s *AuthStore) Create(ctx context.Context, admin Administrator) error {
 	return nil
 }
 
+// ReplacePassword atomically replaces verifier material for the named administrator.
 func (s *AuthStore) ReplacePassword(ctx context.Context, username string, salt, hash []byte) error {
 	result, err := s.db.ExecContext(ctx, `
         UPDATE administrators SET password_salt = ?, password_hash = ?, password_changed_at = ?

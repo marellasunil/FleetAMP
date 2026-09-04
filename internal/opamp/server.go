@@ -69,8 +69,13 @@ func NewAdapter(listenEndpoint, authToken string, tlsConfig *tls.Config) *Adapte
 	}
 }
 
-func (a *Adapter) Name() string                              { return "opamp" }
-func (a *Adapter) Events() <-chan management.Event           { return a.events }
+// Name identifies this management adapter as OpAMP.
+func (a *Adapter) Name() string { return "opamp" }
+
+// Events exposes normalized agent lifecycle changes to the application layer.
+func (a *Adapter) Events() <-chan management.Event { return a.events }
+
+// ConfigEvents exposes remote-configuration status reports received from agents.
 func (a *Adapter) ConfigEvents() <-chan configs.StatusReport { return a.configEvents }
 
 // Start runs the opamp-go server until context cancellation or a listener error.
@@ -114,6 +119,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	return a.server.Stop(stopCtx)
 }
 
+// authorized validates the optional OpAMP bearer token before accepting a WebSocket connection.
 func (a *Adapter) authorized(request *http.Request) bool {
 	if a.authToken == "" {
 		return true
@@ -128,6 +134,7 @@ func (a *Adapter) authorized(request *http.Request) bool {
 	return subtle.ConstantTimeCompare(actual[:], expected[:]) == 1
 }
 
+// onConnected records successful transport establishment without treating it as a fully identified agent yet.
 func (a *Adapter) onConnected(_ context.Context, _ servertypes.Connection) {
 	slog.Info("OpAMP transport connected", "component", "opamp", "event", "transport_connected")
 }
@@ -191,6 +198,7 @@ func (a *Adapter) EffectiveConfig(instanceUID string) string {
 	return a.effective[instanceUID]
 }
 
+// effectiveConfigString combines the named effective-config files reported by an agent into readable text.
 func effectiveConfigString(e *protobufs.EffectiveConfig) string {
 	if e == nil || e.GetConfigMap() == nil {
 		return ""
@@ -211,6 +219,7 @@ func effectiveConfigString(e *protobufs.EffectiveConfig) string {
 	return b.String()
 }
 
+// onConnectionClose removes connection indexes and emits a disconnected lifecycle event for the last known agent state.
 func (a *Adapter) onConnectionClose(conn servertypes.Connection) {
 	a.mu.Lock()
 	agent, ok := a.byConn[conn]
@@ -231,6 +240,7 @@ func (a *Adapter) onConnectionClose(conn servertypes.Connection) {
 	slog.Info("OpAMP agent disconnected", "component", "opamp", "event", "agent_disconnected", "agent_uid", agent.InstanceUID)
 }
 
+// managedAgentFromMessage translates an OpAMP protobuf message into FleetAMP's protocol-independent agent model.
 func managedAgentFromMessage(msg *protobufs.AgentToServer) *agents.ManagedAgent {
 	attrs := map[string]string{}
 	if d := msg.GetAgentDescription(); d != nil {
@@ -311,6 +321,7 @@ func mergeAgent(current, previous *agents.ManagedAgent) {
 	}
 }
 
+// splitFleetAMPMetadata separates group fields, operator labels, and unknown FleetAMP-prefixed attributes.
 func splitFleetAMPMetadata(attrs map[string]string) (map[string]string, map[string]string, map[string]string) {
 	groupFields, labels, unknown := map[string]string{}, map[string]string{}, map[string]string{}
 	for key, value := range attrs {
@@ -352,6 +363,7 @@ func deploymentFromAttributes(attrs map[string]string) agents.DeploymentContext 
 	return d
 }
 
+// capabilityNames converts the OpAMP capability bitmask into stable names used by FleetAMP policy and UI code.
 func capabilityNames(bits uint64) []string {
 	caps := []struct {
 		bit  uint64
@@ -383,6 +395,7 @@ func capabilityNames(bits uint64) []string {
 	return result
 }
 
+// anyValueString converts an OpAMP AnyValue into a human-readable attribute value.
 func anyValueString(v *protobufs.AnyValue) string {
 	switch x := v.GetValue().(type) {
 	case *protobufs.AnyValue_StringValue:
@@ -400,6 +413,7 @@ func anyValueString(v *protobufs.AnyValue) string {
 	}
 }
 
+// formatInstanceUID renders the 16-byte OpAMP instance identifier as canonical UUID text.
 func formatInstanceUID(uid []byte) string {
 	if len(uid) != 16 {
 		return ""
@@ -408,6 +422,7 @@ func formatInstanceUID(uid []byte) string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
+// shortUID returns a compact identifier used when no human-friendly agent name is reported.
 func shortUID(uid string) string {
 	clean := strings.ReplaceAll(uid, "-", "")
 	if len(clean) > 8 {
@@ -416,6 +431,7 @@ func shortUID(uid string) string {
 	return clean
 }
 
+// firstNonEmpty returns the first nonblank candidate in preference order.
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -425,6 +441,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// cloneStringMap copies metadata maps so connection state cannot be mutated through shared references.
 func cloneStringMap(in map[string]string) map[string]string {
 	if in == nil {
 		return nil
@@ -436,6 +453,7 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
+// cloneManagedAgent deep-copies agent state stored in connection indexes or emitted to consumers.
 func cloneManagedAgent(agent *agents.ManagedAgent) *agents.ManagedAgent {
 	if agent == nil {
 		return nil
@@ -501,6 +519,7 @@ func (a *Adapter) SendRemoteConfig(ctx context.Context, instanceUID string, conf
 	return conn.Send(ctx, message)
 }
 
+// remoteConfigStatus maps OpAMP protocol status values to FleetAMP delivery states.
 func remoteConfigStatus(status protobufs.RemoteConfigStatuses) configs.DeliveryStatus {
 	switch status {
 	case protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED:
@@ -514,6 +533,7 @@ func remoteConfigStatus(status protobufs.RemoteConfigStatuses) configs.DeliveryS
 	}
 }
 
+// hasCapability checks whether an agent advertised the capability required for an operation.
 func hasCapability(capabilities []string, wanted string) bool {
 	for _, capability := range capabilities {
 		if capability == wanted {
@@ -523,6 +543,7 @@ func hasCapability(capabilities []string, wanted string) bool {
 	return false
 }
 
+// parseInstanceUID validates canonical UUID text and returns the 16-byte identifier required by OpAMP.
 func parseInstanceUID(value string) ([]byte, error) {
 	clean := strings.ReplaceAll(value, "-", "")
 	decoded, err := hex.DecodeString(clean)
@@ -534,10 +555,12 @@ func parseInstanceUID(value string) ([]byte, error) {
 
 type stdLogger struct{}
 
+// Debugf adapts opamp-go debug messages to FleetAMP structured logging.
 func (stdLogger) Debugf(_ context.Context, format string, v ...interface{}) {
 	slog.Debug(fmt.Sprintf(format, v...), "component", "opamp", "source", "opamp-go")
 }
 
+// Errorf adapts opamp-go errors to FleetAMP structured logging.
 func (stdLogger) Errorf(_ context.Context, format string, v ...interface{}) {
 	slog.Error(fmt.Sprintf(format, v...), "component", "opamp", "source", "opamp-go")
 }
