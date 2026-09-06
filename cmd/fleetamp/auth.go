@@ -27,6 +27,8 @@ const (
 	serverPepperCredential = "fleetamp-server-pepper"
 	sessionCookieName      = "fleetamp_session"
 	minimumAdminPassword   = 16
+	sessionLifetime        = 12 * time.Hour
+	maximumActiveSessions  = 32
 )
 
 type administratorStore interface {
@@ -161,12 +163,15 @@ func (a *authManager) issueBootstrapToken() error {
 		return fmt.Errorf("generate bootstrap token: %w", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
+	expires := a.now().Add(15 * time.Minute)
+	a.mu.Lock()
 	a.bootstrapDigest = sha256.Sum256([]byte(token))
-	a.bootstrapExpires = a.now().Add(15 * time.Minute)
+	a.bootstrapExpires = expires
+	a.mu.Unlock()
 	slog.Warn("FleetAMP administrator setup required",
 		"component", "auth", "event", "bootstrap_required",
 		"setup_url", "/setup", "bootstrap_token", token,
-		"expires_at", a.bootstrapExpires.UTC().Format(time.RFC3339))
+		"expires_at", expires.UTC().Format(time.RFC3339))
 	return nil
 }
 
@@ -177,11 +182,14 @@ func (a *authManager) configured(ctx context.Context) (bool, error) {
 
 // validBootstrapToken checks token expiry and value using a constant-time digest comparison.
 func (a *authManager) validBootstrapToken(token string) bool {
-	if token == "" || !a.now().Before(a.bootstrapExpires) {
+	a.mu.RLock()
+	expires, expected := a.bootstrapExpires, a.bootstrapDigest
+	a.mu.RUnlock()
+	if token == "" || !a.now().Before(expires) {
 		return false
 	}
 	actual := sha256.Sum256([]byte(token))
-	return subtle.ConstantTimeCompare(actual[:], a.bootstrapDigest[:]) == 1
+	return subtle.ConstantTimeCompare(actual[:], expected[:]) == 1
 }
 
 // passwordDigest derives the stored Argon2id verifier from the password, per-user salt, and server-specific pepper.
@@ -230,8 +238,10 @@ func (a *authManager) createAdministrator(ctx context.Context, username, passwor
 	}); err != nil {
 		return err
 	}
+	a.mu.Lock()
 	a.bootstrapDigest = [sha256.Size]byte{}
 	a.bootstrapExpires = time.Time{}
+	a.mu.Unlock()
 	slog.Info("administrator created", "component", "auth", "event", "administrator_created", "username", username)
 	return nil
 }
@@ -249,7 +259,7 @@ func (a *authManager) authenticate(ctx context.Context, username, password strin
 		subtle.ConstantTimeCompare(actualHash, admin.PasswordHash) == 1
 }
 
-// createSession creates an opaque browser token while storing only its digest in the in-memory session table.
+// createSession creates an opaque browser token while storing only its digest in a bounded in-memory session table.
 func (a *authManager) createSession(username string) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -257,8 +267,24 @@ func (a *authManager) createSession(username string) (string, error) {
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
 	key := sessionKey(token)
+	now := a.now()
 	a.mu.Lock()
-	a.sessions[key] = authSession{Username: username, Expires: a.now().Add(12 * time.Hour)}
+	for existingKey, session := range a.sessions {
+		if !now.Before(session.Expires) {
+			delete(a.sessions, existingKey)
+		}
+	}
+	for len(a.sessions) >= maximumActiveSessions {
+		var oldestKey string
+		var oldestExpiry time.Time
+		for existingKey, session := range a.sessions {
+			if oldestKey == "" || session.Expires.Before(oldestExpiry) {
+				oldestKey, oldestExpiry = existingKey, session.Expires
+			}
+		}
+		delete(a.sessions, oldestKey)
+	}
+	a.sessions[key] = authSession{Username: username, Expires: now.Add(sessionLifetime)}
 	a.mu.Unlock()
 	return token, nil
 }
@@ -296,7 +322,7 @@ func (a *authManager) setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: token, Path: "/",
 		HttpOnly: true, Secure: a.secureCookies, SameSite: http.SameSiteStrictMode,
-		MaxAge: int((12 * time.Hour).Seconds()),
+		MaxAge: int(sessionLifetime.Seconds()), Expires: a.now().Add(sessionLifetime),
 	})
 }
 

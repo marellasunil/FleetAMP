@@ -126,4 +126,26 @@ func TestSessionCookieSecurity(t *testing.T) {
 	if !manager.validSession(request) {
 		t.Fatal("valid session rejected")
 	}
+	if cookie.Expires.IsZero() {
+		t.Fatal("persistent session cookie is missing an explicit expiry")
+	}
+}
+
+func TestCreateSessionBoundsAndPrunesSessionTable(t *testing.T) {
+	manager := testAuthManager(&memoryAdministratorStore{}, strings.Repeat("p", 32), "bootstrap")
+	now := time.Date(2026, time.September, 6, 12, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return now }
+	manager.sessions["expired"] = authSession{Username: "admin", Expires: now.Add(-time.Minute)}
+
+	for i := 0; i < maximumActiveSessions+5; i++ {
+		if _, err := manager.createSession("admin"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(manager.sessions); got != maximumActiveSessions {
+		t.Fatalf("active sessions=%d, want %d", got, maximumActiveSessions)
+	}
+	if _, ok := manager.sessions["expired"]; ok {
+		t.Fatal("expired session was not pruned")
+	}
 }

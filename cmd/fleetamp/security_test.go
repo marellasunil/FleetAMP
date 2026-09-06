@@ -101,6 +101,18 @@ func TestSecurityMiddlewareAuthenticationAndHeaders(t *testing.T) {
 		t.Fatalf("health status=%d", health.Code)
 	}
 }
+func TestConstantTimeCredentialEqual(t *testing.T) {
+	if !constantTimeCredentialEqual("operator", "operator") {
+		t.Fatal("equal credentials rejected")
+	}
+	if constantTimeCredentialEqual("operator", "Operator") {
+		t.Fatal("different credentials accepted")
+	}
+	if constantTimeCredentialEqual(strings.Repeat("x", maximumCredentialBytes+1), strings.Repeat("x", maximumCredentialBytes+1)) {
+		t.Fatal("oversized credentials accepted")
+	}
+}
+
 func TestSecurityMiddlewareRejectsCrossSiteMutation(t *testing.T) {
 	cfg := securityConfig{MaxBodyBytes: defaultMaxRequestBodyBytes}
 	handler := securityMiddleware(cfg, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -129,6 +141,19 @@ func TestSecurityMiddlewareLimitsRequestBody(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized request status=%d", response.Code)
+	}
+}
+
+func TestValidRequestOriginRejectsCrossSiteFetchWithoutOrigin(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "http://fleetamp.example/groups", nil)
+	request.Header.Set("Sec-Fetch-Site", "cross-site")
+	if validRequestOrigin(request, nil) {
+		t.Fatal("cross-site browser request without Origin accepted")
+	}
+
+	apiRequest := httptest.NewRequest(http.MethodPost, "http://fleetamp.example/api/groups", nil)
+	if !validRequestOrigin(apiRequest, nil) {
+		t.Fatal("non-browser API request without browser origin headers rejected")
 	}
 }
 

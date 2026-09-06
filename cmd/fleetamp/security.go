@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
 	"log/slog"
@@ -176,18 +175,30 @@ func isUnsafeMethod(method string) bool {
 	return method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
 }
 
-// validBasicAuth verifies the legacy migration credentials using constant-time digest comparison.
+// validBasicAuth verifies legacy migration credentials using a bounded constant-time comparison.
 func validBasicAuth(r *http.Request, cfg securityConfig) bool {
 	username, password, ok := r.BasicAuth()
 	if !ok {
 		return false
 	}
-	expectedUser := sha256.Sum256([]byte(cfg.HTTPUsername))
-	actualUser := sha256.Sum256([]byte(username))
-	expectedPassword := sha256.Sum256([]byte(cfg.HTTPPassword))
-	actualPassword := sha256.Sum256([]byte(password))
-	return subtle.ConstantTimeCompare(actualUser[:], expectedUser[:]) == 1 &&
-		subtle.ConstantTimeCompare(actualPassword[:], expectedPassword[:]) == 1
+	return constantTimeCredentialEqual(username, cfg.HTTPUsername) &&
+		constantTimeCredentialEqual(password, cfg.HTTPPassword)
+}
+
+const maximumCredentialBytes = 1024
+
+// constantTimeCredentialEqual compares legacy environment credentials without
+// repurposing a fast general-purpose hash as a password hashing algorithm.
+func constantTimeCredentialEqual(actual, expected string) bool {
+	if len(actual) > maximumCredentialBytes || len(expected) > maximumCredentialBytes {
+		return false
+	}
+	var actualPadded, expectedPadded [maximumCredentialBytes]byte
+	copy(actualPadded[:], actual)
+	copy(expectedPadded[:], expected)
+	contentsEqual := subtle.ConstantTimeCompare(actualPadded[:], expectedPadded[:])
+	lengthsEqual := subtle.ConstantTimeEq(int32(len(actual)), int32(len(expected)))
+	return contentsEqual&lengthsEqual == 1
 }
 
 // internalServerError logs the detailed error server-side while returning a generic response to the client.
@@ -200,7 +211,9 @@ func internalServerError(w http.ResponseWriter, err error) {
 func validRequestOrigin(r *http.Request, allowed map[string]struct{}) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
-		return true
+		// Modern browsers identify cross-site requests even when an Origin header
+		// is absent. Non-browser API clients normally omit both headers.
+		return !strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site")
 	}
 	if origin == "null" {
 		return validLoopbackNullOrigin(r)
