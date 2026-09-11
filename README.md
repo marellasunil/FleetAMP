@@ -108,19 +108,21 @@ Enrichment providers can eventually include:
 - generic REST CMDB
 - organization-specific metadata services
 
-## v0.1 scope
+## v0.1.0 community preview
 
-The first milestone intentionally stays small:
+FleetAMP v0.1.0 is the first packaged community preview. It is suitable for
+evaluation and a controlled single-server pilot, but it is not yet a supported
+production release.
 
-1. Start the FleetAMP service.
-2. Accept OpAMP Supervisor connections.
-3. Normalize connected Collectors into the generic `ManagedAgent` model.
-4. Track managed agents in memory.
-5. Expose inventory through a REST API.
-6. Show instance UID, type, name, version, health, connectivity and last seen.
-7. Provide a minimal web UI.
+The preview includes persistent OpAMP agent inventory, Active/Offline/Retired
+lifecycle state, stable logical-agent reassociation, SQLite-backed groups and
+assignments, versioned configuration deployment and history, rollback, first-login
+administrator setup, session security, optional TLS and mTLS, and Linux systemd
+deployment assets.
 
-Persistence, grouping, remote configuration, rollout control, RBAC, Git integrations and CMDB enrichment will follow later.
+Known gaps include high availability, PostgreSQL, OIDC/RBAC, approval separation,
+certificate-to-agent authorization, Collector binary upgrades, and production
+scale certification. These remain pre-v1.0 work.
 
 ## Project structure
 
@@ -141,9 +143,27 @@ FleetAMP/
 └── go.sum                 # locked dependency checksums
 ```
 
-## Running the current skeleton
+## Install a release
 
-Requires Go 1.25+.
+End users do not need to clone this repository or install Go. Download the archive
+for the laptop or server architecture from
+[GitHub Releases](https://github.com/marellasunil/FleetAMP/releases), download
+`SHA256SUMS`, and verify the archive before extracting it:
+
+```bash
+sha256sum -c SHA256SUMS
+tar -xzf fleetamp_0.1.0_linux_amd64.tar.gz
+cd fleetamp_0.1.0_linux_amd64
+./fleetamp --version
+```
+
+Use `linux_arm64` instead on a 64-bit ARM system. The archive includes the
+systemd examples and `scripts/install-user.sh`; read
+[`deploy/systemd/README.md`](deploy/systemd/README.md) before installing.
+
+## Build from source (contributors)
+
+Building from source requires Go 1.25+.
 
 ```bash
 go run ./cmd/fleetamp
@@ -197,11 +217,11 @@ For OS-specific deployment models and initial sizing requirements, see the [OS d
 
 ## Roadmap
 
-- **v0.1** — OpAMP server adapter, managed-agent inventory, health, REST API, memory store, basic UI
-- **v0.2** — SQLite persistence, remote configuration, config history, desired-vs-effective state
-- **v0.3** — label-based groups, group deployment, rollout/rollback
-- **v0.4** — PostgreSQL, OIDC/RBAC, audit and HA-oriented deployment
-- **v0.5+** — canaries, drift detection, package upgrades, runtime telemetry visualization, Helm/Kubernetes deployment, additional agent adapters
+- **v0.1.x** — community preview packaging, single-node pilot validation, hardening and bug fixes
+- **v0.2** — approval workflow, audit trail, RBAC foundation and rollout safeguards
+- **v0.3** — PostgreSQL, high-availability foundations and broader scale testing
+- **v0.4+** — package upgrades, drift detection, canaries, Helm/Kubernetes deployment and additional agent adapters
+- **v1.0** — stable production baseline with documented compatibility, upgrade and support expectations
 
 ## Design principles
 

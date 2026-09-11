@@ -1,0 +1,162 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semantic version tag, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          version="${REQUESTED_VERSION:-${GITHUB_REF_NAME}}"
+          [[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Version must match vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          }
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]] &&
+             git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
+            echo "Tag ${version} already exists" >&2
+            exit 1
+          fi
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run race detector
+        run: go test -race ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  build:
+    needs: validate
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build release archive
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${REQUESTED_VERSION:-${GITHUB_REF_NAME}}"
+          release="${version#v}"
+          commit="${GITHUB_SHA::12}"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          package="fleetamp_${release}_${GOOS}_${GOARCH}"
+          mkdir -p "dist/${package}/deploy/systemd" "dist/${package}/scripts"
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-s -w -X main.version=${version} -X main.commit=${commit} -X main.buildDate=${build_date}" \
+            -o "dist/${package}/fleetamp" ./cmd/fleetamp
+          cp LICENSE README.md "dist/${package}/"
+          cp deploy/systemd/* "dist/${package}/deploy/systemd/"
+          cp scripts/install-user.sh "dist/${package}/scripts/"
+          "dist/${package}/fleetamp" --version | grep -F "${version}"
+          tar -C dist -czf "dist/${package}.tar.gz" "${package}"
+          rm -rf "dist/${package}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleetamp-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fleetamp-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+
+      - name: Publish GitHub pre-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${REQUESTED_VERSION:-${GITHUB_REF_NAME}}"
+          notes_file="docs/releases/${version}.md"
+          if [[ -f "${notes_file}" ]]; then
+            gh release create "${version}" dist/* \
+              --target "${GITHUB_SHA}" \
+              --title "FleetAMP ${version}" \
+              --notes-file "${notes_file}" \
+              --prerelease
+          else
+            gh release create "${version}" dist/* \
+              --target "${GITHUB_SHA}" \
+              --title "FleetAMP ${version}" \
+              --generate-notes \
+              --prerelease
+          fi

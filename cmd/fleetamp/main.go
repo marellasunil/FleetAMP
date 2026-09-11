@@ -57,6 +57,11 @@ type healthResponse struct {
 
 // main assembles FleetAMP's stores, authentication, OpAMP adapter, HTTP pages/APIs, background workers, and graceful shutdown.
 func main() {
+	if versionRequested(os.Args[1:]) {
+		writeVersion(os.Stdout)
+		return
+	}
+
 	closeLog := configureLogging()
 	defer closeLog()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
