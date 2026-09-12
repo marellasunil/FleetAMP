@@ -1,0 +1,50 @@
+name: Bug report
+description: Report unexpected FleetAMP behavior
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not include credentials, tokens, certificates, database files, or unredacted logs.
+  - type: input
+    id: version
+    attributes:
+      label: FleetAMP version
+      description: Include the release, commit, or container image tag.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the OS, deployment method, OpenTelemetry Collector version, and OpAMP endpoint type.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reproducible sequence. Redact sensitive values.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include redacted logs or errors when useful.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: Do not disclose vulnerabilities here. Use SECURITY.md for a suspected vulnerability.
+

@@ -1,0 +1,37 @@
+name: Deployment or configuration support
+description: Ask for help configuring or operating FleetAMP
+title: "support: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, tokens, certificates, database files, or unredacted logs. Report suspected vulnerabilities through SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: FleetAMP version
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Deployment environment
+      description: Include the OS, deployment method, OpenTelemetry Collector version, and OpAMP endpoint type.
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Relevant configuration
+      description: Share only redacted configuration needed to understand the question.
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question and expected outcome
+    validations:
+      required: true
+
