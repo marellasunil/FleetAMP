@@ -8,8 +8,6 @@ FleetAMP is an independent community project and is not an official OpenTelemetr
 
 Documentation: [fleetamp.marellasunil.com](https://fleetamp.marellasunil.com)
 
-Documentation source: [marellasunil/FleetAMP-docs](https://github.com/marellasunil/FleetAMP-docs)
-
 ## Vision
 
 FleetAMP aims to provide a vendor-neutral management layer for telemetry-agent fleets while keeping protocol, storage, source-control, CMDB, identity, and UI concerns isolated behind stable interfaces.
