@@ -115,7 +115,8 @@ jobs:
           if [[ "${GOARCH}" == "amd64" ]]; then
             "dist/${package}/fleetamp" --version | grep -F "${version}"
           else
-            go version -m "dist/${package}/fleetamp" | grep -F "linux/arm64"
+            go version -m "dist/${package}/fleetamp" | grep -F "GOOS=linux"
+            go version -m "dist/${package}/fleetamp" | grep -F "GOARCH=arm64"
           fi
 
           tar -C dist -czf "dist/${package}.tar.gz" "${package}"
