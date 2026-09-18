@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
+	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/groups"
 	"github.com/marellasunil/FleetAMP/internal/storage"
 	"github.com/marellasunil/FleetAMP/internal/storage/memory"
@@ -39,11 +40,43 @@ type groupsView struct {
 	Page  string
 	Items []groupListItem
 }
+type groupPreviewAgent struct {
+	Agent  *agents.ManagedAgent
+	Reason string
+}
+
 type groupDetailView struct {
-	Page    string
-	Group   *groups.Group
-	Members []*agents.ManagedAgent
-	Error   string
+	Page           string
+	Group          *groups.Group
+	Members        []*agents.ManagedAgent
+	Configurations []*configs.Configuration
+	SelectedConfig *configs.Configuration
+	Preview        []groupPreviewAgent
+	Eligible       int
+	Error          string
+}
+
+// previewGroupMembers classifies current members without changing desired state.
+func previewGroupMembers(members []*agents.ManagedAgent, enabled bool) ([]groupPreviewAgent, int) {
+	result := make([]groupPreviewAgent, 0, len(members))
+	eligible := 0
+	for _, agent := range members {
+		reason := "Ready"
+		switch {
+		case !enabled:
+			reason = "Group disabled"
+		case agent.Status == agents.LifecycleRetired:
+			reason = "Retired"
+		case !agent.Connected:
+			reason = "Offline"
+		case !hasCapability(agent.Capabilities, "accepts_remote_config"):
+			reason = "Remote configuration unsupported"
+		default:
+			eligible++
+		}
+		result = append(result, groupPreviewAgent{Agent: agent, Reason: reason})
+	}
+	return result, eligible
 }
 
 const maxManagedLabels = 5
@@ -58,7 +91,7 @@ func copyStringMap(in map[string]string) map[string]string {
 }
 
 // registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
-func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, dataDir string) {
+func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, dataDir string) {
 	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
 	mux.HandleFunc("/agents/{uid}/group", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -300,7 +333,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 	})
 
-	registerGroupUI(mux, groupStore, agentStore)
+	registerGroupUI(mux, groupStore, agentStore, configStore)
 }
 
 // newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
@@ -392,7 +425,7 @@ func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.Ag
 }
 
 // registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
-func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore) {
+func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore) {
 	// /groups displays all groups and accepts creation form submissions.
 	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/groups" {
@@ -508,8 +541,27 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			internalServerError(w, err)
 			return
 		}
+		available, err := configStore.List(r.Context())
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		view := groupDetailView{Page: "groups", Group: group, Members: members, Configurations: available, Error: r.URL.Query().Get("error")}
+		if configID := strings.TrimSpace(r.URL.Query().Get("configuration_id")); configID != "" {
+			for _, configuration := range available {
+				if configuration.ID == configID {
+					view.SelectedConfig = configuration
+					break
+				}
+			}
+			if view.SelectedConfig == nil {
+				http.Error(w, "configuration not found", http.StatusNotFound)
+				return
+			}
+			view.Preview, view.Eligible = previewGroupMembers(members, group.Enabled)
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = groupDetailPage.Execute(w, groupDetailView{Page: "groups", Group: group, Members: members, Error: r.URL.Query().Get("error")})
+		_ = groupDetailPage.Execute(w, view)
 	})
 }
 
