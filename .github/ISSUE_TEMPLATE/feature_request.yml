@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an improvement to FleetAMP
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, tokens, certificates, database files, or unredacted logs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Explain the deployment or operational problem.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired outcome and any alternatives considered.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Deployment context
+      description: Include relevant Collector, OpAMP, and infrastructure details without secrets.
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: Do not disclose vulnerabilities here. Use SECURITY.md for a suspected vulnerability.
+
