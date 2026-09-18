@@ -295,9 +295,18 @@ func sessionKey(token string) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// cookieName binds the browser cookie to this FleetAMP installation. Browsers
+// share cookies across ports on the same hostname, so two localhost instances
+// must use different names. The server pepper already has a stable, random
+// value unique to the installation.
+func (a *authManager) cookieName() string {
+	digest := sha256.Sum256(append([]byte("fleetamp-session-cookie-v1:"), a.pepper...))
+	return sessionCookieName + "_" + hex.EncodeToString(digest[:8])
+}
+
 // validSession verifies the cookie-backed session and removes it when it has expired.
 func (a *authManager) validSession(r *http.Request) bool {
-	cookie, err := r.Cookie(sessionCookieName)
+	cookie, err := r.Cookie(a.cookieName())
 	if err != nil || cookie.Value == "" {
 		return false
 	}
@@ -320,7 +329,7 @@ func (a *authManager) validSession(r *http.Request) bool {
 // setSessionCookie writes a restricted HttpOnly, SameSite cookie and enables Secure when HTTPS is expected.
 func (a *authManager) setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookieName, Value: token, Path: "/",
+		Name: a.cookieName(), Value: token, Path: "/",
 		HttpOnly: true, Secure: a.secureCookies, SameSite: http.SameSiteStrictMode,
 		MaxAge: int(sessionLifetime.Seconds()), Expires: a.now().Add(sessionLifetime),
 	})
@@ -328,13 +337,13 @@ func (a *authManager) setSessionCookie(w http.ResponseWriter, token string) {
 
 // clearSession deletes the server-side session and expires the corresponding browser cookie.
 func (a *authManager) clearSession(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+	if cookie, err := r.Cookie(a.cookieName()); err == nil {
 		a.mu.Lock()
 		delete(a.sessions, sessionKey(cookie.Value))
 		a.mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookieName, Path: "/", HttpOnly: true,
+		Name: a.cookieName(), Path: "/", HttpOnly: true,
 		Secure: a.secureCookies, SameSite: http.SameSiteStrictMode, MaxAge: -1,
 	})
 }
