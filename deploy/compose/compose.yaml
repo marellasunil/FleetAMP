@@ -1,0 +1,46 @@
+name: fleetamp-lab
+services:
+  fleetamp:
+    build:
+      context: ../..
+      args:
+        VERSION: dev
+    image: fleetamp:local
+    environment:
+      FLEETAMP_HTTP_ADDR: 127.0.0.1:8080
+      FLEETAMP_OPAMP_ADDR: 127.0.0.1:14320
+      FLEETAMP_DATA_DIR: /var/lib/fleetamp
+      FLEETAMP_DATABASE_PATH: /var/lib/fleetamp/fleetamp.db
+      FLEETAMP_LOG_FORMAT: json
+    ports:
+      - "127.0.0.1:18080:18080"
+    volumes:
+      - fleetamp-data:/var/lib/fleetamp
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web-proxy:
+    image: nginx:1.29-alpine
+    network_mode: "service:fleetamp"
+    depends_on:
+      fleetamp:
+        condition: service_started
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  collector:
+    image: fleetamp-opamp-supervisor:0.149.0
+    network_mode: "service:fleetamp"
+    depends_on:
+      fleetamp:
+        condition: service_started
+    volumes:
+      - ./supervisor.yaml:/etc/fleetamp-supervisor/supervisor.yaml:ro
+      - supervisor-data:/var/lib/otel-supervisor
+
+volumes:
+  fleetamp-data:
+  supervisor-data:

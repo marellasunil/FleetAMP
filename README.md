@@ -8,6 +8,8 @@ FleetAMP is an independent community project and is not an official OpenTelemetr
 
 Documentation: [fleetamp.marellasunil.com](https://fleetamp.marellasunil.com)
 
+Local Docker test with FleetAMP and an OpAMP-managed Collector: [Compose lab](deploy/compose/README.md). The lab builds the current checkout and requires a local Supervisor image; it is not part of the v0.1.0 archives.
+
 ## Vision
 
 FleetAMP aims to provide a vendor-neutral management layer for telemetry-agent fleets while keeping protocol, storage, source-control, CMDB, identity, and UI concerns isolated behind stable interfaces.
@@ -108,6 +110,8 @@ Enrichment providers can eventually include:
 
 ## v0.1.0 community preview
 
+[Download FleetAMP v0.1.0](https://github.com/marellasunil/FleetAMP/releases/tag/v0.1.0).
+
 FleetAMP v0.1.0 is the first packaged community preview. It is suitable for
 evaluation and a controlled single-server pilot, but it is not yet a supported
 production release.
@@ -149,7 +153,7 @@ for the laptop or server architecture from
 `SHA256SUMS`, and verify the archive before extracting it:
 
 ```bash
-sha256sum -c SHA256SUMS
+grep -F '  fleetamp_0.1.0_linux_amd64.tar.gz' SHA256SUMS | sha256sum -c -
 tar -xzf fleetamp_0.1.0_linux_amd64.tar.gz
 cd fleetamp_0.1.0_linux_amd64
 ./fleetamp --version

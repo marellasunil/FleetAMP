@@ -1,0 +1,11 @@
+.git
+data
+.env
+.env.*
+!.env.example
+fleetamp
+*.db
+*.sqlite
+*.sqlite3
+logs
+tmp
