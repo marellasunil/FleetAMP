@@ -38,11 +38,14 @@ jobs:
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
+          set -euo pipefail
           version="${REQUESTED_VERSION:-${GITHUB_REF_NAME}}"
+
           [[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Version must match vMAJOR.MINOR.PATCH" >&2
             exit 1
           }
+
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]] &&
              git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
             echo "Tag ${version} already exists" >&2
@@ -59,12 +62,14 @@ jobs:
         run: go vet ./...
 
       - name: Run vulnerability scan
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+        uses: golang/govulncheck-action@v1
+        with:
+          go-package: ./...
+          repo-checkout: false
 
   build:
     needs: validate
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
@@ -72,15 +77,13 @@ jobs:
             goarch: amd64
           - goos: linux
             goarch: arm64
-    runs-on: ubuntu-latest
+
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -98,19 +101,28 @@ jobs:
           commit="${GITHUB_SHA::12}"
           build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           package="fleetamp_${release}_${GOOS}_${GOARCH}"
+
           mkdir -p "dist/${package}/deploy/systemd" "dist/${package}/scripts"
+
           CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w -X main.version=${version} -X main.commit=${commit} -X main.buildDate=${build_date}" \
             -o "dist/${package}/fleetamp" ./cmd/fleetamp
+
           cp LICENSE README.md "dist/${package}/"
           cp deploy/systemd/* "dist/${package}/deploy/systemd/"
           cp scripts/install-user.sh "dist/${package}/scripts/"
-          "dist/${package}/fleetamp" --version | grep -F "${version}"
+
+          if [[ "${GOARCH}" == "amd64" ]]; then
+            "dist/${package}/fleetamp" --version | grep -F "${version}"
+          else
+            go version -m "dist/${package}/fleetamp" | grep -F "linux/arm64"
+          fi
+
           tar -C dist -czf "dist/${package}.tar.gz" "${package}"
           rm -rf "dist/${package}"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fleetamp-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.tar.gz
@@ -122,12 +134,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@v7
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: fleetamp-*
           path: dist
@@ -147,6 +157,7 @@ jobs:
           set -euo pipefail
           version="${REQUESTED_VERSION:-${GITHUB_REF_NAME}}"
           notes_file="docs/releases/${version}.md"
+
           if [[ -f "${notes_file}" ]]; then
             gh release create "${version}" dist/* \
               --target "${GITHUB_SHA}" \
