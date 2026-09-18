@@ -149,3 +149,33 @@ func TestCreateSessionBoundsAndPrunesSessionTable(t *testing.T) {
 		t.Fatal("expired session was not pruned")
 	}
 }
+
+func TestSessionsOnSameHostDoNotCollideAcrossInstallations(t *testing.T) {
+	first := testAuthManager(&memoryAdministratorStore{}, strings.Repeat("a", 32), "bootstrap")
+	second := testAuthManager(&memoryAdministratorStore{}, strings.Repeat("b", 32), "bootstrap")
+	if first.cookieName() == second.cookieName() {
+		t.Fatal("different installations share a session cookie name")
+	}
+	firstToken, err := first.createSession("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondToken, err := second.createSession("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstResponse := httptest.NewRecorder()
+	first.setSessionCookie(firstResponse, firstToken)
+	secondResponse := httptest.NewRecorder()
+	second.setSessionCookie(secondResponse, secondToken)
+	request := httptest.NewRequest(http.MethodGet, "http://localhost:8080/agents", nil)
+	request.AddCookie(firstResponse.Result().Cookies()[0])
+	request.AddCookie(secondResponse.Result().Cookies()[0])
+	if !first.validSession(request) || !second.validSession(request) {
+		t.Fatal("one installation invalidated the other installation's session")
+	}
+	first.clearSession(httptest.NewRecorder(), request)
+	if first.validSession(request) || !second.validSession(request) {
+		t.Fatal("logging out of one installation changed the other installation's session")
+	}
+}
