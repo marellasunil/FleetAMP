@@ -1,5 +1,3 @@
-[Reading 240 lines from start (total: 240 lines, 0 remaining)]
-
 // Tests SQLite schema persistence for configurations, assignments, deployments, and groups.
 package sqlite
 

@@ -1,5 +1,3 @@
-[Reading 828 lines from start (total: 828 lines, 0 remaining)]
-
 // FleetAMP application entry point.
 //
 // Purpose:

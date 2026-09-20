@@ -1,5 +1,3 @@
-[Reading 53 lines from start (total: 53 lines, 0 remaining)]
-
 package configs
 
 import (

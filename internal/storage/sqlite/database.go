@@ -1,5 +1,3 @@
-[Reading 157 lines from start (total: 157 lines, 0 remaining)]
-
 // SQLite persistence backend for FleetAMP configuration state.
 //
 // Purpose:

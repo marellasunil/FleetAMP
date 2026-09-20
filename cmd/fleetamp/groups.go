@@ -1,5 +1,3 @@
-[Reading 672 lines from start (total: 672 lines, 0 remaining)]
-
 // FleetAMP group, label, and group-management HTTP/UI handlers.
 //
 // Purpose:

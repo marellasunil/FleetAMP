@@ -1,5 +1,3 @@
-[Reading 12 lines from start (total: 12 lines, 0 remaining)]
-
 package storage
 
 import (

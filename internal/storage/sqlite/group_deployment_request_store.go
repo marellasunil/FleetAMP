@@ -1,5 +1,3 @@
-[Reading 71 lines from start (total: 71 lines, 0 remaining)]
-
 package sqlite
 
 import (

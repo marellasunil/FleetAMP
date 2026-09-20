@@ -1,5 +1,3 @@
-[Reading 94 lines from start (total: 94 lines, 0 remaining)]
-
 // FleetAMP web control-plane shell and primary dashboard templates.
 package main
 
