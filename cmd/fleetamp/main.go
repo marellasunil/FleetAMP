@@ -101,6 +101,7 @@ func main() {
 	assignmentStore := database.Assignments()
 	deploymentStore := database.Deployments()
 	groupStore := database.Groups()
+	groupRequestStore := database.GroupDeploymentRequests()
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
 
@@ -189,7 +190,7 @@ func main() {
 	registerHealthRoutes(mux)
 	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter)
 	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter)
-	registerGroupRoutes(mux, groupStore, agentStore, configStore, dataDir)
+	registerGroupRoutes(mux, groupStore, agentStore, configStore, groupRequestStore, auth, dataDir)
 	registerUIRoutes(mux)
 
 	httpServer := &http.Server{

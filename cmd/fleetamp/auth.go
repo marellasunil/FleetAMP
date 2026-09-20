@@ -326,6 +326,21 @@ func (a *authManager) validSession(r *http.Request) bool {
 	return true
 }
 
+// sessionUsername returns the authenticated browser-session principal.
+func (a *authManager) sessionUsername(r *http.Request) (string, bool) {
+	cookie, err := r.Cookie(a.cookieName())
+	if err != nil || cookie.Value == "" {
+		return "", false
+	}
+	a.mu.RLock()
+	session, ok := a.sessions[sessionKey(cookie.Value)]
+	a.mu.RUnlock()
+	if !ok || !a.now().Before(session.Expires) {
+		return "", false
+	}
+	return session.Username, true
+}
+
 // setSessionCookie writes a restricted HttpOnly, SameSite cookie and enables Secure when HTTPS is expected.
 func (a *authManager) setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{

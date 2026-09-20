@@ -58,6 +58,11 @@ func (d *Database) Deployments() *DeploymentStore { return &DeploymentStore{db: 
 // Groups returns the SQLite-backed group repository.
 func (d *Database) Groups() *GroupStore { return &GroupStore{db: d.db} }
 
+// GroupDeploymentRequests returns the approval-request repository.
+func (d *Database) GroupDeploymentRequests() *GroupDeploymentRequestStore {
+	return &GroupDeploymentRequestStore{db: d.db}
+}
+
 // Authentication returns the SQLite-backed singleton administrator repository.
 func (d *Database) Authentication() *AuthStore { return &AuthStore{db: d.db} }
 
@@ -98,6 +103,16 @@ func (d *Database) initialize(ctx context.Context) error {
             selector TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)`,
+		`CREATE TABLE IF NOT EXISTS group_deployment_requests (
+            id TEXT PRIMARY KEY, group_id TEXT NOT NULL, group_name TEXT NOT NULL,
+            group_selector TEXT NOT NULL, configuration_id TEXT NOT NULL,
+            configuration_name TEXT NOT NULL, configuration_version TEXT NOT NULL,
+            configuration_hash TEXT NOT NULL, targets TEXT NOT NULL,
+            requested_by TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+            FOREIGN KEY(group_id) REFERENCES groups(id),
+            FOREIGN KEY(configuration_id) REFERENCES configurations(id)
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_group_deployment_requests_group_created ON group_deployment_requests(group_id, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS administrators (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             username TEXT NOT NULL UNIQUE, password_salt BLOB NOT NULL,

@@ -149,6 +149,64 @@ func TestGroupPersistence(t *testing.T) {
 	}
 }
 
+func TestGroupDeploymentRequestPersistence(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "group-requests.db")
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	group, err := groups.New("payments-prod", "Payments production", map[string]string{
+		"application": "payments",
+		"environment": "prod",
+		"place":       "eu",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Groups().Create(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	configuration := configs.NewConfiguration("collector.yaml", "3", "service: {}\n", "text/yaml")
+	if err := db.Configurations().Put(ctx, configuration); err != nil {
+		t.Fatal(err)
+	}
+	request, err := configs.NewGroupDeploymentRequest(group.ID, group.Name, group.Selector, configuration, []configs.GroupDeploymentTarget{
+		{AgentInstanceUID: "agent-ready", AgentName: "ready", Readiness: "Ready", Eligible: true},
+		{AgentInstanceUID: "agent-offline", AgentName: "offline", Readiness: "Offline", Eligible: false},
+	}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GroupDeploymentRequests().Create(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	items, err := reopened.GroupDeploymentRequests().ListByGroup(ctx, group.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("request count=%d", len(items))
+	}
+	got := items[0]
+	if got.ID != request.ID || got.Status != configs.GroupDeploymentPendingApproval ||
+		got.RequestedBy != "admin" || len(got.Targets) != 2 ||
+		got.GroupSelector["application"] != "payments" ||
+		got.ConfigurationHash != configuration.Hash {
+		t.Fatalf("request mismatch: %#v", got)
+	}
+}
+
 func TestAdministratorPersistence(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "auth.db")

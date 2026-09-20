@@ -53,6 +53,8 @@ type groupDetailView struct {
 	SelectedConfig *configs.Configuration
 	Preview        []groupPreviewAgent
 	Eligible       int
+	Requests       []*configs.GroupDeploymentRequest
+	RequestCreated string
 	Error          string
 }
 
@@ -91,7 +93,7 @@ func copyStringMap(in map[string]string) map[string]string {
 }
 
 // registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
-func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, dataDir string) {
+func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, requestStore storage.GroupDeploymentRequestStore, auth *authManager, dataDir string) {
 	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
 	mux.HandleFunc("/agents/{uid}/group", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -333,7 +335,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 	})
 
-	registerGroupUI(mux, groupStore, agentStore, configStore)
+	registerGroupUI(mux, groupStore, agentStore, configStore, requestStore, auth)
 }
 
 // newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
@@ -425,7 +427,7 @@ func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.Ag
 }
 
 // registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
-func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore) {
+func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, requestStore storage.GroupDeploymentRequestStore, auth *authManager) {
 	// /groups displays all groups and accepts creation form submissions.
 	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/groups" {
@@ -486,6 +488,53 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		if r.Method == http.MethodPost {
 			action := strings.TrimSpace(r.FormValue("action"))
+			if action == "request_deployment" {
+				if !group.Enabled {
+					http.Error(w, "group must be enabled before requesting deployment", http.StatusConflict)
+					return
+				}
+				configuration, err := configStore.Get(r.Context(), strings.TrimSpace(r.FormValue("configuration_id")))
+				if err != nil {
+					http.Error(w, "configuration not found", http.StatusNotFound)
+					return
+				}
+				members, err := membersForGroupIdentity(r.Context(), group, agentStore)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				preview, eligible := previewGroupMembers(members, group.Enabled)
+				if eligible == 0 {
+					http.Error(w, "deployment request requires at least one ready agent", http.StatusConflict)
+					return
+				}
+				targets := make([]configs.GroupDeploymentTarget, 0, len(preview))
+				for _, item := range preview {
+					targets = append(targets, configs.GroupDeploymentTarget{
+						AgentInstanceUID: item.Agent.InstanceUID, AgentName: item.Agent.Name,
+						Readiness: item.Reason, Eligible: item.Reason == "Ready",
+					})
+				}
+				requestedBy, ok := auth.sessionUsername(r)
+				if !ok {
+					requestedBy, _, ok = r.BasicAuth()
+				}
+				if !ok || strings.TrimSpace(requestedBy) == "" {
+					http.Error(w, "authenticated requester identity is required", http.StatusUnauthorized)
+					return
+				}
+				request, err := configs.NewGroupDeploymentRequest(group.ID, group.Name, group.Selector, configuration, targets, requestedBy)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				if err := requestStore.Create(r.Context(), request); err != nil {
+					internalServerError(w, err)
+					return
+				}
+				http.Redirect(w, r, "/groups/"+group.ID+"?request_created="+request.ID, http.StatusSeeOther)
+				return
+			}
 			if action == "delete" {
 				members, err := membersForGroupIdentity(r.Context(), group, agentStore)
 				if err != nil {
@@ -494,6 +543,15 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				}
 				if len(members) > 0 {
 					http.Redirect(w, r, "/groups/"+group.ID+"?error=Cannot+delete+group%3A+unassign+all+agents+from+this+group+first", http.StatusSeeOther)
+					return
+				}
+				requests, err := requestStore.ListByGroup(r.Context(), group.ID, 1)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				if len(requests) > 0 {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error=Cannot+delete+group%3A+approval+history+must+be+preserved", http.StatusSeeOther)
 					return
 				}
 				if err := groupStore.Delete(r.Context(), group.ID); err != nil {
@@ -546,7 +604,16 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			internalServerError(w, err)
 			return
 		}
-		view := groupDetailView{Page: "groups", Group: group, Members: members, Configurations: available, Error: r.URL.Query().Get("error")}
+		requests, err := requestStore.ListByGroup(r.Context(), group.ID, 20)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		view := groupDetailView{
+			Page: "groups", Group: group, Members: members, Configurations: available,
+			Requests: requests, RequestCreated: r.URL.Query().Get("request_created"),
+			Error: r.URL.Query().Get("error"),
+		}
 		if configID := strings.TrimSpace(r.URL.Query().Get("configuration_id")); configID != "" {
 			for _, configuration := range available {
 				if configuration.ID == configID {
