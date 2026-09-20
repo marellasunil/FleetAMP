@@ -343,8 +343,15 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			return
 		}
 
-		view := agentDetailView{Page: "fleet", Agent: agent, EffectiveConfig: adapter.EffectiveConfig(uid), RemoteConfigSupported: hasCapability(agent.Capabilities, "accepts_remote_config"), TargetingMetadata: groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent), EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields, Error: r.URL.Query().Get("error")}
+		view := agentDetailView{
+			Page: "fleet", Agent: agent, EffectiveConfig: adapter.EffectiveConfig(uid),
+			RemoteConfigSupported: hasCapability(agent.Capabilities, "accepts_remote_config"),
+			TargetingMetadata:     groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent),
+			EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields,
+			ConfigurationSaved: r.URL.Query().Get("configuration_saved"), Error: r.URL.Query().Get("error"),
+		}
 		view.Deployments, _ = deploymentStore.ListByAgent(r.Context(), uid, 10)
+		view.SavedConfigurations, _ = configStore.List(r.Context())
 		if allGroups, groupErr := groupStore.List(r.Context()); groupErr == nil {
 			for _, group := range allGroups {
 				if group.Enabled {
@@ -400,6 +407,8 @@ type agentDetailView struct {
 	RemoteConfigSupported bool
 	Drift                 configs.DriftResult
 	ConfigurationHistory  []*configs.Configuration
+	SavedConfigurations   []*configs.Configuration
+	ConfigurationSaved    string
 	Deployments           []*configs.Deployment
 	DeploymentSummary     deploymentSummary
 	Groups                []*groups.Group
@@ -554,6 +563,43 @@ func deliverConfiguration(ctx context.Context, agentUID string, configuration *c
 // immediately before delivery to protect against unsafe desired state.
 // registerConfigRoutes serves configuration CRUD/listing pages, validation, direct deployment, rollback, and group rollout actions.
 func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter) {
+	// POST /agents/{uid}/configurations validates and saves an immutable
+	// configuration version originating from the agent detail editor.
+	mux.HandleFunc("POST /agents/{uid}/configurations", func(w http.ResponseWriter, r *http.Request) {
+		uid := r.PathValue("uid")
+		if _, err := agentStore.Get(r.Context(), uid); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "configuration form is invalid or exceeds 1 MiB", http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(r.FormValue("name"))
+		version := strings.TrimSpace(r.FormValue("version"))
+		content := r.FormValue("content")
+		if name == "" || version == "" || strings.TrimSpace(content) == "" {
+			http.Error(w, "name, version and configuration YAML are required", http.StatusBadRequest)
+			return
+		}
+		validation := validator.Validate(r.Context(), content)
+		if !validation.Valid {
+			message := strings.TrimSpace(validation.Error)
+			if message == "" {
+				message = "configuration validation failed"
+			}
+			http.Error(w, message, http.StatusUnprocessableEntity)
+			return
+		}
+		configuration := configs.NewConfiguration(name, version, content, "text/yaml")
+		if err := configStore.Put(r.Context(), configuration); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/agents/"+uid+"?configuration_saved="+configuration.ID, http.StatusSeeOther)
+	})
+
 	// /api/v1/configurations/validate checks Collector YAML without storing or deploying it.
 	mux.HandleFunc("/api/v1/configurations/validate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
