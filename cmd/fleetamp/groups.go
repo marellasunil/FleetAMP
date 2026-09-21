@@ -99,6 +99,29 @@ func previewGroupMembers(members []*agents.ManagedAgent, enabled bool) ([]groupP
 	return result, eligible
 }
 
+func previewGroupConfiguration(ctx context.Context, members []*agents.ManagedAgent, enabled bool, configuration *configs.Configuration, assignmentStore storage.AssignmentStore) ([]groupPreviewAgent, int, error) {
+	preview, _ := previewGroupMembers(members, enabled)
+	eligible := 0
+	for index := range preview {
+		if preview[index].Reason != "Ready" {
+			continue
+		}
+		latest, err := latestAssignmentForAgent(ctx, assignmentStore, preview[index].Agent.InstanceUID)
+		switch {
+		case err == nil && latest.ConfigurationHash == configuration.Hash && latest.Status == configs.DeliveryApplied:
+			preview[index].Reason = "Already deployed · Latest"
+		case err == nil && latest.ConfigurationHash == configuration.Hash &&
+			(latest.Status == configs.DeliveryPending || latest.Status == configs.DeliverySent || latest.Status == configs.DeliveryApplying):
+			preview[index].Reason = "Deployment already in progress"
+		case err != nil && !errors.Is(err, storage.ErrAssignmentNotFound):
+			return nil, 0, err
+		default:
+			eligible++
+		}
+	}
+	return preview, eligible, nil
+}
+
 const maxManagedLabels = 5
 
 // copyStringMap returns an independent map so request updates cannot mutate stored agent metadata by aliasing.
@@ -579,7 +602,11 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Error(w, "target agent membership changed; create a new deployment request", http.StatusConflict)
 					return
 				}
-				preview, ready := previewGroupMembers([]*agents.ManagedAgent{current}, group.Enabled)
+				preview, ready, err := previewGroupConfiguration(r.Context(), []*agents.ManagedAgent{current}, group.Enabled, configuration, assignmentStore)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
 				if ready != 1 || len(preview) != 1 || preview[0].Reason != "Ready" {
 					http.Error(w, "target agent membership or readiness changed; create a new deployment request", http.StatusConflict)
 					return
@@ -618,9 +645,13 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					internalServerError(w, err)
 					return
 				}
-				preview, eligible := previewGroupMembers(members, group.Enabled)
+				preview, eligible, err := previewGroupConfiguration(r.Context(), members, group.Enabled, configuration, assignmentStore)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
 				if eligible == 0 {
-					http.Error(w, "deployment request requires at least one ready agent", http.StatusConflict)
+					http.Error(w, "selected configuration is already deployed and latest, already in progress, or has no ready target", http.StatusConflict)
 					return
 				}
 				targets := make([]configs.GroupDeploymentTarget, 0, len(preview))
@@ -770,7 +801,11 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				http.Error(w, "configuration not found", http.StatusNotFound)
 				return
 			}
-			view.Preview, view.Eligible = previewGroupMembers(members, group.Enabled)
+			view.Preview, view.Eligible, err = previewGroupConfiguration(r.Context(), members, group.Enabled, view.SelectedConfig, assignmentStore)
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = groupDetailPage.Execute(w, view)
