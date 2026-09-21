@@ -196,6 +196,19 @@ journalctl -u fleetamp -f
 
 See [`deploy/systemd/README.md`](deploy/systemd/README.md) for build, installation, verification, upgrade, and log-retention guidance.
 
+## Configuration validation
+
+FleetAMP validates Collector YAML before saving an immutable configuration
+version and revalidates the selected version before creating a group deployment
+approval request. YAML syntax validation is always enforced. Set
+`FLEETAMP_OTELCOL_BINARY` to the installed Collector executable to additionally
+validate component names, pipelines, and distribution-specific settings with
+`otelcol validate`.
+
+If the validation policy or Collector binary changes after a version was saved,
+the approval-boundary check prevents that version from entering the deployment
+queue until it passes the current policy.
+
 ## Security
 
 FleetAMP listens on localhost by default. The first administrator is created

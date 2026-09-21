@@ -58,7 +58,22 @@ type groupDetailView struct {
 	Error          string
 }
 
-// previewGroupMembers classifies current members without changing desired state.
+// validateConfigurationForApproval enforces the current validation policy before a request enters the approval queue.
+func validateConfigurationForApproval(ctx context.Context, validator *configs.Validator, configuration *configs.Configuration) error {
+	if configuration == nil {
+		return errors.New("configuration is required")
+	}
+	validation := validator.Validate(ctx, configuration.Content)
+	if validation.Valid {
+		return nil
+	}
+	message := strings.TrimSpace(validation.Error)
+	if message == "" {
+		message = "configuration validation failed"
+	}
+	return errors.New(message)
+}
+
 func previewGroupMembers(members []*agents.ManagedAgent, enabled bool) ([]groupPreviewAgent, int) {
 	result := make([]groupPreviewAgent, 0, len(members))
 	eligible := 0
@@ -93,7 +108,7 @@ func copyStringMap(in map[string]string) map[string]string {
 }
 
 // registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
-func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, requestStore storage.GroupDeploymentRequestStore, auth *authManager, dataDir string) {
+func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, auth *authManager, dataDir string) {
 	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
 	mux.HandleFunc("/agents/{uid}/group", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -335,7 +350,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 	})
 
-	registerGroupUI(mux, groupStore, agentStore, configStore, requestStore, auth)
+	registerGroupUI(mux, groupStore, agentStore, configStore, requestStore, validator, auth)
 }
 
 // newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
@@ -427,7 +442,7 @@ func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.Ag
 }
 
 // registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
-func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, requestStore storage.GroupDeploymentRequestStore, auth *authManager) {
+func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, auth *authManager) {
 	// /groups displays all groups and accepts creation form submissions.
 	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/groups" {
@@ -496,6 +511,13 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				configuration, err := configStore.Get(r.Context(), strings.TrimSpace(r.FormValue("configuration_id")))
 				if err != nil {
 					http.Error(w, "configuration not found", http.StatusNotFound)
+					return
+				}
+				// Revalidate the immutable artifact at the approval boundary. This
+				// protects the queue if validation policy or Collector binaries
+				// changed after the version was originally saved.
+				if err := validateConfigurationForApproval(r.Context(), validator, configuration); err != nil {
+					http.Error(w, "configuration is not eligible for approval: "+err.Error(), http.StatusUnprocessableEntity)
 					return
 				}
 				members, err := membersForGroupIdentity(r.Context(), group, agentStore)
