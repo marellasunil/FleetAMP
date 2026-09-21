@@ -8,7 +8,13 @@ import (
 
 type GroupDeploymentRequestStatus string
 
-const GroupDeploymentPendingApproval GroupDeploymentRequestStatus = "pending_approval"
+const (
+	GroupDeploymentPendingApproval GroupDeploymentRequestStatus = "pending_approval"
+	GroupDeploymentDeploying       GroupDeploymentRequestStatus = "deploying"
+	GroupDeploymentCompleted       GroupDeploymentRequestStatus = "completed"
+	GroupDeploymentRejected        GroupDeploymentRequestStatus = "rejected"
+	GroupDeploymentFailed          GroupDeploymentRequestStatus = "failed"
+)
 
 type GroupDeploymentTarget struct {
 	AgentInstanceUID string `json:"agent_instance_uid"`
