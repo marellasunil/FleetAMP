@@ -1,10 +1,25 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
+	"github.com/marellasunil/FleetAMP/internal/configs"
 )
+
+func TestValidateConfigurationForApproval(t *testing.T) {
+	validator := configs.NewValidator("")
+	valid := configs.NewConfiguration("gateway.yaml", "1", "receivers:\n  otlp:\nservice:\n  pipelines: {}\n", "text/yaml")
+	if err := validateConfigurationForApproval(context.Background(), validator, valid); err != nil {
+		t.Fatalf("valid configuration rejected: %v", err)
+	}
+
+	invalid := configs.NewConfiguration("gateway.yaml", "2", "service:\n  pipelines: [\n", "text/yaml")
+	if err := validateConfigurationForApproval(context.Background(), validator, invalid); err == nil {
+		t.Fatal("invalid configuration accepted for approval")
+	}
+}
 
 func TestPreviewGroupMembers(t *testing.T) {
 	members := []*agents.ManagedAgent{

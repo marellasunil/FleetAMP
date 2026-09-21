@@ -190,7 +190,7 @@ func main() {
 	registerHealthRoutes(mux)
 	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter)
 	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter)
-	registerGroupRoutes(mux, groupStore, agentStore, configStore, groupRequestStore, auth, dataDir)
+	registerGroupRoutes(mux, groupStore, agentStore, configStore, groupRequestStore, configValidator, auth, dataDir)
 	registerUIRoutes(mux)
 
 	httpServer := &http.Server{
