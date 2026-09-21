@@ -30,12 +30,63 @@ var groupsPage = template.Must(template.New("groups").Parse(groupsHTML))
 
 type upcomingView struct{ Page, Title, Subtitle, Current, Upcoming string }
 
+const configurationEditorJS = `(() => {
+  const form = document.getElementById("configuration-editor-form");
+  const content = document.getElementById("configuration-content");
+  const errorBox = document.getElementById("configuration-validation-error");
+  if (!form || !content || !errorBox) return;
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  let validated = false;
+  const showError = (message) => {
+    errorBox.textContent = message || "Configuration validation failed.";
+    errorBox.hidden = false;
+    errorBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+  content.addEventListener("input", () => {
+    errorBox.hidden = true;
+    errorBox.textContent = "";
+    validated = false;
+  });
+  form.addEventListener("submit", async (event) => {
+    if (validated) return;
+    event.preventDefault();
+    errorBox.hidden = true;
+    submitButton.disabled = true;
+    try {
+      const response = await fetch("/api/v1/configurations/validate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ content: content.value })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.valid) {
+        showError(result.error || "Configuration validation failed.");
+        return;
+      }
+      validated = true;
+      form.requestSubmit(submitButton);
+    } catch (_) {
+      showError("Unable to validate the configuration. Check the connection and try again.");
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+})();`
+
 const upcomingHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FleetAMP</title><style>` + controlPlaneCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / {{.Title}}</div><div class="pagetitle">{{.Title}}</div><div class="subtitle">{{.Subtitle}}</div></div><div class="topactions"><div class="connection"><span class="dot"></span>OpAMP listening</div></div></header><div class="content"><section class="card"><div class="cardhead"><div><div class="cardtitle">Capability status</div><div class="cardsub">FleetAMP community preview</div></div><span class="badge warn">Upcoming</span></div><div class="cardbody"><h2 style="margin-top:0">Not production-ready yet</h2><p class="subtitle">{{.Upcoming}}</p>{{if .Current}}<div class="groupselector"><strong>Available today</strong><div class="tiny" style="margin-top:7px">{{.Current}}</div></div>{{end}}<p class="tiny">This page is intentionally visible so the product navigation reflects the planned control-plane experience without presenting unfinished functionality as available.</p></div></section></div></main></div></body></html>`
 
 var upcomingPage = template.Must(template.New("upcoming").Parse(upcomingHTML))
 
 // registerUIRoutes serves the dashboard and informational placeholder pages that are not backed by dedicated resource handlers.
 func registerUIRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /assets/configuration-editor.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(configurationEditorJS))
+	})
+
 	pages := map[string]upcomingView{
 		"/deployments": {Page: "deployments", Title: "Deployments", Subtitle: "Configuration rollout, safety gates and audit history", Current: "Per-agent configuration validation, delivery status, deployment history, drift and rollback are available from agent details.", Upcoming: "Fleet-wide and group deployment orchestration, canary stages, health gates, approvals and automatic rollback are Upcoming."},
 		"/pipelines":   {Page: "pipelines", Title: "Pipelines", Subtitle: "Visualize and manage telemetry pipelines", Upcoming: "Pipeline topology, receiver/processor/exporter visualization and policy management are Upcoming."},
@@ -56,7 +107,7 @@ func registerUIRoutes(mux *http.ServeMux) {
 }
 
 const detailCSS = `
-.detailgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.wide{grid-column:1/-1}.kv{display:grid;grid-template-columns:145px minmax(0,1fr);gap:9px 14px}.kv>span:nth-child(odd){color:var(--muted)}.chips{display:flex;gap:7px;flex-wrap:wrap}.configeditor{display:grid;gap:12px}.configeditor textarea{width:100%;min-height:440px;resize:vertical;background:#07111e;border:1px solid #29405f;border-radius:8px;padding:13px;color:#d8e5ff;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.chip{background:#152237;border:1px solid #293c57;border-radius:999px;padding:5px 9px;font-size:10px}.detailactions{display:flex;gap:8px;flex-wrap:wrap}.detailform{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.detailform label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:10px}.detailform .input{min-width:190px}.notice{padding:12px 14px;border:1px solid #704e26;background:#382817;border-radius:8px;color:#ffd08a;margin-bottom:14px}pre{margin:0;white-space:pre-wrap;overflow:auto;background:#07111e;border:1px solid #203047;border-radius:8px;padding:13px;max-height:430px;color:#b9caf0;font:11px ui-monospace,SFMono-Regular,Menlo,monospace}.driftitem{padding:10px 0;border-bottom:1px solid #1d2c40}.driftitem:last-child{border:0}@media(max-width:900px){.detailgrid{grid-template-columns:1fr}.wide{grid-column:auto}.kv{grid-template-columns:1fr}}
+.detailgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.wide{grid-column:1/-1}.kv{display:grid;grid-template-columns:145px minmax(0,1fr);gap:9px 14px}.kv>span:nth-child(odd){color:var(--muted)}.chips{display:flex;gap:7px;flex-wrap:wrap}.configeditor{display:grid;gap:12px}.configerror{padding:12px 14px;border:1px solid #a63d4a;background:#35151b;border-radius:8px;color:#ff9dab;font-weight:650}.configerror[hidden]{display:none}.configeditor textarea{width:100%;min-height:440px;resize:vertical;background:#07111e;border:1px solid #29405f;border-radius:8px;padding:13px;color:#d8e5ff;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.chip{background:#152237;border:1px solid #293c57;border-radius:999px;padding:5px 9px;font-size:10px}.detailactions{display:flex;gap:8px;flex-wrap:wrap}.detailform{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.detailform label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:10px}.detailform .input{min-width:190px}.notice{padding:12px 14px;border:1px solid #704e26;background:#382817;border-radius:8px;color:#ffd08a;margin-bottom:14px}pre{margin:0;white-space:pre-wrap;overflow:auto;background:#07111e;border:1px solid #203047;border-radius:8px;padding:13px;max-height:430px;color:#b9caf0;font:11px ui-monospace,SFMono-Regular,Menlo,monospace}.driftitem{padding:10px 0;border-bottom:1px solid #1d2c40}.driftitem:last-child{border:0}@media(max-width:900px){.detailgrid{grid-template-columns:1fr}.wide{grid-column:auto}.kv{grid-template-columns:1fr}}
 `
 
 const agentDetailHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FleetAMP Agent</title><style>` + controlPlaneCSS + detailCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main">
@@ -73,10 +124,10 @@ const agentDetailHTML = `<!doctype html><html><head><meta charset="utf-8"><meta 
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Deployment status</div><div class="cardsub">Latest configuration delivery state</div></div></div><div class="cardbody">{{if .DeploymentSummary.LastDeployment}}<div class="kv"><span>Current deployed</span><span>{{if .DeploymentSummary.CurrentDeployedVersion}}v{{.DeploymentSummary.CurrentDeployedVersion}}{{else}}Unknown{{end}}</span><span>Last deployment</span><span>{{.DeploymentSummary.LastDeployment.ConfigurationName}} v{{.DeploymentSummary.LastDeployment.ConfigurationVersion}}</span><span>Status</span><span>{{.DeploymentSummary.LastDeployment.Status}}</span><span>Duration</span><span>{{if .DeploymentSummary.LastDeploymentDuration}}{{.DeploymentSummary.LastDeploymentDuration}}{{else}}—{{end}}</span></div>{{else}}<div class="tiny">No FleetAMP deployment history recorded yet.</div>{{end}}</div></section>
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Configuration drift</div><div class="cardsub">Desired versus effective state</div></div></div><div class="cardbody"><div class="kv"><span>Status</span><span>{{.Drift.Status}}</span>{{if .Drift.Reason}}<span>Reason</span><span>{{.Drift.Reason}}</span>{{end}}</div>{{if .Drift.Differences}}<div style="margin-top:12px">{{range .Drift.Differences}}<div class="driftitem"><span class="code">{{.Path}}</span> <span class="amber">{{.Kind}}</span><div class="tiny">Desired: {{printf "%v" .Desired}}</div><div class="tiny">Effective: {{printf "%v" .Effective}}</div></div>{{end}}</div>{{end}}</div></section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Configuration state</div><div class="cardsub">Desired and effective configuration</div></div></div><div class="cardbody" style="display:grid;grid-template-columns:1fr 1fr;gap:14px"><div><div class="agentname" style="margin-bottom:8px">Desired</div>{{if .DesiredConfig}}<div class="tiny" style="margin-bottom:8px">{{.DesiredConfig.Name}} · version {{.DesiredConfig.Version}}</div><pre>{{.DesiredConfig.Content}}</pre>{{else}}<div class="tiny">No desired FleetAMP configuration.</div>{{end}}</div><div><div class="agentname" style="margin-bottom:8px">Effective</div>{{if .EffectiveConfig}}<pre>{{.EffectiveConfig}}</pre>{{else}}<div class="tiny">No effective configuration reported yet.</div>{{end}}</div></div></section>
-<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">Edit a copy, validate it, and save an immutable version</div></div>{{if .RemoteConfigSupported}}<span class="badge ok">Supported</span>{{else}}<span class="badge warn">Delivery unavailable</span>{{end}}</div><div class="cardbody"><form class="configeditor" method="post" action="/agents/{{.Agent.InstanceUID}}/configurations"><div class="detailform"><label>Configuration name<input class="input" name="name" value="{{if .DesiredConfig}}{{.DesiredConfig.Name}}{{else}}{{.Agent.Name}}.yaml{{end}}" required maxlength="160"></label><label>New version<input class="input" name="version" placeholder="for example 1.0.0" required maxlength="80"></label></div><label class="tiny" for="configuration-content">Collector YAML</label><textarea id="configuration-content" name="content" spellcheck="false" required>{{if .EffectiveConfig}}{{.EffectiveConfig}}{{else if .DesiredConfig}}{{.DesiredConfig.Content}}{{end}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Validate and save version</button></div><p class="tiny">Saving does not deploy or overwrite a previous version. The version becomes available to the group approval workflow.</p></form>{{if not .EffectiveConfig}}<div class="notice" style="margin-top:14px">No effective configuration was reported, so paste a complete Collector configuration before saving.</div>{{end}}</div></section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">Edit a copy, validate it, and save an immutable version</div></div>{{if .RemoteConfigSupported}}<span class="badge ok">Supported</span>{{else}}<span class="badge warn">Delivery unavailable</span>{{end}}</div><div class="cardbody"><div id="configuration-validation-error" class="configerror" role="alert" aria-live="polite" hidden></div><form id="configuration-editor-form" class="configeditor" method="post" action="/agents/{{.Agent.InstanceUID}}/configurations"><div class="detailform"><label>Configuration name<input class="input" name="name" value="{{if .DesiredConfig}}{{.DesiredConfig.Name}}{{else}}{{.Agent.Name}}.yaml{{end}}" required maxlength="160"></label><label>New version<input class="input" name="version" placeholder="for example 1.0.0" required maxlength="80"></label></div><label class="tiny" for="configuration-content">Collector YAML</label><textarea id="configuration-content" name="content" spellcheck="false" required>{{if .EffectiveConfig}}{{.EffectiveConfig}}{{else if .DesiredConfig}}{{.DesiredConfig.Content}}{{end}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Validate and save version</button></div><p class="tiny">Saving does not deploy or overwrite a previous version. The version becomes available to the group approval workflow.</p></form>{{if not .EffectiveConfig}}<div class="notice" style="margin-top:14px">No effective configuration was reported, so paste a complete Collector configuration before saving.</div>{{end}}</div></section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Saved configuration versions</div><div class="cardsub">Available for deployment preview and approval</div></div></div>{{if .SavedConfigurations}}<div style="overflow:auto"><table><thead><tr><th>Name</th><th>Version</th><th>Hash</th><th>Created</th></tr></thead><tbody>{{range .SavedConfigurations}}<tr><td>{{.Name}}</td><td>{{.Version}}</td><td class="tiny code">{{.Hash}}</td><td>{{.CreatedAt}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No saved configuration versions yet.</div>{{end}}</section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Deployment history</div><div class="cardsub">Latest configuration attempts for this agent</div></div></div>{{if .Deployments}}<div style="overflow:auto"><table><thead><tr><th>Configuration</th><th>Action</th><th>Status</th><th>Created</th><th>Applied / Failed</th></tr></thead><tbody>{{range .Deployments}}<tr><td><strong>{{.ConfigurationName}} v{{.ConfigurationVersion}}</strong><div class="tiny code">{{.ID}}</div></td><td>{{.Action}}</td><td>{{.Status}}{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</td><td>{{.CreatedAt}}</td><td>{{if .AppliedAt}}{{.AppliedAt}}{{else if .FailedAt}}{{.FailedAt}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No deployment history recorded.</div>{{end}}</section>
-</div></div></main></div></body></html>`
+</div></div></main></div><script src="/assets/configuration-editor.js" defer></script></body></html>`
 
 var agentDetailPage = template.Must(template.New("agent-detail-modern").Parse(agentDetailHTML))
 

@@ -126,3 +126,42 @@ func TestAgentConfigurationEditorRejectsInvalidYAML(t *testing.T) {
 		t.Fatalf("invalid configuration was persisted: %#v", items)
 	}
 }
+
+func TestConfigurationEditorJavaScriptIsServed(t *testing.T) {
+	mux := http.NewServeMux()
+	registerUIRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodGet, "/assets/configuration-editor.js", nil)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if contentType := response.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/javascript") {
+		t.Fatalf("content-type=%q", contentType)
+	}
+	script := response.Body.String()
+	for _, expected := range []string{
+		"configuration-editor-form",
+		"configuration-validation-error",
+		"/api/v1/configurations/validate",
+		"form.requestSubmit",
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("script is missing %q", expected)
+		}
+	}
+}
+
+func TestAgentDetailIncludesInlineConfigurationError(t *testing.T) {
+	for _, expected := range []string{
+		`id="configuration-validation-error"`,
+		`class="configerror"`,
+		`src="/assets/configuration-editor.js"`,
+	} {
+		if !strings.Contains(agentDetailHTML, expected) {
+			t.Fatalf("agent detail template is missing %q", expected)
+		}
+	}
+}
