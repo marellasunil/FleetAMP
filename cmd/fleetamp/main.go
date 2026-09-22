@@ -570,6 +570,8 @@ func deliverConfiguration(ctx context.Context, agentUID string, configuration *c
 // immediately before delivery to protect against unsafe desired state.
 // registerConfigRoutes serves configuration CRUD/listing pages, validation, direct deployment, rollback, and group rollout actions.
 func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter) {
+	registerConfigurationUIRoutes(mux, configStore)
+
 	// POST /agents/{uid}/configurations validates and saves an immutable
 	// configuration version originating from the agent detail editor.
 	mux.HandleFunc("POST /agents/{uid}/configurations", func(w http.ResponseWriter, r *http.Request) {
