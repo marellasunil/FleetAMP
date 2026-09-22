@@ -126,7 +126,7 @@ func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler
 			return
 		}
 		publicHealth := r.URL.Path == "/health" || r.URL.Path == "/ready"
-		publicAuthentication := r.URL.Path == "/setup" || r.URL.Path == "/login"
+		publicAuthentication := r.URL.Path == "/setup" || r.URL.Path == "/login" || r.URL.Path == "/assets/theme.js"
 		if !publicHealth && !publicAuthentication {
 			if auth != nil && !auth.authorize(w, r, cfg) {
 				return
