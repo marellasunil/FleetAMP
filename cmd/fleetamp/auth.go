@@ -424,7 +424,7 @@ const authPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <label>One-time setup token<input class="input" type="password" name="bootstrap_token" autocomplete="off" required></label>{{end}}
 <button class="btn primary" type="submit">{{if .Setup}}Create administrator{{else}}Sign in{{end}}</button>
 </form><p class="authhelp">{{if .Setup}}Retrieve the short-lived token from the FleetAMP systemd journal. It expires after 15 minutes and is consumed once.{{else}}Use the administrator credentials created during FleetAMP setup.{{end}}</p>
-</section></main></body></html>`
+<button class="btn theme-toggle" id="theme-toggle" type="button" aria-label="Switch color theme" style="margin-top:16px">☀ Light theme</button></section></main><script src="/assets/theme.js" defer></script></body></html>`
 
 var authPage = template.Must(template.New("auth").Parse(authPageHTML))
 

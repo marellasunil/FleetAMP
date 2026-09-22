@@ -100,6 +100,12 @@ func TestSecurityMiddlewareAuthenticationAndHeaders(t *testing.T) {
 	if health.Code != http.StatusOK {
 		t.Fatalf("health status=%d", health.Code)
 	}
+
+	theme := httptest.NewRecorder()
+	handler.ServeHTTP(theme, httptest.NewRequest(http.MethodGet, "/assets/theme.js", nil))
+	if theme.Code != http.StatusOK {
+		t.Fatalf("public theme asset status=%d", theme.Code)
+	}
 }
 func TestConstantTimeCredentialEqual(t *testing.T) {
 	if !constantTimeCredentialEqual("operator", "operator") {
