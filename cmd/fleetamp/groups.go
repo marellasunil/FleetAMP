@@ -48,17 +48,19 @@ type groupPreviewAgent struct {
 }
 
 type groupDetailView struct {
-	Page           string
-	Group          *groups.Group
-	Members        []*agents.ManagedAgent
-	Configurations []*configs.Configuration
-	SelectedConfig *configs.Configuration
-	Preview        []groupPreviewAgent
-	Eligible       int
-	Requests       []*configs.GroupDeploymentRequest
-	RequestCreated string
-	RequestUpdated string
-	Error          string
+	Page             string
+	Group            *groups.Group
+	Members          []*agents.ManagedAgent
+	Configurations   []*configs.Configuration
+	SelectedConfig   *configs.Configuration
+	SelectedPipeline *configs.PipelineModel
+	PipelineError    string
+	Preview          []groupPreviewAgent
+	Eligible         int
+	Requests         []*configs.GroupDeploymentRequest
+	RequestCreated   string
+	RequestUpdated   string
+	Error            string
 }
 
 // validateConfigurationForApproval enforces the current validation policy before a request enters the approval queue.
@@ -805,6 +807,10 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			if err != nil {
 				internalServerError(w, err)
 				return
+			}
+			view.SelectedPipeline, err = configs.ParsePipelineModel(view.SelectedConfig.Content)
+			if err != nil {
+				view.PipelineError = err.Error()
 			}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
