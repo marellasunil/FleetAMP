@@ -37,11 +37,13 @@ import (
 
 // ValidationResult describes all checks performed before configuration use.
 type ValidationResult struct {
-	Valid              bool   `json:"valid"`
-	YAMLValid          bool   `json:"yaml_valid"`
-	CollectorValidated bool   `json:"collector_validated"`
-	CollectorSkipped   bool   `json:"collector_skipped"`
-	Error              string `json:"error,omitempty"`
+	Valid              bool           `json:"valid"`
+	YAMLValid          bool           `json:"yaml_valid"`
+	CollectorValidated bool           `json:"collector_validated"`
+	CollectorSkipped   bool           `json:"collector_skipped"`
+	Pipeline           *PipelineModel `json:"pipeline,omitempty"`
+	Warnings           []string       `json:"warnings,omitempty"`
+	Error              string         `json:"error,omitempty"`
 }
 
 // Validator validates configuration syntax and optionally delegates semantic
@@ -71,6 +73,14 @@ func (v *Validator) Validate(ctx context.Context, content string) ValidationResu
 		return result
 	}
 	result.YAMLValid = true
+
+	pipeline, err := ParsePipelineModel(content)
+	if err != nil {
+		result.Error = "invalid Collector configuration: " + err.Error()
+		return result
+	}
+	result.Pipeline = pipeline
+	result.Warnings = append(result.Warnings, pipeline.Warnings...)
 
 	if v == nil || v.CollectorBinary == "" {
 		result.Valid = true
