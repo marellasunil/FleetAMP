@@ -15,7 +15,10 @@ import (
 	"time"
 )
 
-var ErrDeploymentInProgress = errors.New("configuration deployment already in progress for agent")
+var (
+	ErrDeploymentInProgress = errors.New("configuration deployment already in progress for agent")
+	ErrConfigurationCurrent = errors.New("configuration is already deployed and latest for agent")
+)
 
 type DeploymentAction string
 

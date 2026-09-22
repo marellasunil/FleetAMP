@@ -205,6 +205,19 @@ func TestGroupDeploymentRequestPersistence(t *testing.T) {
 		got.ConfigurationHash != configuration.Hash {
 		t.Fatalf("request mismatch: %#v", got)
 	}
+	if err := reopened.GroupDeploymentRequests().UpdateStatus(ctx, request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentDeploying); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := reopened.GroupDeploymentRequests().Get(ctx, request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != configs.GroupDeploymentDeploying {
+		t.Fatalf("updated status=%q", updated.Status)
+	}
+	if err := reopened.GroupDeploymentRequests().UpdateStatus(ctx, request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentRejected); err == nil {
+		t.Fatal("stale status transition unexpectedly succeeded")
+	}
 }
 
 func TestAdministratorPersistence(t *testing.T) {
