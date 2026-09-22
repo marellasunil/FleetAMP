@@ -510,6 +510,13 @@ func latestAssignmentForAgent(ctx context.Context, store storage.AssignmentStore
 
 // deliverConfiguration records desired state and deployment history, sends remote configuration through OpAMP, and persists success or failure.
 func deliverConfiguration(ctx context.Context, agentUID string, configuration *configs.Configuration, action configs.DeploymentAction, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) (*configs.Assignment, *configs.Deployment, error) {
+	latest, err := latestAssignmentForAgent(ctx, assignmentStore, agentUID)
+	if err != nil && !errors.Is(err, storage.ErrAssignmentNotFound) {
+		return nil, nil, err
+	}
+	if err == nil && latest.ConfigurationHash == configuration.Hash && latest.Status == configs.DeliveryApplied {
+		return latest, nil, configs.ErrConfigurationCurrent
+	}
 	if recent, err := deploymentStore.ListByAgent(ctx, agentUID, 1); err != nil {
 		return nil, nil, err
 	} else if len(recent) > 0 && (recent[0].Status == configs.DeliveryPending || recent[0].Status == configs.DeliverySent || recent[0].Status == configs.DeliveryApplying) {
@@ -780,7 +787,7 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 			response := rollbackResponse{Action: "rollback", FromConfigurationID: current.ID, TargetConfiguration: target, Assignment: assignment, Deployment: deployment}
 			if deliveryErr != nil {
 				status := http.StatusInternalServerError
-				if errors.Is(deliveryErr, fleetopamp.ErrRemoteConfigUnsupported) || errors.Is(deliveryErr, fleetopamp.ErrAgentNotConnected) || errors.Is(deliveryErr, configs.ErrDeploymentInProgress) {
+				if errors.Is(deliveryErr, fleetopamp.ErrRemoteConfigUnsupported) || errors.Is(deliveryErr, fleetopamp.ErrAgentNotConnected) || errors.Is(deliveryErr, configs.ErrDeploymentInProgress) || errors.Is(deliveryErr, configs.ErrConfigurationCurrent) {
 					status = http.StatusConflict
 				}
 				writeJSON(w, status, response)
@@ -816,7 +823,8 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 		assignment, _, deliveryErr := deliverConfiguration(r.Context(), agentUID, configuration, configs.DeploymentActionDeploy, assignmentStore, deploymentStore, adapter)
 		if deliveryErr != nil {
 			status := http.StatusInternalServerError
-			if errors.Is(deliveryErr, fleetopamp.ErrRemoteConfigUnsupported) || errors.Is(deliveryErr, fleetopamp.ErrAgentNotConnected) {
+			if errors.Is(deliveryErr, fleetopamp.ErrRemoteConfigUnsupported) || errors.Is(deliveryErr, fleetopamp.ErrAgentNotConnected) ||
+				errors.Is(deliveryErr, configs.ErrDeploymentInProgress) || errors.Is(deliveryErr, configs.ErrConfigurationCurrent) {
 				status = http.StatusConflict
 			}
 			writeJSON(w, status, assignment)

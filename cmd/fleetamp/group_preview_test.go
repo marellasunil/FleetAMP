@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/FleetAMP/internal/storage/memory"
 )
 
 func TestValidateConfigurationForApproval(t *testing.T) {
@@ -46,5 +48,38 @@ func TestPreviewGroupMembers(t *testing.T) {
 		if agent.Reason != "Group disabled" {
 			t.Errorf("disabled group member %q: %q", agent.Agent.InstanceUID, agent.Reason)
 		}
+	}
+}
+
+func TestPreviewGroupConfigurationSkipsCurrentButAllowsOlderVersion(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewAssignmentStore()
+	agent := &agents.ManagedAgent{
+		InstanceUID: "agent-1", Connected: true,
+		Capabilities: []string{"accepts_remote_config"},
+	}
+	current := configs.NewConfiguration("collector.yaml", "2", "service: {pipelines: {}}", "text/yaml")
+	older := configs.NewConfiguration("collector.yaml", "1", "service: {}", "text/yaml")
+	if err := store.Upsert(ctx, &configs.Assignment{
+		AgentInstanceUID: agent.InstanceUID, ConfigurationID: current.ID,
+		ConfigurationHash: current.Hash, Status: configs.DeliveryApplied, UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, eligible, err := previewGroupConfiguration(ctx, []*agents.ManagedAgent{agent}, true, current, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eligible != 0 || preview[0].Reason != "Already deployed · Latest" {
+		t.Fatalf("current preview=%+v eligible=%d", preview, eligible)
+	}
+
+	preview, eligible, err = previewGroupConfiguration(ctx, []*agents.ManagedAgent{agent}, true, older, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eligible != 1 || preview[0].Reason != "Ready" {
+		t.Fatalf("rollback preview=%+v eligible=%d", preview, eligible)
 	}
 }
