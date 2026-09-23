@@ -115,7 +115,7 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_group_deployment_requests_group_created ON group_deployment_requests(group_id, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS administrators (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-            username TEXT NOT NULL UNIQUE, password_salt BLOB NOT NULL,
+            username TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'admin', password_salt BLOB NOT NULL,
             password_hash BLOB NOT NULL, created_at TEXT NOT NULL,
             password_changed_at TEXT NOT NULL
         )`,
@@ -126,6 +126,9 @@ func (d *Database) initialize(ctx context.Context) error {
 		}
 	}
 	if err := d.ensureGroupEnabledColumn(ctx); err != nil {
+		return err
+	}
+	if err := d.ensureAdministratorRoleColumn(ctx); err != nil {
 		return err
 	}
 	return d.db.PingContext(ctx)
@@ -152,6 +155,32 @@ func (d *Database) ensureGroupEnabledColumn(ctx context.Context) error {
 	}
 	if _, err := d.db.ExecContext(ctx, `ALTER TABLE groups ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`); err != nil {
 		return fmt.Errorf("add groups.enabled column: %w", err)
+	}
+	return nil
+}
+
+// ensureAdministratorRoleColumn promotes the existing first-login account to
+// Admin while making its authorization role explicit for RBAC-aware sessions.
+func (d *Database) ensureAdministratorRoleColumn(ctx context.Context) error {
+	rows, err := d.db.QueryContext(ctx, `PRAGMA table_info(administrators)`)
+	if err != nil {
+		return fmt.Errorf("inspect administrators schema: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == "role" {
+			return nil
+		}
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE administrators ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'`); err != nil {
+		return fmt.Errorf("add administrators.role column: %w", err)
 	}
 	return nil
 }

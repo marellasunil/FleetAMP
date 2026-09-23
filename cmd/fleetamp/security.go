@@ -106,7 +106,95 @@ func parseAllowedOrigins(raw string) map[string]struct{} {
 	return result
 }
 
-// securityMiddleware applies headers, authentication, origin checks, method restrictions, body limits, and panic recovery to every route.
+type permission string
+
+const (
+	permissionRead    permission = "read"
+	permissionEdit    permission = "edit"
+	permissionApprove permission = "approve"
+	permissionAdmin   permission = "admin"
+)
+
+// requiredPermission maps each request to the minimum server-side role.
+// The section-policy feature can extend this map without relying on UI state.
+func requiredPermission(r *http.Request) permission {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return permissionRead
+	}
+	if r.URL.Path == "/logout" {
+		return permissionRead
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/agents/") &&
+		(strings.Contains(r.URL.Path, "/config") || strings.Contains(r.URL.Path, "/rollback")) {
+		return permissionApprove
+	}
+	if r.URL.Path == "/api/v1/groups" || strings.HasPrefix(r.URL.Path, "/api/v1/groups/") ||
+		strings.HasSuffix(r.URL.Path, "/group") || strings.HasSuffix(r.URL.Path, "/labels") ||
+		strings.HasSuffix(r.URL.Path, "/label") {
+		return permissionAdmin
+	}
+	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/groups/") {
+		if err := r.ParseForm(); err != nil {
+			return permissionAdmin
+		}
+		switch strings.TrimSpace(r.FormValue("action")) {
+		case "request_deployment":
+			return permissionEdit
+		case "approve_deployment", "reject_deployment":
+			return permissionApprove
+		default:
+			return permissionAdmin
+		}
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/groups" {
+		return permissionAdmin
+	}
+	return permissionEdit
+}
+
+// roleAllows defines the initial FleetAMP authorization hierarchy.
+func roleAllows(principalRole role, required permission) bool {
+	switch principalRole {
+	case roleAdmin:
+		return true
+	case roleOperator:
+		return required == permissionRead || required == permissionEdit
+	case roleViewer:
+		return required == permissionRead
+	default:
+		return false
+	}
+}
+
+// authorizeRole enforces authorization after authentication and records denied
+// operations without exposing credentials or request bodies.
+func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, auth *authManager) bool {
+	principalRole := roleAdmin
+	username := cfg.HTTPUsername
+	if auth != nil {
+		var ok bool
+		principalRole, ok = auth.sessionRole(r)
+		if !ok {
+			if cfg.HTTPUsername == "" || !validBasicAuth(r, cfg) {
+				http.Error(w, "authenticated role is required", http.StatusUnauthorized)
+				return false
+			}
+		} else {
+			username, _ = auth.sessionUsername(r)
+		}
+	}
+	required := requiredPermission(r)
+	if roleAllows(principalRole, required) {
+		return true
+	}
+	slog.Warn("authorization denied", "component", "auth", "event", "authorization_denied",
+		"username", username, "role", principalRole, "required_permission", required,
+		"method", r.Method, "path", r.URL.Path)
+	http.Error(w, "forbidden", http.StatusForbidden)
+	return false
+}
+
+// securityMiddleware applies headers, authentication, authorization, origin checks, method restrictions, body limits, and panic recovery to every route.
 func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w)
@@ -127,7 +215,8 @@ func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler
 		}
 		publicHealth := r.URL.Path == "/health" || r.URL.Path == "/ready"
 		publicAuthentication := r.URL.Path == "/setup" || r.URL.Path == "/login" || r.URL.Path == "/assets/theme.js"
-		if !publicHealth && !publicAuthentication {
+		protected := !publicHealth && !publicAuthentication
+		if protected {
 			if auth != nil && !auth.authorize(w, r, cfg) {
 				return
 			}
@@ -144,6 +233,9 @@ func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler
 		}
 		if isUnsafeMethod(r.Method) && r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, cfg.MaxBodyBytes)
+		}
+		if protected && !authorizeRole(w, r, cfg, auth) {
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

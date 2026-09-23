@@ -3,6 +3,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +11,70 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/groups"
 )
+
+func TestExistingAdministratorMigratesToAdminRole(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy-auth.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec(`CREATE TABLE administrators (
+		singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+		username TEXT NOT NULL UNIQUE, password_salt BLOB NOT NULL,
+		password_hash BLOB NOT NULL, created_at TEXT NOT NULL,
+		password_changed_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := legacy.Exec(`INSERT INTO administrators VALUES (1, ?, ?, ?, ?, ?)`,
+		"existing-admin", []byte("0123456789abcdef"), []byte("hash"), now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	admin, err := db.Authentication().Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admin.Role != "admin" {
+		t.Fatalf("migrated role=%q, want admin", admin.Role)
+	}
+}
+
+func TestAdministratorDefaultsToAdminRole(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "auth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	admin := Administrator{
+		Username:     "admin",
+		PasswordSalt: []byte("0123456789abcdef"),
+		PasswordHash: []byte("test-password-hash"),
+	}
+	if err := db.Authentication().Create(ctx, admin); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := db.Authentication().Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Role != "admin" {
+		t.Fatalf("administrator role=%q, want admin", stored.Role)
+	}
+}
 
 func TestConfigurationAndAssignmentPersistence(t *testing.T) {
 	ctx := context.Background()

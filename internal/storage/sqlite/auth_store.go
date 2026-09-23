@@ -13,6 +13,7 @@ var ErrAdministratorNotFound = errors.New("administrator not found")
 
 type Administrator struct {
 	Username          string
+	Role              string
 	PasswordSalt      []byte
 	PasswordHash      []byte
 	CreatedAt         time.Time
@@ -35,9 +36,9 @@ func (s *AuthStore) Get(ctx context.Context) (*Administrator, error) {
 	var admin Administrator
 	var createdAt, changedAt string
 	err := s.db.QueryRowContext(ctx, `
-        SELECT username, password_salt, password_hash, created_at, password_changed_at
+        SELECT username, role, password_salt, password_hash, created_at, password_changed_at
         FROM administrators WHERE singleton = 1
-    `).Scan(&admin.Username, &admin.PasswordSalt, &admin.PasswordHash, &createdAt, &changedAt)
+    `).Scan(&admin.Username, &admin.Role, &admin.PasswordSalt, &admin.PasswordHash, &createdAt, &changedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrAdministratorNotFound
 	}
@@ -64,11 +65,14 @@ func (s *AuthStore) Create(ctx context.Context, admin Administrator) error {
 	if admin.PasswordChangedAt.IsZero() {
 		admin.PasswordChangedAt = now
 	}
+	if admin.Role == "" {
+		admin.Role = "admin"
+	}
 	_, err := s.db.ExecContext(ctx, `
         INSERT INTO administrators (
-            singleton, username, password_salt, password_hash, created_at, password_changed_at
-        ) VALUES (1, ?, ?, ?, ?, ?)
-    `, admin.Username, admin.PasswordSalt, admin.PasswordHash,
+            singleton, username, role, password_salt, password_hash, created_at, password_changed_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?)
+    `, admin.Username, admin.Role, admin.PasswordSalt, admin.PasswordHash,
 		admin.CreatedAt.Format(time.RFC3339Nano), admin.PasswordChangedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("create administrator: %w", err)
