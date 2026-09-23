@@ -23,6 +23,14 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+type role string
+
+const (
+	roleAdmin    role = "admin"
+	roleOperator role = "operator"
+	roleViewer   role = "viewer"
+)
+
 const (
 	serverPepperCredential = "fleetamp-server-pepper"
 	sessionCookieName      = "fleetamp_session"
@@ -39,6 +47,7 @@ type administratorStore interface {
 }
 type authSession struct {
 	Username string
+	Role     role
 	Expires  time.Time
 }
 
@@ -233,7 +242,7 @@ func (a *authManager) createAdministrator(ctx context.Context, username, passwor
 		return err
 	}
 	if err := a.store.Create(ctx, sqlitestore.Administrator{
-		Username: username, PasswordSalt: salt,
+		Username: username, Role: string(roleAdmin), PasswordSalt: salt,
 		PasswordHash: passwordDigest(password, a.pepper, salt),
 	}); err != nil {
 		return err
@@ -248,19 +257,39 @@ func (a *authManager) createAdministrator(ctx context.Context, username, passwor
 
 // authenticate derives and compares the supplied password without revealing whether an account lookup failed.
 func (a *authManager) authenticate(ctx context.Context, username, password string) bool {
+	_, ok := a.authenticateRole(ctx, username, password)
+	return ok
+}
+
+// authenticateRole returns the persisted role only after both username and
+// password have passed constant-time verification.
+func (a *authManager) authenticateRole(ctx context.Context, username, password string) (role, bool) {
 	admin, err := a.store.Get(ctx)
 	if err != nil {
-		return false
+		return "", false
 	}
 	actualUser := sha256.Sum256([]byte(strings.TrimSpace(username)))
 	expectedUser := sha256.Sum256([]byte(admin.Username))
 	actualHash := passwordDigest(password, a.pepper, admin.PasswordSalt)
-	return subtle.ConstantTimeCompare(actualUser[:], expectedUser[:]) == 1 &&
-		subtle.ConstantTimeCompare(actualHash, admin.PasswordHash) == 1
+	if subtle.ConstantTimeCompare(actualUser[:], expectedUser[:]) != 1 ||
+		subtle.ConstantTimeCompare(actualHash, admin.PasswordHash) != 1 {
+		return "", false
+	}
+	principalRole := role(admin.Role)
+	if principalRole != roleAdmin && principalRole != roleOperator && principalRole != roleViewer {
+		return "", false
+	}
+	return principalRole, true
 }
 
-// createSession creates an opaque browser token while storing only its digest in a bounded in-memory session table.
+// createSession creates an Admin session for the bootstrap account and test helpers.
 func (a *authManager) createSession(username string) (string, error) {
+	return a.createSessionForRole(username, roleAdmin)
+}
+
+// createSessionForRole creates an opaque browser token while retaining the
+// authenticated principal and role in the bounded server-side session table.
+func (a *authManager) createSessionForRole(username string, principalRole role) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -284,7 +313,7 @@ func (a *authManager) createSession(username string) (string, error) {
 		}
 		delete(a.sessions, oldestKey)
 	}
-	a.sessions[key] = authSession{Username: username, Expires: now.Add(sessionLifetime)}
+	a.sessions[key] = authSession{Username: username, Role: principalRole, Expires: now.Add(sessionLifetime)}
 	a.mu.Unlock()
 	return token, nil
 }
@@ -339,6 +368,21 @@ func (a *authManager) sessionUsername(r *http.Request) (string, bool) {
 		return "", false
 	}
 	return session.Username, true
+}
+
+// sessionRole returns the authorization role bound to a valid browser session.
+func (a *authManager) sessionRole(r *http.Request) (role, bool) {
+	cookie, err := r.Cookie(a.cookieName())
+	if err != nil || cookie.Value == "" {
+		return "", false
+	}
+	a.mu.RLock()
+	session, ok := a.sessions[sessionKey(cookie.Value)]
+	a.mu.RUnlock()
+	if !ok || !a.now().Before(session.Expires) {
+		return "", false
+	}
+	return session.Role, true
 }
 
 // setSessionCookie writes a restricted HttpOnly, SameSite cookie and enables Secure when HTTPS is expected.
@@ -496,13 +540,20 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := r.ParseForm(); err != nil || !a.authenticate(r.Context(), r.FormValue("username"), r.FormValue("password")) {
+	if err := r.ParseForm(); err != nil {
 		time.Sleep(300 * time.Millisecond)
 		slog.Warn("login rejected", "component", "auth", "event", "login_failed")
 		a.renderAuthPage(w, authPageData{Title: "Sign in", Message: "Invalid username or password."})
 		return
 	}
-	token, err := a.createSession(strings.TrimSpace(r.FormValue("username")))
+	principalRole, ok := a.authenticateRole(r.Context(), r.FormValue("username"), r.FormValue("password"))
+	if !ok {
+		time.Sleep(300 * time.Millisecond)
+		slog.Warn("login rejected", "component", "auth", "event", "login_failed")
+		a.renderAuthPage(w, authPageData{Title: "Sign in", Message: "Invalid username or password."})
+		return
+	}
+	token, err := a.createSessionForRole(strings.TrimSpace(r.FormValue("username")), principalRole)
 	if err != nil {
 		internalServerError(w, err)
 		return

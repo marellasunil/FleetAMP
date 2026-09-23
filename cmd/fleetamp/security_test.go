@@ -177,6 +177,96 @@ func TestValidRequestOriginAcceptsEquivalentLoopbackAliases(t *testing.T) {
 	}
 }
 
+func TestRolePermissionMatrix(t *testing.T) {
+	tests := []struct {
+		name       string
+		role       role
+		permission permission
+		allowed    bool
+	}{
+		{"admin can administer", roleAdmin, permissionAdmin, true},
+		{"admin can approve", roleAdmin, permissionApprove, true},
+		{"operator can edit", roleOperator, permissionEdit, true},
+		{"operator can read", roleOperator, permissionRead, true},
+		{"operator cannot approve", roleOperator, permissionApprove, false},
+		{"operator cannot administer", roleOperator, permissionAdmin, false},
+		{"viewer can read", roleViewer, permissionRead, true},
+		{"viewer cannot edit", roleViewer, permissionEdit, false},
+		{"unknown role denied", role("unknown"), permissionRead, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := roleAllows(test.role, test.permission); got != test.allowed {
+				t.Fatalf("roleAllows(%q, %q)=%t, want %t", test.role, test.permission, got, test.allowed)
+			}
+		})
+	}
+}
+
+func TestRequiredPermissionProtectsApprovalAndAdministration(t *testing.T) {
+	requestApproval := httptest.NewRequest(http.MethodPost, "/groups/group-1",
+		strings.NewReader("action=request_deployment"))
+	requestApproval.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if got := requiredPermission(requestApproval); got != permissionEdit {
+		t.Fatalf("request deployment permission=%q", got)
+	}
+
+	approve := httptest.NewRequest(http.MethodPost, "/groups/group-1",
+		strings.NewReader("action=approve_deployment"))
+	approve.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if got := requiredPermission(approve); got != permissionApprove {
+		t.Fatalf("approve permission=%q", got)
+	}
+
+	createGroup := httptest.NewRequest(http.MethodPost, "/groups", nil)
+	if got := requiredPermission(createGroup); got != permissionAdmin {
+		t.Fatalf("create group permission=%q", got)
+	}
+
+	saveConfiguration := httptest.NewRequest(http.MethodPost, "/agents/agent-1/configurations", nil)
+	if got := requiredPermission(saveConfiguration); got != permissionEdit {
+		t.Fatalf("save configuration permission=%q", got)
+	}
+}
+
+func TestSecurityMiddlewareEnforcesSessionRole(t *testing.T) {
+	manager := testAuthManager(&memoryAdministratorStore{}, strings.Repeat("p", 32), "bootstrap")
+	handler := securityMiddleware(securityConfig{MaxBodyBytes: defaultMaxRequestBodyBytes}, manager,
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+
+	testRequest := func(principalRole role, method, target, body string) int {
+		t.Helper()
+		token, err := manager.createSessionForRole(string(principalRole), principalRole)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(method, target, strings.NewReader(body))
+		request.AddCookie(&http.Cookie{Name: manager.cookieName(), Value: token})
+		if body != "" {
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response.Code
+	}
+
+	if got := testRequest(roleViewer, http.MethodGet, "/agents", ""); got != http.StatusNoContent {
+		t.Fatalf("viewer read status=%d", got)
+	}
+	if got := testRequest(roleViewer, http.MethodPost, "/agents/a/configurations", "name=test"); got != http.StatusForbidden {
+		t.Fatalf("viewer edit status=%d", got)
+	}
+	if got := testRequest(roleOperator, http.MethodPost, "/agents/a/configurations", "name=test"); got != http.StatusNoContent {
+		t.Fatalf("operator edit status=%d", got)
+	}
+	if got := testRequest(roleOperator, http.MethodPost, "/groups/g", "action=approve_deployment"); got != http.StatusForbidden {
+		t.Fatalf("operator approval status=%d", got)
+	}
+	if got := testRequest(roleAdmin, http.MethodPost, "/groups/g", "action=approve_deployment"); got != http.StatusNoContent {
+		t.Fatalf("admin approval status=%d", got)
+	}
+}
+
 func TestValidRequestOriginAllowsNullOnlyForSameSiteLoopback(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "http://localhost:8080/setup", nil)
 	request.Host = "localhost:8080"
