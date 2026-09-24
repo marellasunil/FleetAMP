@@ -41,6 +41,8 @@ func TestAgentConfigurationEditorSavesValidatedImmutableVersion(t *testing.T) {
 		agentStore,
 		configs.NewValidator(""),
 		nil,
+		nil,
+		nil,
 	)
 
 	form := url.Values{
@@ -98,6 +100,8 @@ func TestAgentConfigurationEditorRejectsInvalidYAML(t *testing.T) {
 		agentStore,
 		configs.NewValidator(""),
 		nil,
+		nil,
+		nil,
 	)
 
 	form := url.Values{
@@ -145,7 +149,7 @@ func TestConfigurationEditorJavaScriptIsServed(t *testing.T) {
 	for _, expected := range []string{
 		"configuration-editor-form",
 		"configuration-validation-error",
-		"/api/v1/configurations/validate",
+		"/api/v1/configurations/sections/compose",
 		"form.requestSubmit",
 	} {
 		if !strings.Contains(script, expected) {

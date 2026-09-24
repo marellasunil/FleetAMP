@@ -63,8 +63,11 @@ func (d *Database) GroupDeploymentRequests() *GroupDeploymentRequestStore {
 	return &GroupDeploymentRequestStore{db: d.db}
 }
 
-// Authentication returns the SQLite-backed singleton administrator repository.
+// Authentication returns the SQLite-backed user repository.
 func (d *Database) Authentication() *AuthStore { return &AuthStore{db: d.db} }
+
+// SectionPolicies returns the SQLite-backed configuration-section policy repository.
+func (d *Database) SectionPolicies() *SectionPolicyStore { return &SectionPolicyStore{db: d.db} }
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -128,6 +131,11 @@ func (d *Database) initialize(ctx context.Context) error {
             updated_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_users_role_enabled ON users(role, enabled)`,
+		`CREATE TABLE IF NOT EXISTS configuration_section_policies (
+            section_key TEXT PRIMARY KEY,
+            operator_editable INTEGER NOT NULL CHECK (operator_editable IN (0, 1)),
+            updated_at TEXT NOT NULL
+        )`,
 	}
 	for _, statement := range statements {
 		if _, err := d.db.ExecContext(ctx, statement); err != nil {

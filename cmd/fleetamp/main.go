@@ -102,6 +102,7 @@ func main() {
 	deploymentStore := database.Deployments()
 	groupStore := database.Groups()
 	groupRequestStore := database.GroupDeploymentRequests()
+	sectionPolicyStore := database.SectionPolicies()
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
 
@@ -188,8 +189,9 @@ func main() {
 	mux := http.NewServeMux()
 	auth.registerRoutes(mux)
 	registerHealthRoutes(mux)
-	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter)
-	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter)
+	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter, sectionPolicyStore, auth)
+	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter, sectionPolicyStore, auth)
+	registerSectionEditorRoutes(mux, sectionPolicyStore, configValidator, auth)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, auth, dataDir)
 	registerUIRoutes(mux)
 
@@ -243,7 +245,7 @@ func registerHealthRoutes(mux *http.ServeMux) {
 // registerAgentRoutes serves fleet inventory, agent detail, effective configuration, drift, deployment history, and per-agent deployment actions.
 func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, groupStore storage.GroupStore, eventStore interface {
 	ListSince(context.Context, time.Time) ([]*events.AgentEvent, error)
-}, adapter *fleetopamp.Adapter) {
+}, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager) {
 	// /api/v1/agents returns the current normalized inventory for automation clients.
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		agentsList, err := agentStore.List(r.Context())
@@ -386,6 +388,22 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		} else {
 			view.Drift = configs.CompareDesiredEffective("", view.EffectiveConfig)
 		}
+		view.EditorBaseline = view.EffectiveConfig
+		if strings.TrimSpace(view.EditorBaseline) == "" && view.DesiredConfig != nil {
+			view.EditorBaseline = view.DesiredConfig.Content
+		}
+		policies, policyErr := sectionPolicyStore.List(r.Context())
+		if policyErr != nil {
+			view.EditorError = "Unable to load configuration section policies."
+		} else {
+			principalRole := currentRole(auth, r)
+			view.CanEditConfiguration = principalRole == roleAdmin || principalRole == roleOperator
+			var editorErr error
+			view.EditorSections, editorErr = buildConfigurationSectionViews(view.EditorBaseline, policies, principalRole)
+			if editorErr != nil {
+				view.EditorError = editorErr.Error()
+			}
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := agentDetailPage.Execute(w, view); err != nil {
 			slog.Error("failed to render agent detail page", "component", "http", "event", "render_failed", "page", "agent_detail", "error", err)
@@ -417,6 +435,10 @@ type agentDetailView struct {
 	GroupIdentity         map[string]string
 	EffectiveLabels       map[string]string
 	UnknownGroupFields    map[string]string
+	EditorSections        []configurationSectionView
+	EditorBaseline        string
+	EditorError           string
+	CanEditConfiguration  bool
 	Error                 string
 }
 
@@ -569,7 +591,7 @@ func deliverConfiguration(ctx context.Context, agentUID string, configuration *c
 // assignment APIs. Validation occurs both before artifact creation and again
 // immediately before delivery to protect against unsafe desired state.
 // registerConfigRoutes serves configuration CRUD/listing pages, validation, direct deployment, rollback, and group rollout actions.
-func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter) {
+func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager) {
 	registerConfigurationUIRoutes(mux, configStore)
 
 	// POST /agents/{uid}/configurations validates and saves an immutable
@@ -588,8 +610,34 @@ func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationS
 		name := strings.TrimSpace(r.FormValue("name"))
 		version := strings.TrimSpace(r.FormValue("version"))
 		content := r.FormValue("content")
+		baseline, err := configurationBaseline(r.Context(), uid, configStore, assignmentStore, adapter)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if r.FormValue("editor_mode") == "sections" {
+			content, err = configs.ComposeConfigurationSections(baseline, sectionValuesFromForm(r))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+		}
 		if name == "" || version == "" || strings.TrimSpace(content) == "" {
 			http.Error(w, "name, version and configuration YAML are required", http.StatusBadRequest)
+			return
+		}
+		policies := configs.DefaultSectionPolicies()
+		if sectionPolicyStore != nil {
+			policies, err = sectionPolicyStore.List(r.Context())
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+		}
+		if err := enforceSectionPolicies(baseline, content, policies, currentRole(auth, r)); err != nil {
+			slog.Warn("configuration section edit rejected", "component", "config", "event", "section_edit_rejected",
+				"agent_uid", uid, "error", err)
+			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}
 		validation := validator.Validate(r.Context(), content)

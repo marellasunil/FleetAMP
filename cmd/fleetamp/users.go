@@ -39,8 +39,9 @@ const sessionJS = `(() => {
         identity.textContent = session.username + " · " + session.role;
         identity.hidden = false;
       }
-      const settings = document.getElementById("admin-settings-link");
-      if (settings && session.role !== "admin") settings.hidden = true;
+      document.querySelectorAll(".admin-settings-link").forEach((settings) => {
+        if (session.role !== "admin") settings.hidden = true;
+      });
     })
     .catch(() => {});
 })();`
