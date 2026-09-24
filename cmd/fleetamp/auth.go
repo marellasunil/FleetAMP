@@ -39,11 +39,14 @@ const (
 	maximumActiveSessions  = 32
 )
 
-type administratorStore interface {
+type userStore interface {
 	Exists(context.Context) (bool, error)
-	Get(context.Context) (*sqlitestore.Administrator, error)
-	Create(context.Context, sqlitestore.Administrator) error
+	Get(context.Context, string) (*sqlitestore.User, error)
+	List(context.Context) ([]*sqlitestore.User, error)
+	Create(context.Context, sqlitestore.User) error
 	ReplacePassword(context.Context, string, []byte, []byte) error
+	UpdateRole(context.Context, string, string) error
+	SetEnabled(context.Context, string, bool) error
 }
 type authSession struct {
 	Username string
@@ -52,7 +55,7 @@ type authSession struct {
 }
 
 type authManager struct {
-	store            administratorStore
+	store            userStore
 	pepper           []byte
 	bootstrapDigest  [sha256.Size]byte
 	bootstrapExpires time.Time
@@ -63,7 +66,7 @@ type authManager struct {
 }
 
 // newAuthManager loads the server-bound pepper, determines secure-cookie behavior, and starts first-login setup when needed.
-func newAuthManager(ctx context.Context, store administratorStore, dataDir, httpAddr string) (*authManager, error) {
+func newAuthManager(ctx context.Context, store userStore, dataDir, httpAddr string) (*authManager, error) {
 	pepper, source, err := loadServerPepper(dataDir, httpAddr)
 	if err != nil {
 		return nil, err
@@ -241,8 +244,8 @@ func (a *authManager) createAdministrator(ctx context.Context, username, passwor
 	if err != nil {
 		return err
 	}
-	if err := a.store.Create(ctx, sqlitestore.Administrator{
-		Username: username, Role: string(roleAdmin), PasswordSalt: salt,
+	if err := a.store.Create(ctx, sqlitestore.User{
+		Username: username, Role: string(roleAdmin), Enabled: true, PasswordSalt: salt,
 		PasswordHash: passwordDigest(password, a.pepper, salt),
 	}); err != nil {
 		return err
@@ -264,18 +267,18 @@ func (a *authManager) authenticate(ctx context.Context, username, password strin
 // authenticateRole returns the persisted role only after both username and
 // password have passed constant-time verification.
 func (a *authManager) authenticateRole(ctx context.Context, username, password string) (role, bool) {
-	admin, err := a.store.Get(ctx)
-	if err != nil {
+	user, err := a.store.Get(ctx, strings.TrimSpace(username))
+	if err != nil || !user.Enabled {
 		return "", false
 	}
 	actualUser := sha256.Sum256([]byte(strings.TrimSpace(username)))
-	expectedUser := sha256.Sum256([]byte(admin.Username))
-	actualHash := passwordDigest(password, a.pepper, admin.PasswordSalt)
+	expectedUser := sha256.Sum256([]byte(user.Username))
+	actualHash := passwordDigest(password, a.pepper, user.PasswordSalt)
 	if subtle.ConstantTimeCompare(actualUser[:], expectedUser[:]) != 1 ||
-		subtle.ConstantTimeCompare(actualHash, admin.PasswordHash) != 1 {
+		subtle.ConstantTimeCompare(actualHash, user.PasswordHash) != 1 {
 		return "", false
 	}
-	principalRole := role(admin.Role)
+	principalRole := role(user.Role)
 	if principalRole != roleAdmin && principalRole != roleOperator && principalRole != roleViewer {
 		return "", false
 	}
@@ -477,6 +480,7 @@ func (a *authManager) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/setup", a.handleSetup)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
+	a.registerUserRoutes(mux)
 }
 
 // handleSetup renders the first-administrator page on GET and processes the one-time setup form on POST.

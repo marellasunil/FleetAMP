@@ -15,50 +15,81 @@ import (
 )
 
 type memoryAdministratorStore struct {
-	mu    sync.Mutex
-	admin *sqlitestore.Administrator
+	mu   sync.Mutex
+	user *sqlitestore.User
 }
 
 func (s *memoryAdministratorStore) Exists(context.Context) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.admin != nil, nil
+	return s.user != nil, nil
 }
 
-func (s *memoryAdministratorStore) Get(context.Context) (*sqlitestore.Administrator, error) {
+func (s *memoryAdministratorStore) Get(_ context.Context, username string) (*sqlitestore.User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.admin == nil {
-		return nil, sqlitestore.ErrAdministratorNotFound
+	if s.user == nil || !strings.EqualFold(s.user.Username, username) {
+		return nil, sqlitestore.ErrUserNotFound
 	}
-	copy := *s.admin
-	copy.PasswordSalt = append([]byte(nil), s.admin.PasswordSalt...)
-	copy.PasswordHash = append([]byte(nil), s.admin.PasswordHash...)
+	copy := *s.user
+	copy.PasswordSalt = append([]byte(nil), s.user.PasswordSalt...)
+	copy.PasswordHash = append([]byte(nil), s.user.PasswordHash...)
 	return &copy, nil
 }
-func (s *memoryAdministratorStore) Create(_ context.Context, admin sqlitestore.Administrator) error {
+
+func (s *memoryAdministratorStore) List(context.Context) ([]*sqlitestore.User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.admin != nil {
-		return errors.New("administrator exists")
+	if s.user == nil {
+		return nil, nil
 	}
-	copy := admin
-	s.admin = &copy
+	copy := *s.user
+	return []*sqlitestore.User{&copy}, nil
+}
+
+func (s *memoryAdministratorStore) Create(_ context.Context, user sqlitestore.User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.user != nil {
+		return errors.New("user exists")
+	}
+	copy := user
+	s.user = &copy
 	return nil
 }
 
 func (s *memoryAdministratorStore) ReplacePassword(_ context.Context, username string, salt, hash []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.admin == nil || s.admin.Username != username {
-		return sqlitestore.ErrAdministratorNotFound
+	if s.user == nil || !strings.EqualFold(s.user.Username, username) {
+		return sqlitestore.ErrUserNotFound
 	}
-	s.admin.PasswordSalt = append([]byte(nil), salt...)
-	s.admin.PasswordHash = append([]byte(nil), hash...)
+	s.user.PasswordSalt = append([]byte(nil), salt...)
+	s.user.PasswordHash = append([]byte(nil), hash...)
 	return nil
 }
 
-func testAuthManager(store administratorStore, pepper, bootstrapToken string) *authManager {
+func (s *memoryAdministratorStore) UpdateRole(_ context.Context, username, nextRole string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.user == nil || !strings.EqualFold(s.user.Username, username) {
+		return sqlitestore.ErrUserNotFound
+	}
+	s.user.Role = nextRole
+	return nil
+}
+
+func (s *memoryAdministratorStore) SetEnabled(_ context.Context, username string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.user == nil || !strings.EqualFold(s.user.Username, username) {
+		return sqlitestore.ErrUserNotFound
+	}
+	s.user.Enabled = enabled
+	return nil
+}
+
+func testAuthManager(store userStore, pepper, bootstrapToken string) *authManager {
 	return &authManager{
 		store: store, pepper: []byte(pepper), now: time.Now,
 		bootstrapDigest:  sha256.Sum256([]byte(bootstrapToken)),
