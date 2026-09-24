@@ -4,6 +4,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -42,12 +43,19 @@ func TestExistingAdministratorMigratesToAdminRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	admin, err := db.Authentication().Get(ctx)
+	admin, err := db.Authentication().Get(ctx, "existing-admin")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if admin.Role != "admin" {
 		t.Fatalf("migrated role=%q, want admin", admin.Role)
+	}
+	var legacyRows int
+	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM administrators").Scan(&legacyRows); err != nil {
+		t.Fatal(err)
+	}
+	if legacyRows != 0 {
+		t.Fatalf("legacy administrator credentials remain after migration: %d row(s)", legacyRows)
 	}
 }
 
@@ -59,20 +67,62 @@ func TestAdministratorDefaultsToAdminRole(t *testing.T) {
 	}
 	defer db.Close()
 
-	admin := Administrator{
-		Username:     "admin",
+	admin := User{
+		Username: "admin", Role: "admin", Enabled: true,
 		PasswordSalt: []byte("0123456789abcdef"),
 		PasswordHash: []byte("test-password-hash"),
 	}
 	if err := db.Authentication().Create(ctx, admin); err != nil {
 		t.Fatal(err)
 	}
-	stored, err := db.Authentication().Get(ctx)
+	stored, err := db.Authentication().Get(ctx, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.Role != "admin" {
 		t.Fatalf("administrator role=%q, want admin", stored.Role)
+	}
+}
+
+func TestUserRolesAndLastAdminProtection(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "users.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := db.Authentication()
+	create := func(username, role string) {
+		t.Helper()
+		if err := store.Create(ctx, User{
+			Username: username, Role: role, Enabled: true,
+			PasswordSalt: []byte("0123456789abcdef"),
+			PasswordHash: []byte("password-verifier"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create("primary-admin", "admin")
+	create("operator-one", "operator")
+
+	if err := store.UpdateRole(ctx, "primary-admin", "viewer"); !errors.Is(err, ErrLastAdmin) {
+		t.Fatalf("demote last Admin error=%v", err)
+	}
+	if err := store.SetEnabled(ctx, "primary-admin", false); !errors.Is(err, ErrLastAdmin) {
+		t.Fatalf("disable last Admin error=%v", err)
+	}
+	if err := store.UpdateRole(ctx, "operator-one", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateRole(ctx, "primary-admin", "viewer"); err != nil {
+		t.Fatal(err)
+	}
+	users, err := store.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 2 || users[0].Username != "operator-one" || users[1].Role != "viewer" {
+		t.Fatalf("unexpected users: %#v", users)
 	}
 }
 
@@ -292,8 +342,9 @@ func TestAdministratorPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	admin := Administrator{
-		Username: "admin", PasswordSalt: []byte("0123456789abcdef"),
+	admin := User{
+		Username: "admin", Role: "admin", Enabled: true,
+		PasswordSalt: []byte("0123456789abcdef"),
 		PasswordHash: []byte("stored-password-verifier"),
 	}
 	if err := db.Authentication().Create(ctx, admin); err != nil {
@@ -307,7 +358,7 @@ func TestAdministratorPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	got, err := reopened.Authentication().Get(ctx)
+	got, err := reopened.Authentication().Get(ctx, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

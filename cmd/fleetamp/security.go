@@ -118,6 +118,9 @@ const (
 // requiredPermission maps each request to the minimum server-side role.
 // The section-policy feature can extend this map without relying on UI state.
 func requiredPermission(r *http.Request) permission {
+	if r.URL.Path == "/settings/users" || strings.HasPrefix(r.URL.Path, "/settings/users/") {
+		return permissionAdmin
+	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
 		return permissionRead
 	}

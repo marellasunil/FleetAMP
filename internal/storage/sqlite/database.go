@@ -119,6 +119,15 @@ func (d *Database) initialize(ctx context.Context) error {
             password_hash BLOB NOT NULL, created_at TEXT NOT NULL,
             password_changed_at TEXT NOT NULL
         )`,
+		`CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY COLLATE NOCASE,
+            role TEXT NOT NULL CHECK (role IN ('admin','operator','viewer')),
+            enabled INTEGER NOT NULL DEFAULT 1,
+            password_salt BLOB NOT NULL, password_hash BLOB NOT NULL,
+            created_at TEXT NOT NULL, password_changed_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_users_role_enabled ON users(role, enabled)`,
 	}
 	for _, statement := range statements {
 		if _, err := d.db.ExecContext(ctx, statement); err != nil {
@@ -129,6 +138,9 @@ func (d *Database) initialize(ctx context.Context) error {
 		return err
 	}
 	if err := d.ensureAdministratorRoleColumn(ctx); err != nil {
+		return err
+	}
+	if err := d.migrateAdministratorToUsers(ctx); err != nil {
 		return err
 	}
 	return d.db.PingContext(ctx)
@@ -183,4 +195,29 @@ func (d *Database) ensureAdministratorRoleColumn(ctx context.Context) error {
 		return fmt.Errorf("add administrators.role column: %w", err)
 	}
 	return nil
+}
+
+// migrateAdministratorToUsers preserves the bootstrap account while moving
+// authentication to the multi-user RBAC store. It is safe to run repeatedly.
+func (d *Database) migrateAdministratorToUsers(ctx context.Context) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin administrator migration: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+        INSERT OR IGNORE INTO users (
+            username, role, enabled, password_salt, password_hash,
+            created_at, password_changed_at, updated_at
+        )
+        SELECT username, role, 1, password_salt, password_hash,
+               created_at, password_changed_at, password_changed_at
+        FROM administrators
+    `); err != nil {
+		return fmt.Errorf("migrate administrator to users: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM administrators`); err != nil {
+		return fmt.Errorf("clear migrated administrator credential: %w", err)
+	}
+	return tx.Commit()
 }
