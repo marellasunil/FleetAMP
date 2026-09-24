@@ -12,7 +12,7 @@ const baseControlPlaneCSS = `
 `
 const controlPlaneCSS = baseControlPlaneCSS + themeCSS
 
-const sideNav = `<aside class="side"><div class="brand"><div class="brandmark">∿</div><div><div class="brandname">FleetAMP</div><div class="brandsub">CONTROL PLANE</div></div></div><nav><a class="navitem {{if eq .Page "fleet"}}active{{end}}" href="/agents"><span class="navicon">▦</span>Fleet</a><a class="navitem {{if eq .Page "groups"}}active{{end}}" href="/groups"><span class="navicon">♙</span>Groups</a><a class="navitem {{if eq .Page "deployments"}}active{{end}}" href="/deployments"><span class="navicon">➤</span>Deployments</a><div class="navlabel">Observe</div><a class="navitem" href="/pipelines"><span class="navicon">⌁</span>Pipelines<span class="soon">Upcoming</span></a><a class="navitem" href="/audit-log"><span class="navicon">◷</span>Audit log<span class="soon">Upcoming</span></a></nav><div class="sidebottom"><div class="mode">◉ Community preview<small>Live data unless marked Upcoming.</small></div><div class="tiny" id="current-user" hidden></div><button class="navitem theme-toggle" id="theme-toggle" type="button" aria-label="Switch color theme">☀ Light theme</button><a class="navitem {{if eq .Page "settings"}}active{{end}}" id="admin-settings-link" href="/settings/users"><span class="navicon">☷</span>Users & roles</a><form method="post" action="/logout"><button class="navitem" type="submit" style="width:100%;border:0;cursor:pointer"><span class="navicon">↪</span>Sign out</button></form></div></aside><script src="/assets/theme.js" defer></script><script src="/assets/session.js" defer></script>`
+const sideNav = `<aside class="side"><div class="brand"><div class="brandmark">∿</div><div><div class="brandname">FleetAMP</div><div class="brandsub">CONTROL PLANE</div></div></div><nav><a class="navitem {{if eq .Page "fleet"}}active{{end}}" href="/agents"><span class="navicon">▦</span>Fleet</a><a class="navitem {{if eq .Page "groups"}}active{{end}}" href="/groups"><span class="navicon">♙</span>Groups</a><a class="navitem {{if eq .Page "deployments"}}active{{end}}" href="/deployments"><span class="navicon">➤</span>Deployments</a><div class="navlabel">Observe</div><a class="navitem" href="/pipelines"><span class="navicon">⌁</span>Pipelines<span class="soon">Upcoming</span></a><a class="navitem" href="/audit-log"><span class="navicon">◷</span>Audit log<span class="soon">Upcoming</span></a></nav><div class="sidebottom"><div class="mode">◉ Community preview<small>Live data unless marked Upcoming.</small></div><div class="tiny" id="current-user" hidden></div><button class="navitem theme-toggle" id="theme-toggle" type="button" aria-label="Switch color theme">☀ Light theme</button><a class="navitem {{if eq .Page "settings"}}active{{end}} admin-settings-link" href="/settings/users"><span class="navicon">☷</span>Users & roles</a><a class="navitem {{if eq .Page "settings"}}active{{end}} admin-settings-link" href="/settings/configuration-sections"><span class="navicon">⚙</span>Config policies</a><form method="post" action="/logout"><button class="navitem" type="submit" style="width:100%;border:0;cursor:pointer"><span class="navicon">↪</span>Sign out</button></form></div></aside><script src="/assets/theme.js" defer></script><script src="/assets/session.js" defer></script>`
 
 const fleetHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FleetAMP Fleet</title><style>` + controlPlaneCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Fleet</div><div class="pagetitle">Fleet</div><div class="subtitle">Live control-plane state across your telemetry estate</div></div><div class="topactions"><div class="connection"><span class="dot"></span>OpAMP listening</div><a class="btn primary" href="/deployments">➤ Deploy configuration</a></div></header><div class="content">
 <div class="metrics"><div class="metric"><div class="metriclabel">Managed agents</div><div class="metricvalue">{{.Known}}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:7px 0"><span class="badge ok">{{.Active}} Active</span><span class="badge off">{{.Offline}} Offline</span><span class="badge warn">{{.Retired}} Retired</span></div>{{if .LastConnectedAgent}}<div class="metricnote">Last connected: {{.LastConnectedAgent}} · Group: {{.LastConnectedGroup}}</div>{{else}}<div class="metricnote">No connection event recorded</div>{{end}}</div><div class="metric"><div class="metriclabel">Fleet health</div><div class="metricvalue green">{{.HealthyPercent}}%</div><div class="metricnote">{{.Healthy}} agents healthy</div></div><div class="metric"><div class="metriclabel">Needs attention</div><div class="metricvalue amber">{{.Attention}}</div><div class="metricnote">Disconnected or unhealthy</div></div><div class="metric upcoming"><div class="metriclabel">Signal throughput · Upcoming</div><div class="metricvalue purple">—</div><div class="metricnote">Collector self-telemetry integration planned</div></div></div>
@@ -35,44 +35,81 @@ type upcomingView struct{ Page, Title, Subtitle, Current, Upcoming string }
 const configurationEditorJS = `(() => {
   const form = document.getElementById("configuration-editor-form");
   const content = document.getElementById("configuration-content");
+  const baseline = document.getElementById("configuration-baseline");
+  const preview = document.getElementById("configuration-preview");
+  const previewButton = document.getElementById("configuration-preview-button");
   const errorBox = document.getElementById("configuration-validation-error");
-  if (!form || !content || !errorBox) return;
+  if (!form || !content || !baseline || !errorBox) return;
 
   const submitButton = form.querySelector('button[type="submit"]');
+  const editors = Array.from(form.querySelectorAll("[data-section-key]"));
+  const tabs = Array.from(form.querySelectorAll("[data-section-tab]"));
+  const panels = Array.from(form.querySelectorAll("[data-section-panel]"));
   let validated = false;
+
+  const selectTab = (key) => {
+    tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.sectionTab === key));
+    panels.forEach((panel) => panel.classList.toggle("active", panel.dataset.sectionPanel === key));
+  };
+  tabs.forEach((tab) => tab.addEventListener("click", () => selectTab(tab.dataset.sectionTab)));
+
+  const clearValidation = () => {
+    errorBox.hidden = true;
+    errorBox.textContent = "";
+    validated = false;
+  };
+  editors.forEach((editor) => editor.addEventListener("input", clearValidation));
+
   const showError = (message) => {
     errorBox.textContent = message || "Configuration validation failed.";
     errorBox.hidden = false;
     errorBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
-  content.addEventListener("input", () => {
-    errorBox.hidden = true;
-    errorBox.textContent = "";
-    validated = false;
+  const sections = () => Object.fromEntries(
+    editors.map((editor) => [editor.dataset.sectionKey, editor.value])
+  );
+  const composeAndValidate = async () => {
+    const response = await fetch("/api/v1/configurations/sections/compose", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ baseline: baseline.value, sections: sections() })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.validation || !result.validation.valid) {
+      throw new Error((result.validation && result.validation.error) || "Configuration validation failed.");
+    }
+    content.value = result.content;
+    if (preview) preview.value = result.content;
+    return result.content;
+  };
+
+  if (previewButton) previewButton.addEventListener("click", async () => {
+    clearValidation();
+    previewButton.disabled = true;
+    try {
+      await composeAndValidate();
+      selectTab("complete_preview");
+    } catch (error) {
+      showError(error.message);
+    } finally {
+      previewButton.disabled = false;
+    }
   });
+
   form.addEventListener("submit", async (event) => {
     if (validated) return;
     event.preventDefault();
-    errorBox.hidden = true;
-    submitButton.disabled = true;
+    clearValidation();
+    if (submitButton) submitButton.disabled = true;
     try {
-      const response = await fetch("/api/v1/configurations/validate", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify({ content: content.value })
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.valid) {
-        showError(result.error || "Configuration validation failed.");
-        return;
-      }
+      await composeAndValidate();
       validated = true;
       form.requestSubmit(submitButton);
-    } catch (_) {
-      showError("Unable to validate the configuration. Check the connection and try again.");
+    } catch (error) {
+      showError(error.message || "Unable to validate the configuration.");
     } finally {
-      submitButton.disabled = false;
+      if (submitButton) submitButton.disabled = false;
     }
   });
 })();`
@@ -114,7 +151,7 @@ func registerUIRoutes(mux *http.ServeMux) {
 	}
 }
 
-const detailCSS = `
+const detailCSS = sectionEditorCSS + `
 .detailgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.wide{grid-column:1/-1}.kv{display:grid;grid-template-columns:145px minmax(0,1fr);gap:9px 14px}.kv>span:nth-child(odd){color:var(--muted)}.chips{display:flex;gap:7px;flex-wrap:wrap}.configeditor{display:grid;gap:12px}.configerror{padding:12px 14px;border:1px solid #a63d4a;background:#35151b;border-radius:8px;color:#ff9dab;font-weight:650}.configerror[hidden]{display:none}.configeditor textarea{width:100%;min-height:440px;resize:vertical;background:#07111e;border:1px solid #29405f;border-radius:8px;padding:13px;color:#d8e5ff;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.chip{background:#152237;border:1px solid #293c57;border-radius:999px;padding:5px 9px;font-size:10px}.detailactions{display:flex;gap:8px;flex-wrap:wrap}.detailform{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.detailform label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:10px}.detailform .input{min-width:190px}.notice{padding:12px 14px;border:1px solid #704e26;background:#382817;border-radius:8px;color:#ffd08a;margin-bottom:14px}pre{margin:0;white-space:pre-wrap;overflow:auto;background:#07111e;border:1px solid #203047;border-radius:8px;padding:13px;max-height:430px;color:#b9caf0;font:11px ui-monospace,SFMono-Regular,Menlo,monospace}.driftitem{padding:10px 0;border-bottom:1px solid #1d2c40}.driftitem:last-child{border:0}@media(max-width:900px){.detailgrid{grid-template-columns:1fr}.wide{grid-column:auto}.kv{grid-template-columns:1fr}}
 `
 
@@ -132,7 +169,7 @@ const agentDetailHTML = `<!doctype html><html><head><meta charset="utf-8"><meta 
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Deployment status</div><div class="cardsub">Latest configuration delivery state</div></div></div><div class="cardbody">{{if .DeploymentSummary.LastDeployment}}<div class="kv"><span>Current deployed</span><span>{{if .DeploymentSummary.CurrentDeployedVersion}}v{{.DeploymentSummary.CurrentDeployedVersion}}{{else}}Unknown{{end}}</span><span>Last deployment</span><span>{{.DeploymentSummary.LastDeployment.ConfigurationName}} v{{.DeploymentSummary.LastDeployment.ConfigurationVersion}}</span><span>Status</span><span>{{.DeploymentSummary.LastDeployment.Status}}</span><span>Duration</span><span>{{if .DeploymentSummary.LastDeploymentDuration}}{{.DeploymentSummary.LastDeploymentDuration}}{{else}}—{{end}}</span></div>{{else}}<div class="tiny">No FleetAMP deployment history recorded yet.</div>{{end}}</div></section>
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Configuration drift</div><div class="cardsub">Desired versus effective state</div></div></div><div class="cardbody"><div class="kv"><span>Status</span><span>{{.Drift.Status}}</span>{{if .Drift.Reason}}<span>Reason</span><span>{{.Drift.Reason}}</span>{{end}}</div>{{if .Drift.Differences}}<div style="margin-top:12px">{{range .Drift.Differences}}<div class="driftitem"><span class="code">{{.Path}}</span> <span class="amber">{{.Kind}}</span><div class="tiny">Desired: {{printf "%v" .Desired}}</div><div class="tiny">Effective: {{printf "%v" .Effective}}</div></div>{{end}}</div>{{end}}</div></section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Configuration state</div><div class="cardsub">Desired and effective configuration</div></div></div><div class="cardbody" style="display:grid;grid-template-columns:1fr 1fr;gap:14px"><div><div class="agentname" style="margin-bottom:8px">Desired</div>{{if .DesiredConfig}}<div class="tiny" style="margin-bottom:8px">{{.DesiredConfig.Name}} · version {{.DesiredConfig.Version}}</div><pre>{{.DesiredConfig.Content}}</pre>{{else}}<div class="tiny">No desired FleetAMP configuration.</div>{{end}}</div><div><div class="agentname" style="margin-bottom:8px">Effective</div>{{if .EffectiveConfig}}<pre>{{.EffectiveConfig}}</pre>{{else}}<div class="tiny">No effective configuration reported yet.</div>{{end}}</div></div></section>
-<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">Edit a copy, validate it, and save an immutable version</div></div>{{if .RemoteConfigSupported}}<span class="badge ok">Supported</span>{{else}}<span class="badge warn">Delivery unavailable</span>{{end}}</div><div class="cardbody"><div id="configuration-validation-error" class="configerror" role="alert" aria-live="polite" hidden></div><form id="configuration-editor-form" class="configeditor" method="post" action="/agents/{{.Agent.InstanceUID}}/configurations"><div class="detailform"><label>Configuration name<input class="input" name="name" value="{{if .DesiredConfig}}{{.DesiredConfig.Name}}{{else}}{{.Agent.Name}}.yaml{{end}}" required maxlength="160"></label><label>New version<input class="input" name="version" placeholder="for example 1.0.0" required maxlength="80"></label></div><label class="tiny" for="configuration-content">Collector YAML</label><textarea id="configuration-content" name="content" spellcheck="false" required>{{if .EffectiveConfig}}{{.EffectiveConfig}}{{else if .DesiredConfig}}{{.DesiredConfig.Content}}{{end}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Validate and save version</button></div><p class="tiny">Saving does not deploy or overwrite a previous version. The version becomes available to the group approval workflow.</p></form>{{if not .EffectiveConfig}}<div class="notice" style="margin-top:14px">No effective configuration was reported, so paste a complete Collector configuration before saving.</div>{{end}}</div></section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">Edit sections, reconstruct the complete Collector YAML, validate it, and save an immutable version</div></div>{{if .RemoteConfigSupported}}<span class="badge ok">Supported</span>{{else}}<span class="badge warn">Delivery unavailable</span>{{end}}</div><div class="cardbody">{{if .EditorError}}<div class="configerror" role="alert">{{.EditorError}}</div>{{end}}<div id="configuration-validation-error" class="configerror" role="alert" aria-live="polite" hidden></div><form id="configuration-editor-form" class="configeditor" method="post" action="/agents/{{.Agent.InstanceUID}}/configurations"><input type="hidden" name="editor_mode" value="sections"><textarea id="configuration-baseline" hidden>{{.EditorBaseline}}</textarea><input type="hidden" id="configuration-content" name="content"><div class="detailform"><label>Configuration name<input class="input" name="name" value="{{if .DesiredConfig}}{{.DesiredConfig.Name}}{{else}}{{.Agent.Name}}.yaml{{end}}" required maxlength="160"></label><label>New version<input class="input" name="version" placeholder="for example 1.0.0" required maxlength="80"></label></div>{{if .EditorSections}}<div class="section-tabs" role="tablist">{{range $index,$section := .EditorSections}}<button class="section-tab {{if eq $index 0}}active{{end}}" type="button" role="tab" data-section-tab="{{$section.Key}}">{{$section.Title}}</button>{{end}}<button class="section-tab" type="button" role="tab" data-section-tab="complete_preview">Complete YAML</button></div>{{range $index,$section := .EditorSections}}<section class="section-panel {{if eq $index 0}}active{{end}}" data-section-panel="{{$section.Key}}"><div class="section-heading"><div><strong>{{$section.Title}}</strong><div class="tiny">{{$section.Description}}</div></div>{{if $section.Editable}}<span class="badge ok">Editable</span>{{else}}<span class="badge off">Read-only by Admin policy</span>{{end}}</div><textarea class="section-editor" name="section_{{$section.Key}}" data-section-key="{{$section.Key}}" spellcheck="false" {{if not $section.Editable}}readonly{{end}}>{{$section.Content}}</textarea></section>{{end}}<section class="section-panel" data-section-panel="complete_preview"><div class="section-heading"><div><strong>Complete Collector YAML</strong><div class="tiny">Generated from all sections and validated as one deployable configuration.</div></div><span class="badge off">Generated preview</span></div><textarea id="configuration-preview" class="section-editor preview-editor" readonly spellcheck="false">{{.EditorBaseline}}</textarea></section><div class="detailactions">{{if .CanEditConfiguration}}<button class="btn" id="configuration-preview-button" type="button">Validate and preview</button><button class="btn primary" type="submit">Validate and save version</button>{{end}}</div>{{else}}<div class="notice">The reported configuration could not be divided into supported Collector sections.</div>{{end}}<p class="tiny">Unknown keys from the current complete configuration are preserved. Saving does not deploy or overwrite a previous version; it enters the existing approval workflow.</p></form>{{if not .EditorBaseline}}<div class="notice" style="margin-top:14px">No effective or desired configuration was found. Admins may create a complete configuration section by section.</div>{{end}}</div></section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Saved configuration versions</div><div class="cardsub">Available for deployment preview, visualization and approval</div></div></div>{{if .SavedConfigurations}}<div style="overflow:auto"><table><thead><tr><th>Name</th><th>Version</th><th>Hash</th><th>Created</th></tr></thead><tbody>{{range .SavedConfigurations}}<tr><td><a class="agentname" href="/configurations/{{.ID}}">{{.Name}}</a><div class="tiny">View pipeline</div></td><td>{{.Version}}</td><td class="tiny code">{{.Hash}}</td><td>{{.CreatedAt}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No saved configuration versions yet.</div>{{end}}</section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Deployment history</div><div class="cardsub">Latest configuration attempts for this agent</div></div></div>{{if .Deployments}}<div style="overflow:auto"><table><thead><tr><th>Configuration</th><th>Action</th><th>Status</th><th>Created</th><th>Applied / Failed</th></tr></thead><tbody>{{range .Deployments}}<tr><td><strong>{{.ConfigurationName}} v{{.ConfigurationVersion}}</strong><div class="tiny code">{{.ID}}</div></td><td>{{.Action}}</td><td>{{.Status}}{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</td><td>{{.CreatedAt}}</td><td>{{if .AppliedAt}}{{.AppliedAt}}{{else if .FailedAt}}{{.FailedAt}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No deployment history recorded.</div>{{end}}</section>
 </div></div></main></div><script src="/assets/configuration-editor.js" defer></script></body></html>`

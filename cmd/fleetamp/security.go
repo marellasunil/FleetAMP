@@ -118,7 +118,12 @@ const (
 // requiredPermission maps each request to the minimum server-side role.
 // The section-policy feature can extend this map without relying on UI state.
 func requiredPermission(r *http.Request) permission {
-	if r.URL.Path == "/settings/users" || strings.HasPrefix(r.URL.Path, "/settings/users/") {
+	if r.URL.Path == "/settings" || strings.HasPrefix(r.URL.Path, "/settings/") {
+		return permissionAdmin
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/configurations" {
+		// Raw complete-document creation bypasses per-section baselines, so it
+		// remains Admin-only. Operators use the policy-enforced agent editor.
 		return permissionAdmin
 	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {

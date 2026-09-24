@@ -367,3 +367,51 @@ func TestAdministratorPersistence(t *testing.T) {
 		t.Fatalf("administrator mismatch: %#v", got)
 	}
 }
+
+func TestConfigurationSectionPolicyPersistence(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "section-policies.db")
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := db.SectionPolicies()
+	policies, err := store.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exportersEditable bool
+	for _, policy := range policies {
+		if policy.SectionKey == configs.SectionExporters {
+			exportersEditable = policy.OperatorEditable
+		}
+	}
+	if exportersEditable {
+		t.Fatal("exporters should be read-only for Operators by default")
+	}
+	if err := store.SetOperatorEditable(ctx, configs.SectionExporters, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	policies, err = reopened.SectionPolicies().List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range policies {
+		if policy.SectionKey == configs.SectionExporters {
+			if !policy.OperatorEditable {
+				t.Fatal("exporter policy did not persist")
+			}
+			return
+		}
+	}
+	t.Fatal("exporter policy is missing")
+}
