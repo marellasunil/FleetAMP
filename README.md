@@ -27,6 +27,7 @@ FleetAMP aims to provide a simple community-oriented way to:
 - manage versioned configurations
 - deploy remote configuration through management adapters
 - compare desired and effective configuration
+- let administrators report configuration drift or enforce the approved desired state
 - support safe rollout and rollback workflows
 - integrate with Git-based configuration sources
 - enrich fleet metadata from CMDB/CSDM or other metadata providers

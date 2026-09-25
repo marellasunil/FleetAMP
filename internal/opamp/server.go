@@ -41,16 +41,17 @@ import (
 )
 
 type Adapter struct {
-	listenEndpoint string
-	authToken      string
-	tlsConfig      *tls.Config
-	events         chan management.Event
-	configEvents   chan configs.StatusReport
-	server         server.OpAMPServer
-	mu             sync.Mutex
-	byConn         map[servertypes.Connection]*agents.ManagedAgent
-	byUID          map[string]servertypes.Connection
-	effective      map[string]string
+	listenEndpoint  string
+	authToken       string
+	tlsConfig       *tls.Config
+	events          chan management.Event
+	configEvents    chan configs.StatusReport
+	effectiveEvents chan configs.EffectiveConfigReport
+	server          server.OpAMPServer
+	mu              sync.Mutex
+	byConn          map[servertypes.Connection]*agents.ManagedAgent
+	byUID           map[string]servertypes.Connection
+	effective       map[string]string
 }
 
 // NewAdapter creates an OpAMP adapter bound to the configured WebSocket listener.
@@ -58,14 +59,15 @@ type Adapter struct {
 // When tlsConfig is non-nil, the listener accepts secure WebSocket connections.
 func NewAdapter(listenEndpoint, authToken string, tlsConfig *tls.Config) *Adapter {
 	return &Adapter{
-		listenEndpoint: listenEndpoint,
-		authToken:      authToken,
-		tlsConfig:      tlsConfig,
-		events:         make(chan management.Event, 128),
-		configEvents:   make(chan configs.StatusReport, 128),
-		byConn:         make(map[servertypes.Connection]*agents.ManagedAgent),
-		byUID:          make(map[string]servertypes.Connection),
-		effective:      make(map[string]string),
+		listenEndpoint:  listenEndpoint,
+		authToken:       authToken,
+		tlsConfig:       tlsConfig,
+		events:          make(chan management.Event, 128),
+		configEvents:    make(chan configs.StatusReport, 128),
+		effectiveEvents: make(chan configs.EffectiveConfigReport, 128),
+		byConn:          make(map[servertypes.Connection]*agents.ManagedAgent),
+		byUID:           make(map[string]servertypes.Connection),
+		effective:       make(map[string]string),
 	}
 }
 
@@ -77,6 +79,11 @@ func (a *Adapter) Events() <-chan management.Event { return a.events }
 
 // ConfigEvents exposes remote-configuration status reports received from agents.
 func (a *Adapter) ConfigEvents() <-chan configs.StatusReport { return a.configEvents }
+
+// EffectiveConfigEvents reports a changed effective configuration for drift handling.
+func (a *Adapter) EffectiveConfigEvents() <-chan configs.EffectiveConfigReport {
+	return a.effectiveEvents
+}
 
 // Start runs the opamp-go server until context cancellation or a listener error.
 func (a *Adapter) Start(ctx context.Context) error {
@@ -166,10 +173,15 @@ func (a *Adapter) onMessage(_ context.Context, conn servertypes.Connection, msg 
 	}
 	a.byConn[conn] = cloneManagedAgent(agent)
 	a.byUID[agent.InstanceUID] = conn
-	if effective := effectiveConfigString(msg.GetEffectiveConfig()); effective != "" {
+	effective := effectiveConfigString(msg.GetEffectiveConfig())
+	effectiveChanged := effective != "" && effective != a.effective[agent.InstanceUID]
+	if effectiveChanged {
 		a.effective[agent.InstanceUID] = effective
 	}
 	a.mu.Unlock()
+	if effectiveChanged {
+		a.effectiveEvents <- configs.EffectiveConfigReport{AgentInstanceUID: agent.InstanceUID, Content: effective}
+	}
 	eventType := management.EventUpdated
 	if !existed {
 		eventType = management.EventConnected

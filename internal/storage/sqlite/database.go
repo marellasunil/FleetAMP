@@ -69,6 +69,9 @@ func (d *Database) Authentication() *AuthStore { return &AuthStore{db: d.db} }
 // SectionPolicies returns the SQLite-backed configuration-section policy repository.
 func (d *Database) SectionPolicies() *SectionPolicyStore { return &SectionPolicyStore{db: d.db} }
 
+// DriftPolicy returns the SQLite-backed global drift policy repository.
+func (d *Database) DriftPolicy() *DriftPolicyStore { return &DriftPolicyStore{db: d.db} }
+
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -136,6 +139,13 @@ func (d *Database) initialize(ctx context.Context) error {
             operator_editable INTEGER NOT NULL CHECK (operator_editable IN (0, 1)),
             updated_at TEXT NOT NULL
         )`,
+		`CREATE TABLE IF NOT EXISTS configuration_drift_policy (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            policy TEXT NOT NULL CHECK (policy IN ('report_only','enforce')),
+            updated_at TEXT NOT NULL
+        )`,
+		`INSERT OR IGNORE INTO configuration_drift_policy(singleton,policy,updated_at)
+            VALUES(1,'report_only',CURRENT_TIMESTAMP)`,
 	}
 	for _, statement := range statements {
 		if _, err := d.db.ExecContext(ctx, statement); err != nil {
