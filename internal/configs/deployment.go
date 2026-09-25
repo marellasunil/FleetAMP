@@ -23,8 +23,9 @@ var (
 type DeploymentAction string
 
 const (
-	DeploymentActionDeploy   DeploymentAction = "deploy"
-	DeploymentActionRollback DeploymentAction = "rollback"
+	DeploymentActionDeploy    DeploymentAction = "deploy"
+	DeploymentActionRollback  DeploymentAction = "rollback"
+	DeploymentActionReconcile DeploymentAction = "reconcile"
 )
 
 type Deployment struct {

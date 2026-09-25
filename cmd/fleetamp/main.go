@@ -103,6 +103,7 @@ func main() {
 	groupStore := database.Groups()
 	groupRequestStore := database.GroupDeploymentRequests()
 	sectionPolicyStore := database.SectionPolicies()
+	driftPolicyStore := database.DriftPolicy()
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
 
@@ -185,6 +186,7 @@ func main() {
 	}()
 
 	go runRetirementLoop(ctx, agentStore, eventStore, retireAfter, dataDir)
+	go runDriftReconciler(ctx, driftPolicyStore, assignmentStore, configStore, deploymentStore, adapter)
 
 	mux := http.NewServeMux()
 	auth.registerRoutes(mux)
@@ -192,6 +194,7 @@ func main() {
 	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter, sectionPolicyStore, auth)
 	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter, sectionPolicyStore, auth)
 	registerSectionEditorRoutes(mux, sectionPolicyStore, configValidator, auth)
+	registerDriftPolicyRoutes(mux, driftPolicyStore, auth)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, auth, dataDir)
 	registerUIRoutes(mux)
 
@@ -536,7 +539,8 @@ func deliverConfiguration(ctx context.Context, agentUID string, configuration *c
 	if err != nil && !errors.Is(err, storage.ErrAssignmentNotFound) {
 		return nil, nil, err
 	}
-	if err == nil && latest.ConfigurationHash == configuration.Hash && latest.Status == configs.DeliveryApplied {
+	if action != configs.DeploymentActionReconcile && err == nil &&
+		latest.ConfigurationHash == configuration.Hash && latest.Status == configs.DeliveryApplied {
 		return latest, nil, configs.ErrConfigurationCurrent
 	}
 	if recent, err := deploymentStore.ListByAgent(ctx, agentUID, 1); err != nil {
