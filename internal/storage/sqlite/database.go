@@ -72,6 +72,9 @@ func (d *Database) SectionPolicies() *SectionPolicyStore { return &SectionPolicy
 // DriftPolicy returns the SQLite-backed global drift policy repository.
 func (d *Database) DriftPolicy() *DriftPolicyStore { return &DriftPolicyStore{db: d.db} }
 
+// Audit returns the SQLite-backed append-only audit repository.
+func (d *Database) Audit() *AuditStore { return &AuditStore{db: d.db} }
+
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -146,6 +149,16 @@ func (d *Database) initialize(ctx context.Context) error {
         )`,
 		`INSERT OR IGNORE INTO configuration_drift_policy(singleton,policy,updated_at)
             VALUES(1,'report_only',CURRENT_TIMESTAMP)`,
+		`CREATE TABLE IF NOT EXISTS audit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            occurred_at TEXT NOT NULL, actor TEXT NOT NULL,
+            action TEXT NOT NULL, resource_type TEXT NOT NULL,
+            resource_id TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL,
+            http_method TEXT NOT NULL, path TEXT NOT NULL, status_code INTEGER NOT NULL
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_occurred ON audit_events(occurred_at DESC,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor,occurred_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_action ON audit_events(action,occurred_at DESC)`,
 	}
 	for _, statement := range statements {
 		if _, err := d.db.ExecContext(ctx, statement); err != nil {
