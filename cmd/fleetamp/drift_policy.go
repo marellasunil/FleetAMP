@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"time"
 
+	"github.com/marellasunil/FleetAMP/internal/audit"
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
 	"github.com/marellasunil/FleetAMP/internal/storage"
@@ -78,6 +80,7 @@ func runDriftReconciler(
 	assignmentStore storage.AssignmentStore,
 	configStore storage.ConfigurationStore,
 	deploymentStore storage.DeploymentStore,
+	auditStore storage.AuditStore,
 	adapter *fleetopamp.Adapter,
 ) {
 	for {
@@ -113,8 +116,20 @@ func runDriftReconciler(
 			if err != nil {
 				slog.Warn("configuration drift reconciliation failed", "component", "config",
 					"event", "drift_reconcile_failed", "agent_uid", report.AgentInstanceUID, "error", err)
+				_ = auditStore.Append(context.Background(), &audit.Event{
+					Timestamp: time.Now().UTC(), Actor: "fleetamp-system",
+					Action: "configuration.reconcile", ResourceType: "agent",
+					ResourceID: report.AgentInstanceUID, Outcome: "failed",
+					HTTPMethod: "SYSTEM", Path: "opamp/effective-config", StatusCode: 500,
+				})
 				continue
 			}
+			_ = auditStore.Append(context.Background(), &audit.Event{
+				Timestamp: time.Now().UTC(), Actor: "fleetamp-system",
+				Action: "configuration.reconcile", ResourceType: "agent",
+				ResourceID: report.AgentInstanceUID, Outcome: "success",
+				HTTPMethod: "SYSTEM", Path: "opamp/effective-config", StatusCode: 200,
+			})
 			slog.Info("configuration drift reconciliation sent", "component", "config",
 				"event", "drift_reconcile_sent", "agent_uid", report.AgentInstanceUID,
 				"configuration_id", configuration.ID, "deployment_id", deployment.ID)

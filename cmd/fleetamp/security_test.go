@@ -271,6 +271,12 @@ func TestSecurityMiddlewareEnforcesSessionRole(t *testing.T) {
 	if got := testRequest(roleAdmin, http.MethodGet, "/settings/users", ""); got != http.StatusNoContent {
 		t.Fatalf("admin user-management status=%d", got)
 	}
+	if got := testRequest(roleOperator, http.MethodGet, "/audit-log", ""); got != http.StatusForbidden {
+		t.Fatalf("operator audit-log status=%d", got)
+	}
+	if got := testRequest(roleAdmin, http.MethodGet, "/audit-log", ""); got != http.StatusNoContent {
+		t.Fatalf("admin audit-log status=%d", got)
+	}
 }
 
 func TestValidRequestOriginAllowsNullOnlyForSameSiteLoopback(t *testing.T) {

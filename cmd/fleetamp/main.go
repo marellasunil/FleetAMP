@@ -104,6 +104,7 @@ func main() {
 	groupRequestStore := database.GroupDeploymentRequests()
 	sectionPolicyStore := database.SectionPolicies()
 	driftPolicyStore := database.DriftPolicy()
+	auditStore := database.Audit()
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
 
@@ -186,7 +187,7 @@ func main() {
 	}()
 
 	go runRetirementLoop(ctx, agentStore, eventStore, retireAfter, dataDir)
-	go runDriftReconciler(ctx, driftPolicyStore, assignmentStore, configStore, deploymentStore, adapter)
+	go runDriftReconciler(ctx, driftPolicyStore, assignmentStore, configStore, deploymentStore, auditStore, adapter)
 
 	mux := http.NewServeMux()
 	auth.registerRoutes(mux)
@@ -195,12 +196,13 @@ func main() {
 	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter, sectionPolicyStore, auth)
 	registerSectionEditorRoutes(mux, sectionPolicyStore, configValidator, auth)
 	registerDriftPolicyRoutes(mux, driftPolicyStore, auth)
+	registerAuditRoutes(mux, auditStore)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, auth, dataDir)
 	registerUIRoutes(mux)
 
 	httpServer := &http.Server{
 		Addr:              httpAddr,
-		Handler:           securityMiddleware(security, auth, mux),
+		Handler:           auditMiddleware(auth, auditStore, securityMiddleware(security, auth, mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
