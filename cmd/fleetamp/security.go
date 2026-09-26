@@ -143,7 +143,9 @@ func requiredPermission(r *http.Request) permission {
 		return permissionAdmin
 	}
 	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/configurations") {
-		return permissionAdmin
+		// Saving a validated version is an edit operation. Deployment approval is
+		// authorized separately through the group approval workflow.
+		return permissionEdit
 	}
 	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/groups/") {
 		if err := r.ParseForm(); err != nil {
