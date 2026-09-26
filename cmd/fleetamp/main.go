@@ -350,8 +350,9 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			return
 		}
 
+		principalRole := currentRole(auth, r)
 		view := agentDetailView{
-			Page: "fleet", Agent: agent, EffectiveConfig: adapter.EffectiveConfig(uid),
+			Page: "fleet", Agent: agent, CanAdminBreakGlass: principalRole == roleAdmin, EffectiveConfig: adapter.EffectiveConfig(uid),
 			RemoteConfigSupported: hasCapability(agent.Capabilities, "accepts_remote_config"),
 			TargetingMetadata:     groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent),
 			EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields,
@@ -401,8 +402,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		if policyErr != nil {
 			view.EditorError = "Unable to load configuration section policies."
 		} else {
-			principalRole := currentRole(auth, r)
-			view.CanEditConfiguration = principalRole == roleAdmin || principalRole == roleOperator
+			view.CanEditConfiguration = principalRole == roleAdmin
 			var editorErr error
 			view.EditorSections, editorErr = buildConfigurationSectionViews(view.EditorBaseline, policies, principalRole)
 			if editorErr != nil {
@@ -444,6 +444,7 @@ type agentDetailView struct {
 	EditorBaseline        string
 	EditorError           string
 	CanEditConfiguration  bool
+	CanAdminBreakGlass    bool
 	Error                 string
 }
 

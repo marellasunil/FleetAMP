@@ -36,6 +36,7 @@ type groupRequest struct {
 type groupListItem struct {
 	Group       *groups.Group
 	MemberCount int
+	Drifted     int
 }
 
 type groupsView struct {
@@ -48,19 +49,22 @@ type groupPreviewAgent struct {
 }
 
 type groupDetailView struct {
-	Page             string
-	Group            *groups.Group
-	Members          []*agents.ManagedAgent
-	Configurations   []*configs.Configuration
-	SelectedConfig   *configs.Configuration
-	SelectedPipeline *configs.PipelineModel
-	PipelineError    string
-	Preview          []groupPreviewAgent
-	Eligible         int
-	Requests         []*configs.GroupDeploymentRequest
-	RequestCreated   string
-	RequestUpdated   string
-	Error            string
+	Page               string
+	Group              *groups.Group
+	Members            []*agents.ManagedAgent
+	Configurations     []*configs.Configuration
+	SelectedConfig     *configs.Configuration
+	SelectedPipeline   *configs.PipelineModel
+	PipelineError      string
+	Preview            []groupPreviewAgent
+	Eligible           int
+	Requests           []*configs.GroupDeploymentRequest
+	DeploymentHistory  []*configs.Deployment
+	DriftSummary       groupDriftSummary
+	ConfigurationSaved string
+	RequestCreated     string
+	RequestUpdated     string
+	Error              string
 }
 
 // validateConfigurationForApproval enforces the current validation policy before a request enters the approval queue.
@@ -518,8 +522,17 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		view := groupsView{Page: "groups", Items: make([]groupListItem, 0, len(groupsList))}
 		for _, group := range groupsList {
-			members, _ := membersForGroupIdentity(r.Context(), group, agentStore)
-			view.Items = append(view.Items, groupListItem{Group: group, MemberCount: len(members)})
+			members, memberErr := membersForGroupIdentity(r.Context(), group, agentStore)
+			if memberErr != nil {
+				internalServerError(w, memberErr)
+				return
+			}
+			drift, driftErr := buildGroupDrift(r.Context(), members, configStore, assignmentStore, adapter)
+			if driftErr != nil {
+				internalServerError(w, driftErr)
+				return
+			}
+			view.Items = append(view.Items, groupListItem{Group: group, MemberCount: len(members), Drifted: drift.Drifted})
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = groupsPage.Execute(w, view)
@@ -543,6 +556,31 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		if r.Method == http.MethodPost {
 			action := strings.TrimSpace(r.FormValue("action"))
+			if action == "create_configuration" {
+				name := strings.TrimSpace(r.FormValue("name"))
+				version := strings.TrimSpace(r.FormValue("version"))
+				content := r.FormValue("content")
+				if name == "" || version == "" || strings.TrimSpace(content) == "" {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Name, version and configuration YAML are required."), http.StatusSeeOther)
+					return
+				}
+				validation := validator.Validate(r.Context(), content)
+				if !validation.Valid {
+					message := strings.TrimSpace(validation.Error)
+					if message == "" {
+						message = "configuration validation failed"
+					}
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(message), http.StatusSeeOther)
+					return
+				}
+				configuration := configs.NewConfiguration(name, version, content, "text/yaml")
+				if err := configStore.Put(r.Context(), configuration); err != nil {
+					internalServerError(w, err)
+					return
+				}
+				http.Redirect(w, r, "/groups/"+group.ID+"?configuration_saved="+configuration.ID, http.StatusSeeOther)
+				return
+			}
 			if action == "reject_deployment" {
 				request, err := requestStore.Get(r.Context(), strings.TrimSpace(r.FormValue("request_id")))
 				if err != nil || request.GroupID != group.ID {
@@ -579,14 +617,14 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Error(w, "configuration is not eligible for deployment: "+err.Error(), http.StatusUnprocessableEntity)
 					return
 				}
-				eligibleTargets := make([]configs.GroupDeploymentTarget, 0, 1)
+				eligibleTargets := make([]configs.GroupDeploymentTarget, 0, len(request.Targets))
 				for _, target := range request.Targets {
 					if target.Eligible {
 						eligibleTargets = append(eligibleTargets, target)
 					}
 				}
-				if len(eligibleTargets) != 1 {
-					http.Error(w, "this preview rollout supports exactly one eligible test agent", http.StatusConflict)
+				if len(eligibleTargets) == 0 {
+					http.Error(w, "approval request has no eligible targets", http.StatusConflict)
 					return
 				}
 				currentMembers, err := membersForGroupIdentity(r.Context(), group, agentStore)
@@ -598,28 +636,37 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				for _, member := range currentMembers {
 					currentByID[member.InstanceUID] = member
 				}
-				target := eligibleTargets[0]
-				current := currentByID[target.AgentInstanceUID]
-				if current == nil {
-					http.Error(w, "target agent membership changed; create a new deployment request", http.StatusConflict)
-					return
-				}
-				preview, ready, err := previewGroupConfiguration(r.Context(), []*agents.ManagedAgent{current}, group.Enabled, configuration, assignmentStore)
-				if err != nil {
-					internalServerError(w, err)
-					return
-				}
-				if ready != 1 || len(preview) != 1 || preview[0].Reason != "Ready" {
-					http.Error(w, "target agent membership or readiness changed; create a new deployment request", http.StatusConflict)
-					return
+				readyMembers := make([]*agents.ManagedAgent, 0, len(eligibleTargets))
+				for _, target := range eligibleTargets {
+					current := currentByID[target.AgentInstanceUID]
+					if current == nil {
+						http.Error(w, "target agent membership changed; create a new deployment request", http.StatusConflict)
+						return
+					}
+					preview, ready, err := previewGroupConfiguration(r.Context(), []*agents.ManagedAgent{current}, group.Enabled, configuration, assignmentStore)
+					if err != nil {
+						internalServerError(w, err)
+						return
+					}
+					if ready != 1 || len(preview) != 1 || preview[0].Reason != "Ready" {
+						http.Error(w, "target agent membership or readiness changed; create a new deployment request", http.StatusConflict)
+						return
+					}
+					readyMembers = append(readyMembers, current)
 				}
 				if err := requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentDeploying); err != nil {
 					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
 					return
 				}
-				if _, _, err := deliverConfiguration(r.Context(), target.AgentInstanceUID, configuration, configs.DeploymentActionDeploy, assignmentStore, deploymentStore, adapter); err != nil {
+				failures := make([]string, 0)
+				for _, member := range readyMembers {
+					if _, _, err := deliverConfiguration(r.Context(), member.InstanceUID, configuration, configs.DeploymentActionDeploy, assignmentStore, deploymentStore, adapter); err != nil {
+						failures = append(failures, member.Name+": "+err.Error())
+					}
+				}
+				if len(failures) > 0 {
 					_ = requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentFailed)
-					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Deployment failed: "+err.Error()), http.StatusSeeOther)
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Deployment failed for "+strings.Join(failures, "; ")), http.StatusSeeOther)
 					return
 				}
 				http.Redirect(w, r, "/groups/"+group.ID+"?request_updated=deploying", http.StatusSeeOther)
@@ -761,36 +808,56 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			if request.Status != configs.GroupDeploymentDeploying {
 				continue
 			}
+			eligible, applied, failed := 0, 0, 0
 			for index, target := range request.Targets {
 				if !target.Eligible {
 					continue
 				}
+				eligible++
 				deployments, listErr := deploymentStore.ListByAgent(r.Context(), target.AgentInstanceUID, 20)
 				if listErr != nil {
 					internalServerError(w, listErr)
 					return
 				}
 				for _, deployment := range deployments {
-					if deployment.ConfigurationHash != request.ConfigurationHash {
+					if deployment.ConfigurationHash != request.ConfigurationHash || deployment.CreatedAt.Before(request.CreatedAt) {
 						continue
 					}
 					request.Targets[index].Readiness = string(deployment.Status)
 					switch deployment.Status {
 					case configs.DeliveryApplied:
-						_ = requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentCompleted)
-						request.Status = configs.GroupDeploymentCompleted
+						applied++
 					case configs.DeliveryFailed, configs.DeliveryUnsupported:
-						_ = requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentFailed)
-						request.Status = configs.GroupDeploymentFailed
+						failed++
 					}
 					break
 				}
 			}
+			switch {
+			case failed > 0:
+				_ = requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentFailed)
+				request.Status = configs.GroupDeploymentFailed
+			case eligible > 0 && applied == eligible:
+				_ = requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentCompleted)
+				request.Status = configs.GroupDeploymentCompleted
+			}
+		}
+		driftSummary, err := buildGroupDrift(r.Context(), members, configStore, assignmentStore, adapter)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		deploymentHistory, err := groupDeploymentHistory(r.Context(), members, deploymentStore, 50)
+		if err != nil {
+			internalServerError(w, err)
+			return
 		}
 		view := groupDetailView{
 			Page: "groups", Group: group, Members: members, Configurations: available,
-			Requests: requests, RequestCreated: r.URL.Query().Get("request_created"),
-			RequestUpdated: r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),
+			Requests: requests, DeploymentHistory: deploymentHistory, DriftSummary: driftSummary,
+			ConfigurationSaved: r.URL.Query().Get("configuration_saved"),
+			RequestCreated:     r.URL.Query().Get("request_created"),
+			RequestUpdated:     r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),
 		}
 		if configID := strings.TrimSpace(r.URL.Query().Get("configuration_id")); configID != "" {
 			for _, configuration := range available {
