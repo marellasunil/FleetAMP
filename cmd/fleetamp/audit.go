@@ -14,8 +14,8 @@ import (
 )
 
 type auditPageData struct {
-	Page, Actor, Action, Outcome, From, To string
-	Events                                 []*audit.Event
+	Page, Actor, Action, Outcome, Category, From, To string
+	Events                                           []*audit.Event
 }
 
 var auditPage = template.Must(template.New("audit").Funcs(template.FuncMap{
@@ -23,7 +23,7 @@ var auditPage = template.Must(template.New("audit").Funcs(template.FuncMap{
 }).Parse(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FleetAMP Audit log</title><style>` +
 	controlPlaneCSS + detailCSS + `</style></head><body><div class="shell">` + sideNav +
 	`<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Audit</div><div class="pagetitle">Audit log</div><div class="subtitle">Append-only control-plane activity and security history</div></div></header><div class="content">` +
-	`<section class="card"><div class="cardbody"><form class="detailform" method="get" action="/audit-log"><label>Actor<input class="input" name="actor" value="{{.Actor}}" placeholder="username"></label><label>Action<input class="input" name="action" value="{{.Action}}" placeholder="deployment.approve"></label><label>Outcome<select class="select" name="outcome"><option value="">All</option><option value="success" {{if eq .Outcome "success"}}selected{{end}}>Success</option><option value="failed" {{if eq .Outcome "failed"}}selected{{end}}>Failed</option><option value="denied" {{if eq .Outcome "denied"}}selected{{end}}>Denied</option></select></label><label>From<input class="input" type="date" name="from" value="{{.From}}"></label><label>To<input class="input" type="date" name="to" value="{{.To}}"></label><button class="btn primary" type="submit">Filter</button><a class="btn" href="/audit-log">Clear</a></form></div></section>` +
+	`<section class="card"><div class="cardbody"><div class="detailactions" style="margin-bottom:14px"><a class="btn" href="/audit-log">All activity</a><a class="btn" href="/audit-log?category=configuration">Configuration</a><a class="btn" href="/audit-log?category=deployment">Deployments</a><a class="btn" href="/audit-log?category=drift">Drift</a><a class="btn" href="/audit-log?category=security">Security & users</a></div><form class="detailform" method="get" action="/audit-log">{{if .Category}}<input type="hidden" name="category" value="{{.Category}}">{{end}}<label>Actor<input class="input" name="actor" value="{{.Actor}}" placeholder="username"></label><label>Action<input class="input" name="action" value="{{.Action}}" placeholder="deployment.approve"></label><label>Outcome<select class="select" name="outcome"><option value="">All</option><option value="success" {{if eq .Outcome "success"}}selected{{end}}>Success</option><option value="failed" {{if eq .Outcome "failed"}}selected{{end}}>Failed</option><option value="denied" {{if eq .Outcome "denied"}}selected{{end}}>Denied</option></select></label><label>From<input class="input" type="date" name="from" value="{{.From}}"></label><label>To<input class="input" type="date" name="to" value="{{.To}}"></label><button class="btn primary" type="submit">Filter</button><a class="btn" href="/audit-log">Clear</a></form></div></section>` +
 	`<section class="card" style="margin-top:14px"><div class="cardhead"><div><div class="cardtitle">Recorded events</div><div class="cardsub">{{len .Events}} most recent matching event(s)</div></div><span class="badge ok">Append-only</span></div>{{if .Events}}<div style="overflow:auto"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Request</th></tr></thead><tbody>{{range .Events}}<tr><td>{{auditTime .Timestamp}}</td><td>{{.Actor}}</td><td><span class="code">{{.Action}}</span></td><td>{{.ResourceType}}{{if .ResourceID}}<div class="tiny code">{{.ResourceID}}</div>{{end}}</td><td>{{if eq .Outcome "success"}}<span class="badge ok">Success</span>{{else if eq .Outcome "denied"}}<span class="badge warn">Denied</span>{{else}}<span class="badge off">Failed</span>{{end}}</td><td><span class="code">{{.HTTPMethod}} {{.Path}}</span><div class="tiny">HTTP {{.StatusCode}}</div></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No audit events match these filters.</div>{{end}}</section></div></main></div></body></html>`))
 
 func registerAuditRoutes(mux *http.ServeMux, store storage.AuditStore) {
@@ -56,8 +56,18 @@ func registerAuditRoutes(mux *http.ServeMux, store storage.AuditStore) {
 			internalServerError(w, err)
 			return
 		}
+		category := strings.TrimSpace(r.URL.Query().Get("category"))
+		if category != "" {
+			filtered := make([]*audit.Event, 0, len(events))
+			for _, event := range events {
+				if auditCategoryMatches(category, event.Action) {
+					filtered = append(filtered, event)
+				}
+			}
+			events = filtered
+		}
 		view := auditPageData{
-			Page: "audit", Actor: filter.Actor, Action: filter.Action,
+			Page: "audit", Actor: filter.Actor, Action: filter.Action, Category: category,
 			Outcome: filter.Outcome, From: r.URL.Query().Get("from"),
 			To: r.URL.Query().Get("to"), Events: events,
 		}
@@ -66,6 +76,21 @@ func registerAuditRoutes(mux *http.ServeMux, store storage.AuditStore) {
 			slog.Error("render audit log", "component", "http", "error", err)
 		}
 	})
+}
+
+func auditCategoryMatches(category, action string) bool {
+	switch category {
+	case "configuration":
+		return strings.HasPrefix(action, "configuration.")
+	case "deployment":
+		return strings.HasPrefix(action, "deployment.")
+	case "drift":
+		return strings.HasPrefix(action, "drift.") || action == "configuration.reconcile"
+	case "security":
+		return strings.HasPrefix(action, "authentication.") || strings.HasPrefix(action, "user.") || strings.HasPrefix(action, "policy.")
+	default:
+		return true
+	}
 }
 
 func parseAuditDate(value string, exclusiveEnd bool) (time.Time, error) {
@@ -185,6 +210,9 @@ func describeAuditAction(r *http.Request) (string, string, string) {
 	if strings.HasPrefix(r.URL.Path, "/groups/") && action != "" {
 		if action == "request_deployment" || action == "approve_deployment" || action == "reject_deployment" {
 			return "deployment." + action, "group", resourceID
+		}
+		if action == "create_configuration" {
+			return "configuration.version_create", "group", resourceID
 		}
 		return "group." + action, "group", resourceID
 	}

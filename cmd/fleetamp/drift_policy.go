@@ -118,7 +118,7 @@ func runDriftReconciler(
 					"event", "drift_reconcile_failed", "agent_uid", report.AgentInstanceUID, "error", err)
 				_ = auditStore.Append(context.Background(), &audit.Event{
 					Timestamp: time.Now().UTC(), Actor: "fleetamp-system",
-					Action: "configuration.reconcile", ResourceType: "agent",
+					Action: "drift.reconcile_failed", ResourceType: "agent",
 					ResourceID: report.AgentInstanceUID, Outcome: "failed",
 					HTTPMethod: "SYSTEM", Path: "opamp/effective-config", StatusCode: 500,
 				})
@@ -126,7 +126,7 @@ func runDriftReconciler(
 			}
 			_ = auditStore.Append(context.Background(), &audit.Event{
 				Timestamp: time.Now().UTC(), Actor: "fleetamp-system",
-				Action: "configuration.reconcile", ResourceType: "agent",
+				Action: "drift.reconcile_sent", ResourceType: "agent",
 				ResourceID: report.AgentInstanceUID, Outcome: "success",
 				HTTPMethod: "SYSTEM", Path: "opamp/effective-config", StatusCode: 200,
 			})
