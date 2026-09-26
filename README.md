@@ -211,6 +211,28 @@ If the validation policy or Collector binary changes after a version was saved,
 the approval-boundary check prevents that version from entering the deployment
 queue until it passes the current policy.
 
+## Group ownership, approvals, and rollback
+
+Admins can create users with the `group_owner` role and assign them to specific
+groups. Group owners can only open groups assigned to them, create validated
+configuration versions, preview the snapshotted target set, and submit a
+deployment request. They cannot approve their own request or access the global
+fleet, approval queue, audit log, or administration pages.
+
+The Admin-only **Approvals** page compares the currently approved working
+configuration with the proposed immutable version and highlights additions and
+removals. Approval revalidates the configuration and target readiness before
+delivery. Every deployment records its approval request and the previous
+working configuration per agent. If OpAMP reports a failed or unsupported
+deployment, FleetAMP claims a single automatic rollback attempt and sends that
+agent its previous working version. The deployment history records both the
+failed rollout and the rollback attempt.
+
+Agent details show the central desired configuration and the effective
+agent-reported configuration side by side. With drift enforcement enabled,
+FleetAMP sends the approved central version again and records the reconciliation
+in the drift audit log.
+
 ## Security
 
 FleetAMP listens on localhost by default. The first administrator is created

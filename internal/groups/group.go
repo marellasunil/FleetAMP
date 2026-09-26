@@ -19,6 +19,7 @@ type Group struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description,omitempty"`
 	Selector    map[string]string `json:"selector"`
+	Owners      []string          `json:"owners,omitempty"`
 	Enabled     bool              `json:"enabled"`
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`

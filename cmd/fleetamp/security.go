@@ -119,6 +119,7 @@ const (
 // The section-policy feature can extend this map without relying on UI state.
 func requiredPermission(r *http.Request) permission {
 	if r.URL.Path == "/settings" || strings.HasPrefix(r.URL.Path, "/settings/") ||
+		r.URL.Path == "/approvals" || strings.HasPrefix(r.URL.Path, "/approvals/") ||
 		r.URL.Path == "/audit-log" || strings.HasPrefix(r.URL.Path, "/api/v1/audit-events") {
 		return permissionAdmin
 	}
@@ -173,6 +174,8 @@ func roleAllows(principalRole role, required permission) bool {
 		return true
 	case roleOperator:
 		return required == permissionRead || required == permissionEdit
+	case roleGroupOwner:
+		return required == permissionRead || required == permissionEdit
 	case roleViewer:
 		return required == permissionRead
 	default:
@@ -198,6 +201,12 @@ func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, a
 		}
 	}
 	required := requiredPermission(r)
+	if principalRole == roleGroupOwner && !groupOwnerRoute(r.URL.Path) {
+		slog.Warn("group owner route denied", "component", "auth", "event", "authorization_denied",
+			"username", username, "role", principalRole, "method", r.Method, "path", r.URL.Path)
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
 	if roleAllows(principalRole, required) {
 		return true
 	}
@@ -206,6 +215,12 @@ func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, a
 		"method", r.Method, "path", r.URL.Path)
 	http.Error(w, "forbidden", http.StatusForbidden)
 	return false
+}
+
+func groupOwnerRoute(path string) bool {
+	return path == "/groups" || strings.HasPrefix(path, "/groups/") ||
+		path == "/api/v1/groups" || strings.HasPrefix(path, "/api/v1/groups/") ||
+		path == "/logout" || path == "/api/v1/session" || strings.HasPrefix(path, "/assets/")
 }
 
 // securityMiddleware applies headers, authentication, authorization, origin checks, method restrictions, body limits, and panic recovery to every route.

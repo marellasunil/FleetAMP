@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -100,6 +101,8 @@ func (d *Database) initialize(ctx context.Context) error {
             id TEXT PRIMARY KEY, agent_instance_uid TEXT NOT NULL,
             configuration_id TEXT NOT NULL, configuration_name TEXT NOT NULL,
             configuration_version TEXT NOT NULL, configuration_hash TEXT NOT NULL,
+            previous_configuration_id TEXT NOT NULL DEFAULT '', approval_request_id TEXT NOT NULL DEFAULT '',
+            rollback_started_at TEXT,
             action TEXT NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL, sent_at TEXT, applying_at TEXT, applied_at TEXT,
             failed_at TEXT, updated_at TEXT NOT NULL,
@@ -109,15 +112,18 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_deployments_agent_hash ON deployments(agent_instance_uid, configuration_hash, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS groups (
             id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '',
-            selector TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            selector TEXT NOT NULL, owners TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)`,
 		`CREATE TABLE IF NOT EXISTS group_deployment_requests (
             id TEXT PRIMARY KEY, group_id TEXT NOT NULL, group_name TEXT NOT NULL,
             group_selector TEXT NOT NULL, configuration_id TEXT NOT NULL,
             configuration_name TEXT NOT NULL, configuration_version TEXT NOT NULL,
-            configuration_hash TEXT NOT NULL, targets TEXT NOT NULL,
-            requested_by TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+            configuration_hash TEXT NOT NULL, base_configuration_id TEXT NOT NULL DEFAULT '',
+            base_configuration_hash TEXT NOT NULL DEFAULT '', targets TEXT NOT NULL,
+            requested_by TEXT NOT NULL, reviewed_by TEXT NOT NULL DEFAULT '',
+            review_comment TEXT NOT NULL DEFAULT '', reviewed_at TEXT,
+            status TEXT NOT NULL, created_at TEXT NOT NULL,
             FOREIGN KEY(group_id) REFERENCES groups(id),
             FOREIGN KEY(configuration_id) REFERENCES configurations(id)
         )`,
@@ -130,7 +136,7 @@ func (d *Database) initialize(ctx context.Context) error {
         )`,
 		`CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY COLLATE NOCASE,
-            role TEXT NOT NULL CHECK (role IN ('admin','operator','viewer')),
+            role TEXT NOT NULL CHECK (role IN ('admin','operator','group_owner','viewer')),
             enabled INTEGER NOT NULL DEFAULT 1,
             password_salt BLOB NOT NULL, password_hash BLOB NOT NULL,
             created_at TEXT NOT NULL, password_changed_at TEXT NOT NULL,
@@ -168,13 +174,152 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureGroupEnabledColumn(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureGroupOwnersColumn(ctx); err != nil {
+		return err
+	}
+	if err := d.ensureApprovalReviewColumns(ctx); err != nil {
+		return err
+	}
+	if err := d.ensureDeploymentRollbackColumns(ctx); err != nil {
+		return err
+	}
 	if err := d.ensureAdministratorRoleColumn(ctx); err != nil {
+		return err
+	}
+	if err := d.ensureGroupOwnerRole(ctx); err != nil {
 		return err
 	}
 	if err := d.migrateAdministratorToUsers(ctx); err != nil {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+// ensureGroupOwnerRole widens the users role constraint for databases created
+// before resource-scoped group owners were introduced.
+func (d *Database) ensureGroupOwnerRole(ctx context.Context) error {
+	var schema string
+	if err := d.db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name='users'`).Scan(&schema); err != nil {
+		return fmt.Errorf("inspect users role constraint: %w", err)
+	}
+	if strings.Contains(schema, "group_owner") {
+		return nil
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	statements := []string{
+		`CREATE TABLE users_next (
+            username TEXT PRIMARY KEY COLLATE NOCASE,
+            role TEXT NOT NULL CHECK (role IN ('admin','operator','group_owner','viewer')),
+            enabled INTEGER NOT NULL DEFAULT 1,
+            password_salt BLOB NOT NULL, password_hash BLOB NOT NULL,
+            created_at TEXT NOT NULL, password_changed_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )`,
+		`INSERT INTO users_next SELECT username,role,enabled,password_salt,password_hash,created_at,password_changed_at,updated_at FROM users`,
+		`DROP TABLE users`,
+		`ALTER TABLE users_next RENAME TO users`,
+		`CREATE INDEX idx_users_role_enabled ON users(role, enabled)`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("migrate users group_owner role: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (d *Database) ensureDeploymentRollbackColumns(ctx context.Context) error {
+	columns := []struct{ name, definition string }{
+		{"previous_configuration_id", "TEXT NOT NULL DEFAULT ''"},
+		{"approval_request_id", "TEXT NOT NULL DEFAULT ''"},
+		{"rollback_started_at", "TEXT"},
+	}
+	for _, column := range columns {
+		present, err := sqliteColumnExists(ctx, d.db, "deployments", column.name)
+		if err != nil {
+			return err
+		}
+		if present {
+			continue
+		}
+		if _, err := d.db.ExecContext(ctx, `ALTER TABLE deployments ADD COLUMN `+column.name+` `+column.definition); err != nil {
+			return fmt.Errorf("add deployments.%s column: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+func (d *Database) ensureApprovalReviewColumns(ctx context.Context) error {
+	columns := []struct{ name, definition string }{
+		{"base_configuration_id", "TEXT NOT NULL DEFAULT ''"},
+		{"base_configuration_hash", "TEXT NOT NULL DEFAULT ''"},
+		{"reviewed_by", "TEXT NOT NULL DEFAULT ''"},
+		{"review_comment", "TEXT NOT NULL DEFAULT ''"},
+		{"reviewed_at", "TEXT"},
+	}
+	for _, column := range columns {
+		present, err := sqliteColumnExists(ctx, d.db, "group_deployment_requests", column.name)
+		if err != nil {
+			return err
+		}
+		if present {
+			continue
+		}
+		if _, err := d.db.ExecContext(ctx, `ALTER TABLE group_deployment_requests ADD COLUMN `+column.name+` `+column.definition); err != nil {
+			return fmt.Errorf("add group_deployment_requests.%s column: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+func sqliteColumnExists(ctx context.Context, db *sql.DB, table, wanted string) (bool, error) {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == wanted {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// ensureGroupOwnersColumn migrates existing installations to resource-scoped group ownership.
+func (d *Database) ensureGroupOwnersColumn(ctx context.Context) error {
+	rows, err := d.db.QueryContext(ctx, `PRAGMA table_info(groups)`)
+	if err != nil {
+		return fmt.Errorf("inspect groups schema: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == "owners" {
+			return nil
+		}
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE groups ADD COLUMN owners TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		return fmt.Errorf("add groups.owners column: %w", err)
+	}
+	return nil
 }
 
 // ensureGroupEnabledColumn migrates older group tables that predate the enabled flag.

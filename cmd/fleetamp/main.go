@@ -182,6 +182,9 @@ func main() {
 				if err := deploymentStore.UpdateLatestByAgentHash(ctx, report.AgentInstanceUID, report.ConfigurationHash, report.Status, report.Error); err != nil && !errors.Is(err, storage.ErrDeploymentNotFound) && ctx.Err() == nil {
 					slog.Error("failed to update deployment status", "component", "deployment", "event", "status_update_failed", "agent_uid", report.AgentInstanceUID, "config_hash", report.ConfigurationHash, "error", err)
 				}
+				if report.Status == configs.DeliveryFailed || report.Status == configs.DeliveryUnsupported {
+					attemptAutomaticRollback(ctx, report.AgentInstanceUID, report.ConfigurationHash, configStore, assignmentStore, deploymentStore, adapter)
+				}
 			}
 		}
 	}()
@@ -198,6 +201,7 @@ func main() {
 	registerDriftPolicyRoutes(mux, driftPolicyStore, auth)
 	registerAuditRoutes(mux, auditStore)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, auth, dataDir)
+	registerApprovalRoutes(mux, groupRequestStore, configStore)
 	registerUIRoutes(mux)
 
 	httpServer := &http.Server{
@@ -231,6 +235,28 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+}
+
+func attemptAutomaticRollback(ctx context.Context, agentUID, failedHash string, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) {
+	failed, err := deploymentStore.LatestByAgentHash(ctx, agentUID, failedHash)
+	if err != nil || failed.Action != configs.DeploymentActionDeploy || failed.PreviousConfigurationID == "" {
+		return
+	}
+	claimed, err := deploymentStore.ClaimRollback(ctx, failed.ID)
+	if err != nil || !claimed {
+		return
+	}
+	previous, err := configStore.Get(ctx, failed.PreviousConfigurationID)
+	if err != nil {
+		slog.Error("automatic rollback configuration unavailable", "component", "deployment", "event", "rollback_failed", "agent_uid", agentUID, "deployment_id", failed.ID, "previous_configuration_id", failed.PreviousConfigurationID, "error", err)
+		return
+	}
+	_, rollback, err := deliverConfiguration(ctx, agentUID, previous, configs.DeploymentActionRollback, assignmentStore, deploymentStore, adapter)
+	if err != nil {
+		slog.Error("automatic rollback delivery failed", "component", "deployment", "event", "rollback_failed", "agent_uid", agentUID, "failed_configuration_version", failed.ConfigurationVersion, "rollback_configuration_version", previous.Version, "error", err)
+		return
+	}
+	slog.Warn("deployment failed; automatic rollback started", "component", "deployment", "event", "rollback_started", "agent_uid", agentUID, "failed_configuration_version", failed.ConfigurationVersion, "rollback_configuration_version", previous.Version, "rollback_deployment_id", rollback.ID)
 }
 
 // registerHealthRoutes exposes unauthenticated liveness (/health) and readiness (/ready) probes for service managers and load balancers.
@@ -538,6 +564,10 @@ func latestAssignmentForAgent(ctx context.Context, store storage.AssignmentStore
 
 // deliverConfiguration records desired state and deployment history, sends remote configuration through OpAMP, and persists success or failure.
 func deliverConfiguration(ctx context.Context, agentUID string, configuration *configs.Configuration, action configs.DeploymentAction, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) (*configs.Assignment, *configs.Deployment, error) {
+	return deliverConfigurationWithRollback(ctx, agentUID, configuration, action, "", "", assignmentStore, deploymentStore, adapter)
+}
+
+func deliverConfigurationWithRollback(ctx context.Context, agentUID string, configuration *configs.Configuration, action configs.DeploymentAction, previousConfigurationID, approvalRequestID string, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) (*configs.Assignment, *configs.Deployment, error) {
 	latest, err := latestAssignmentForAgent(ctx, assignmentStore, agentUID)
 	if err != nil && !errors.Is(err, storage.ErrAssignmentNotFound) {
 		return nil, nil, err
@@ -555,6 +585,8 @@ func deliverConfiguration(ctx context.Context, agentUID string, configuration *c
 	if err != nil {
 		return nil, nil, err
 	}
+	deployment.PreviousConfigurationID = previousConfigurationID
+	deployment.ApprovalRequestID = approvalRequestID
 	if err := deploymentStore.Create(ctx, deployment); err != nil {
 		return nil, nil, err
 	}

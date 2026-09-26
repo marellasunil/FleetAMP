@@ -20,14 +20,29 @@ func (s *DeploymentStore) Create(ctx context.Context, d *configs.Deployment) err
 		return fmt.Errorf("deployment is required")
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO deployments
-        (id,agent_instance_uid,configuration_id,configuration_name,configuration_version,configuration_hash,action,status,error,created_at,sent_at,applying_at,applied_at,failed_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, d.ID, d.AgentInstanceUID, d.ConfigurationID,
-		d.ConfigurationName, d.ConfigurationVersion, d.ConfigurationHash, string(d.Action), string(d.Status), d.Error,
+		(id,agent_instance_uid,configuration_id,configuration_name,configuration_version,configuration_hash,previous_configuration_id,approval_request_id,rollback_started_at,action,status,error,created_at,sent_at,applying_at,applied_at,failed_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, d.ID, d.AgentInstanceUID, d.ConfigurationID,
+		d.ConfigurationName, d.ConfigurationVersion, d.ConfigurationHash, d.PreviousConfigurationID, d.ApprovalRequestID, formatTimePtr(d.RollbackStartedAt), string(d.Action), string(d.Status), d.Error,
 		formatTime(d.CreatedAt), formatTimePtr(d.SentAt), formatTimePtr(d.ApplyingAt), formatTimePtr(d.AppliedAt), formatTimePtr(d.FailedAt), formatTime(d.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("create deployment: %w", err)
 	}
 	return nil
+}
+
+func (s *DeploymentStore) LatestByAgentHash(ctx context.Context, agentUID, configHash string) (*configs.Deployment, error) {
+	row := s.db.QueryRowContext(ctx, deploymentSelect+` WHERE agent_instance_uid=? AND configuration_hash=? ORDER BY created_at DESC LIMIT 1`, agentUID, configHash)
+	return scanDeployment(row)
+}
+
+func (s *DeploymentStore) ClaimRollback(ctx context.Context, deploymentID string) (bool, error) {
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE deployments SET rollback_started_at=? WHERE id=? AND rollback_started_at IS NULL`, formatTime(now), deploymentID)
+	if err != nil {
+		return false, fmt.Errorf("claim automatic rollback: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	return affected == 1, err
 }
 
 // Get loads one deployment by its unique identifier.
@@ -94,7 +109,7 @@ func (s *DeploymentStore) UpdateLatestByAgentHash(ctx context.Context, agentUID,
 	return nil
 }
 
-const deploymentSelect = `SELECT id,agent_instance_uid,configuration_id,configuration_name,configuration_version,configuration_hash,action,status,error,created_at,sent_at,applying_at,applied_at,failed_at,updated_at FROM deployments`
+const deploymentSelect = `SELECT id,agent_instance_uid,configuration_id,configuration_name,configuration_version,configuration_hash,previous_configuration_id,approval_request_id,rollback_started_at,action,status,error,created_at,sent_at,applying_at,applied_at,failed_at,updated_at FROM deployments`
 
 type deploymentScanner interface{ Scan(dest ...any) error }
 
@@ -102,8 +117,8 @@ type deploymentScanner interface{ Scan(dest ...any) error }
 func scanDeployment(scanner deploymentScanner) (*configs.Deployment, error) {
 	var d configs.Deployment
 	var action, status, created, updated string
-	var sent, applying, applied, failed sql.NullString
-	if err := scanner.Scan(&d.ID, &d.AgentInstanceUID, &d.ConfigurationID, &d.ConfigurationName, &d.ConfigurationVersion, &d.ConfigurationHash, &action, &status, &d.Error, &created, &sent, &applying, &applied, &failed, &updated); err != nil {
+	var rollbackStarted, sent, applying, applied, failed sql.NullString
+	if err := scanner.Scan(&d.ID, &d.AgentInstanceUID, &d.ConfigurationID, &d.ConfigurationName, &d.ConfigurationVersion, &d.ConfigurationHash, &d.PreviousConfigurationID, &d.ApprovalRequestID, &rollbackStarted, &action, &status, &d.Error, &created, &sent, &applying, &applied, &failed, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, storage.ErrDeploymentNotFound
 		}
@@ -127,6 +142,9 @@ func scanDeployment(scanner deploymentScanner) (*configs.Deployment, error) {
 		return nil, err
 	}
 	if d.FailedAt, err = parseNullTime(failed); err != nil {
+		return nil, err
+	}
+	if d.RollbackStartedAt, err = parseNullTime(rollbackStarted); err != nil {
 		return nil, err
 	}
 	return &d, nil

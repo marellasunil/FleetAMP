@@ -26,9 +26,10 @@ import (
 type role string
 
 const (
-	roleAdmin    role = "admin"
-	roleOperator role = "operator"
-	roleViewer   role = "viewer"
+	roleAdmin      role = "admin"
+	roleOperator   role = "operator"
+	roleGroupOwner role = "group_owner"
+	roleViewer     role = "viewer"
 )
 
 const (
@@ -279,7 +280,7 @@ func (a *authManager) authenticateRole(ctx context.Context, username, password s
 		return "", false
 	}
 	principalRole := role(user.Role)
-	if principalRole != roleAdmin && principalRole != roleOperator && principalRole != roleViewer {
+	if principalRole != roleAdmin && principalRole != roleOperator && principalRole != roleGroupOwner && principalRole != roleViewer {
 		return "", false
 	}
 	return principalRole, true
@@ -564,6 +565,10 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setSessionCookie(w, token)
 	slog.Info("administrator signed in", "component", "auth", "event", "login_succeeded", "username", strings.TrimSpace(r.FormValue("username")))
+	if principalRole == roleGroupOwner {
+		http.Redirect(w, r, "/groups", http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/agents", http.StatusSeeOther)
 }
 

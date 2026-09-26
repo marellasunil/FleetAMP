@@ -14,5 +14,7 @@ type DeploymentStore interface {
 	Create(ctx context.Context, deployment *configs.Deployment) error
 	Get(ctx context.Context, id string) (*configs.Deployment, error)
 	ListByAgent(ctx context.Context, agentUID string, limit int) ([]*configs.Deployment, error)
+	LatestByAgentHash(ctx context.Context, agentUID, configHash string) (*configs.Deployment, error)
+	ClaimRollback(ctx context.Context, deploymentID string) (bool, error)
 	UpdateLatestByAgentHash(ctx context.Context, agentUID, configHash string, status configs.DeliveryStatus, errText string) error
 }
