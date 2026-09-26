@@ -7,6 +7,7 @@ import (
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/FleetAMP/internal/groups"
 	"github.com/marellasunil/FleetAMP/internal/storage/memory"
 )
 
@@ -20,6 +21,17 @@ func TestValidateConfigurationForApproval(t *testing.T) {
 	invalid := configs.NewConfiguration("gateway.yaml", "2", "service:\n  pipelines: [\n", "text/yaml")
 	if err := validateConfigurationForApproval(context.Background(), validator, invalid); err == nil {
 		t.Fatal("invalid configuration accepted for approval")
+	}
+}
+
+func TestNormalizeOwnersAndOwnershipMatch(t *testing.T) {
+	owners := normalizeOwners([]string{" Alice, bob ", "alice", "BOB", "carol"})
+	if len(owners) != 3 || owners[0] != "Alice" || owners[1] != "bob" || owners[2] != "carol" {
+		t.Fatalf("owners=%#v", owners)
+	}
+	group := &groups.Group{Owners: owners}
+	if !isGroupOwner(group, "ALICE") || isGroupOwner(group, "mallory") {
+		t.Fatalf("unexpected ownership match for %#v", owners)
 	}
 }
 

@@ -30,6 +30,7 @@ type groupRequest struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description,omitempty"`
 	Selector    map[string]string `json:"selector"`
+	Owners      []string          `json:"owners,omitempty"`
 	Enabled     *bool             `json:"enabled,omitempty"`
 }
 
@@ -65,6 +66,65 @@ type groupDetailView struct {
 	RequestCreated     string
 	RequestUpdated     string
 	Error              string
+	CanAdminister      bool
+	OwnersText         string
+}
+
+func currentUsername(auth *authManager, r *http.Request) string {
+	if auth != nil {
+		if username, ok := auth.sessionUsername(r); ok {
+			return username
+		}
+	}
+	if username, _, ok := r.BasicAuth(); ok {
+		return username
+	}
+	return ""
+}
+
+func isGroupOwner(group *groups.Group, username string) bool {
+	for _, owner := range group.Owners {
+		if strings.EqualFold(strings.TrimSpace(owner), strings.TrimSpace(username)) {
+			return true
+		}
+	}
+	return false
+}
+
+func canAccessGroup(auth *authManager, r *http.Request, group *groups.Group) bool {
+	if currentRole(auth, r) != roleGroupOwner {
+		return true
+	}
+	return isGroupOwner(group, currentUsername(auth, r))
+}
+
+func requireGroupAccess(w http.ResponseWriter, r *http.Request, auth *authManager, group *groups.Group) bool {
+	if canAccessGroup(auth, r, group) {
+		return true
+	}
+	http.Error(w, "forbidden: you are not an owner of this group", http.StatusForbidden)
+	return false
+}
+
+func normalizeOwners(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, item := range strings.Split(value, ",") {
+			owner := strings.TrimSpace(item)
+			key := strings.ToLower(owner)
+			if owner == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, owner)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 // validateConfigurationForApproval enforces the current validation policy before a request enters the approval queue.
@@ -126,6 +186,46 @@ func previewGroupConfiguration(ctx context.Context, members []*agents.ManagedAge
 		}
 	}
 	return preview, eligible, nil
+}
+
+func commonAppliedConfiguration(ctx context.Context, preview []groupPreviewAgent, assignmentStore storage.AssignmentStore) (string, string, error) {
+	baseID, baseHash := "", ""
+	for _, item := range preview {
+		if item.Reason != "Ready" {
+			continue
+		}
+		assignment, err := latestAssignmentForAgent(ctx, assignmentStore, item.Agent.InstanceUID)
+		if errors.Is(err, storage.ErrAssignmentNotFound) {
+			continue
+		}
+		if err != nil {
+			return "", "", err
+		}
+		if assignment.Status != configs.DeliveryApplied {
+			continue
+		}
+		if baseID == "" {
+			baseID, baseHash = assignment.ConfigurationID, assignment.ConfigurationHash
+			continue
+		}
+		if assignment.ConfigurationID != baseID || assignment.ConfigurationHash != baseHash {
+			return "", "", nil
+		}
+	}
+	return baseID, baseHash, nil
+}
+
+func lastSuccessfulConfigurationID(ctx context.Context, agentUID string, deploymentStore storage.DeploymentStore) (string, error) {
+	deployments, err := deploymentStore.ListByAgent(ctx, agentUID, 100)
+	if err != nil {
+		return "", err
+	}
+	for _, deployment := range deployments {
+		if deployment.Status == configs.DeliveryApplied {
+			return deployment.ConfigurationID, nil
+		}
+	}
+	return "", nil
 }
 
 const maxManagedLabels = 5
@@ -304,6 +404,16 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				internalServerError(w, err)
 				return
 			}
+			if currentRole(auth, r) == roleGroupOwner {
+				username := currentUsername(auth, r)
+				filtered := make([]*groups.Group, 0, len(items))
+				for _, item := range items {
+					if isGroupOwner(item, username) {
+						filtered = append(filtered, item)
+					}
+				}
+				items = filtered
+			}
 			writeJSON(w, http.StatusOK, items)
 		case http.MethodPost:
 			var req groupRequest
@@ -338,6 +448,9 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 			http.Error(w, "group not found", 404)
 			return
 		}
+		if !requireGroupAccess(w, r, auth, group) {
+			return
+		}
 		if len(parts) == 2 && parts[1] == "members" && r.Method == http.MethodGet {
 			members, err := membersForGroupIdentity(r.Context(), group, agentStore)
 			if err != nil {
@@ -366,6 +479,9 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				return
 			}
 			group.Name, group.Description, group.Selector, group.UpdatedAt = canonicalGroupName(selector), strings.TrimSpace(req.Description), selector, time.Now().UTC()
+			if currentRole(auth, r) == roleAdmin && req.Owners != nil {
+				group.Owners = normalizeOwners(req.Owners)
+			}
 			if req.Enabled != nil {
 				group.Enabled = *req.Enabled
 			}
@@ -520,6 +636,16 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			internalServerError(w, err)
 			return
 		}
+		if currentRole(auth, r) == roleGroupOwner {
+			username := currentUsername(auth, r)
+			filtered := make([]*groups.Group, 0, len(groupsList))
+			for _, item := range groupsList {
+				if isGroupOwner(item, username) {
+					filtered = append(filtered, item)
+				}
+			}
+			groupsList = filtered
+		}
 		view := groupsView{Page: "groups", Items: make([]groupListItem, 0, len(groupsList))}
 		for _, group := range groupsList {
 			members, memberErr := membersForGroupIdentity(r.Context(), group, agentStore)
@@ -554,8 +680,33 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			http.NotFound(w, r)
 			return
 		}
+		if !requireGroupAccess(w, r, auth, group) {
+			return
+		}
 		if r.Method == http.MethodPost {
 			action := strings.TrimSpace(r.FormValue("action"))
+			if action == "set_owners" {
+				if currentRole(auth, r) != roleAdmin {
+					http.Error(w, "only Admins can change group owners", http.StatusForbidden)
+					return
+				}
+				owners := normalizeOwners([]string{r.FormValue("owners")})
+				for _, owner := range owners {
+					user, err := auth.store.Get(r.Context(), owner)
+					if err != nil || !user.Enabled || user.Role != string(roleGroupOwner) {
+						http.Error(w, "group owner must be an enabled user with the group_owner role: "+owner, http.StatusUnprocessableEntity)
+						return
+					}
+				}
+				group.Owners = owners
+				group.UpdatedAt = time.Now().UTC()
+				if err := groupStore.Update(r.Context(), group); err != nil {
+					internalServerError(w, err)
+					return
+				}
+				http.Redirect(w, r, "/groups/"+group.ID, http.StatusSeeOther)
+				return
+			}
 			if action == "create_configuration" {
 				name := strings.TrimSpace(r.FormValue("name"))
 				version := strings.TrimSpace(r.FormValue("version"))
@@ -587,7 +738,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Error(w, "deployment request not found", http.StatusNotFound)
 					return
 				}
-				if err := requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentRejected); err != nil {
+				reviewer := currentUsername(auth, r)
+				if strings.EqualFold(reviewer, request.RequestedBy) {
+					http.Error(w, "requesters cannot review their own deployment request", http.StatusForbidden)
+					return
+				}
+				if err := requestStore.Review(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentRejected, reviewer, strings.TrimSpace(r.FormValue("review_comment"))); err != nil {
 					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
 					return
 				}
@@ -602,6 +758,11 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				}
 				if request.Status != configs.GroupDeploymentPendingApproval {
 					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
+					return
+				}
+				reviewer := currentUsername(auth, r)
+				if strings.EqualFold(reviewer, request.RequestedBy) {
+					http.Error(w, "requesters cannot approve their own deployment request", http.StatusForbidden)
 					return
 				}
 				if !group.Enabled || !sameSelector(group.Selector, request.GroupSelector) {
@@ -654,13 +815,19 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					}
 					readyMembers = append(readyMembers, current)
 				}
-				if err := requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentDeploying); err != nil {
+				if err := requestStore.Review(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentDeploying, reviewer, strings.TrimSpace(r.FormValue("review_comment"))); err != nil {
 					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
 					return
 				}
 				failures := make([]string, 0)
 				for _, member := range readyMembers {
-					if _, _, err := deliverConfiguration(r.Context(), member.InstanceUID, configuration, configs.DeploymentActionDeploy, assignmentStore, deploymentStore, adapter); err != nil {
+					previousID, err := lastSuccessfulConfigurationID(r.Context(), member.InstanceUID, deploymentStore)
+					if err != nil {
+						failures = append(failures, member.Name+": "+err.Error())
+						continue
+					}
+					if _, _, err := deliverConfigurationWithRollback(r.Context(), member.InstanceUID, configuration, configs.DeploymentActionDeploy, previousID, request.ID, assignmentStore, deploymentStore, adapter); err != nil {
+						attemptAutomaticRollback(r.Context(), member.InstanceUID, configuration.Hash, configStore, assignmentStore, deploymentStore, adapter)
 						failures = append(failures, member.Name+": "+err.Error())
 					}
 				}
@@ -719,6 +886,11 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					return
 				}
 				request, err := configs.NewGroupDeploymentRequest(group.ID, group.Name, group.Selector, configuration, targets, requestedBy)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				request.BaseConfigurationID, request.BaseConfigurationHash, err = commonAppliedConfiguration(r.Context(), preview, assignmentStore)
 				if err != nil {
 					internalServerError(w, err)
 					return
@@ -855,6 +1027,8 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		view := groupDetailView{
 			Page: "groups", Group: group, Members: members, Configurations: available,
 			Requests: requests, DeploymentHistory: deploymentHistory, DriftSummary: driftSummary,
+			CanAdminister:      currentRole(auth, r) == roleAdmin,
+			OwnersText:         strings.Join(group.Owners, ", "),
 			ConfigurationSaved: r.URL.Query().Get("configuration_saved"),
 			RequestCreated:     r.URL.Query().Get("request_created"),
 			RequestUpdated:     r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),

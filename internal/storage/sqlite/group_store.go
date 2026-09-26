@@ -26,8 +26,12 @@ func (s *GroupStore) Create(ctx context.Context, group *groups.Group) error {
 	if err != nil {
 		return fmt.Errorf("encode group selector: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO groups(id,name,description,selector,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,
-		group.ID, group.Name, group.Description, string(selector), boolToInt(group.Enabled), group.CreatedAt.Format(time.RFC3339Nano), group.UpdatedAt.Format(time.RFC3339Nano))
+	owners, err := json.Marshal(group.Owners)
+	if err != nil {
+		return fmt.Errorf("encode group owners: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO groups(id,name,description,selector,owners,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`,
+		group.ID, group.Name, group.Description, string(selector), string(owners), boolToInt(group.Enabled), group.CreatedAt.Format(time.RFC3339Nano), group.UpdatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("create group: %w", err)
 	}
@@ -40,8 +44,12 @@ func (s *GroupStore) Update(ctx context.Context, group *groups.Group) error {
 	if err != nil {
 		return fmt.Errorf("encode group selector: %w", err)
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE groups SET name=?,description=?,selector=?,enabled=?,updated_at=? WHERE id=?`,
-		group.Name, group.Description, string(selector), boolToInt(group.Enabled), group.UpdatedAt.Format(time.RFC3339Nano), group.ID)
+	owners, err := json.Marshal(group.Owners)
+	if err != nil {
+		return fmt.Errorf("encode group owners: %w", err)
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE groups SET name=?,description=?,selector=?,owners=?,enabled=?,updated_at=? WHERE id=?`,
+		group.Name, group.Description, string(selector), string(owners), boolToInt(group.Enabled), group.UpdatedAt.Format(time.RFC3339Nano), group.ID)
 	if err != nil {
 		return fmt.Errorf("update group: %w", err)
 	}
@@ -93,21 +101,24 @@ func (s *GroupStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-const groupSelect = `SELECT id,name,description,selector,enabled,created_at,updated_at FROM groups`
+const groupSelect = `SELECT id,name,description,selector,owners,enabled,created_at,updated_at FROM groups`
 
 type scanner interface{ Scan(dest ...any) error }
 
 // scanGroup decodes selector JSON and constructs a group from a SQL row.
 func scanGroup(s scanner) (*groups.Group, error) {
 	var g groups.Group
-	var selector, createdAt, updatedAt string
+	var selector, owners, createdAt, updatedAt string
 	var enabled int
-	if err := s.Scan(&g.ID, &g.Name, &g.Description, &selector, &enabled, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&g.ID, &g.Name, &g.Description, &selector, &owners, &enabled, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	g.Enabled = enabled != 0
 	if err := json.Unmarshal([]byte(selector), &g.Selector); err != nil {
 		return nil, fmt.Errorf("decode group selector: %w", err)
+	}
+	if err := json.Unmarshal([]byte(owners), &g.Owners); err != nil {
+		return nil, fmt.Errorf("decode group owners: %w", err)
 	}
 	var err error
 	g.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)

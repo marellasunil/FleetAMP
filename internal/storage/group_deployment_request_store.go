@@ -16,5 +16,7 @@ type GroupDeploymentRequestStore interface {
 	Create(context.Context, *configs.GroupDeploymentRequest) error
 	Get(context.Context, string) (*configs.GroupDeploymentRequest, error)
 	ListByGroup(context.Context, string, int) ([]*configs.GroupDeploymentRequest, error)
+	List(context.Context, int) ([]*configs.GroupDeploymentRequest, error)
 	UpdateStatus(context.Context, string, configs.GroupDeploymentRequestStatus, configs.GroupDeploymentRequestStatus) error
+	Review(context.Context, string, configs.GroupDeploymentRequestStatus, configs.GroupDeploymentRequestStatus, string, string) error
 }

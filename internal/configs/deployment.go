@@ -29,21 +29,24 @@ const (
 )
 
 type Deployment struct {
-	ID                   string           `json:"id"`
-	AgentInstanceUID     string           `json:"agent_instance_uid"`
-	ConfigurationID      string           `json:"configuration_id"`
-	ConfigurationName    string           `json:"configuration_name"`
-	ConfigurationVersion string           `json:"configuration_version"`
-	ConfigurationHash    string           `json:"configuration_hash"`
-	Action               DeploymentAction `json:"action"`
-	Status               DeliveryStatus   `json:"status"`
-	Error                string           `json:"error,omitempty"`
-	CreatedAt            time.Time        `json:"created_at"`
-	SentAt               *time.Time       `json:"sent_at,omitempty"`
-	ApplyingAt           *time.Time       `json:"applying_at,omitempty"`
-	AppliedAt            *time.Time       `json:"applied_at,omitempty"`
-	FailedAt             *time.Time       `json:"failed_at,omitempty"`
-	UpdatedAt            time.Time        `json:"updated_at"`
+	ID                      string           `json:"id"`
+	AgentInstanceUID        string           `json:"agent_instance_uid"`
+	ConfigurationID         string           `json:"configuration_id"`
+	ConfigurationName       string           `json:"configuration_name"`
+	ConfigurationVersion    string           `json:"configuration_version"`
+	ConfigurationHash       string           `json:"configuration_hash"`
+	PreviousConfigurationID string           `json:"previous_configuration_id,omitempty"`
+	ApprovalRequestID       string           `json:"approval_request_id,omitempty"`
+	RollbackStartedAt       *time.Time       `json:"rollback_started_at,omitempty"`
+	Action                  DeploymentAction `json:"action"`
+	Status                  DeliveryStatus   `json:"status"`
+	Error                   string           `json:"error,omitempty"`
+	CreatedAt               time.Time        `json:"created_at"`
+	SentAt                  *time.Time       `json:"sent_at,omitempty"`
+	ApplyingAt              *time.Time       `json:"applying_at,omitempty"`
+	AppliedAt               *time.Time       `json:"applied_at,omitempty"`
+	FailedAt                *time.Time       `json:"failed_at,omitempty"`
+	UpdatedAt               time.Time        `json:"updated_at"`
 }
 
 // NewDeployment creates a pending delivery-history record for a configuration action against one agent.

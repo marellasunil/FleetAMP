@@ -42,6 +42,9 @@ const sessionJS = `(() => {
       document.querySelectorAll(".admin-settings-link").forEach((settings) => {
         if (session.role !== "admin") settings.hidden = true;
       });
+      if (session.role === "group_owner") {
+        document.querySelectorAll('nav a:not([href^="/groups"])').forEach((link) => { link.hidden = true; });
+      }
     })
     .catch(() => {});
 })();`
@@ -67,7 +70,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <input type="hidden" name="action" value="create">
 <label>Username<input class="input" name="username" required minlength="3" maxlength="64"></label>
 <label>Role<select class="select" name="role" required>
-<option value="viewer">Viewer</option><option value="operator">Operator</option>
+<option value="viewer">Viewer</option><option value="group_owner">Group owner</option><option value="operator">Operator</option>
 <option value="admin">Admin</option></select></label>
 <label>Password<input class="input" type="password" name="password" required minlength="16" autocomplete="new-password"></label>
 <label>Confirm password<input class="input" type="password" name="confirm_password" required minlength="16" autocomplete="new-password"></label>
@@ -85,6 +88,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <input type="hidden" name="username" value="{{.Username}}">
 <label><span class="tiny">Role</span><select class="select compact" name="role">
 <option value="viewer" {{if eq .Role "viewer"}}selected{{end}}>Viewer</option>
+<option value="group_owner" {{if eq .Role "group_owner"}}selected{{end}}>Group owner</option>
 <option value="operator" {{if eq .Role "operator"}}selected{{end}}>Operator</option>
 <option value="admin" {{if eq .Role "admin"}}selected{{end}}>Admin</option>
 </select></label><button class="btn" type="submit">Save role</button></form></td>
@@ -108,7 +112,7 @@ var usersPage = template.Must(template.New("users").Parse(usersPageHTML))
 
 func validRole(value string) bool {
 	switch role(value) {
-	case roleAdmin, roleOperator, roleViewer:
+	case roleAdmin, roleOperator, roleGroupOwner, roleViewer:
 		return true
 	default:
 		return false
@@ -122,7 +126,7 @@ func (a *authManager) createUser(ctx context.Context, username, password, roleVa
 		return fmt.Errorf("username must contain between 3 and 64 characters")
 	}
 	if !validRole(roleValue) {
-		return fmt.Errorf("role must be admin, operator, or viewer")
+		return fmt.Errorf("role must be admin, operator, group_owner, or viewer")
 	}
 	if len(password) < minimumAdminPassword {
 		return fmt.Errorf("password must contain at least %d characters", minimumAdminPassword)

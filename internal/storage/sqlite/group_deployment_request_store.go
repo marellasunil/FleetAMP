@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/storage"
@@ -22,10 +23,11 @@ func (s *GroupDeploymentRequestStore) Create(ctx context.Context, request *confi
 		return fmt.Errorf("encode deployment targets: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO group_deployment_requests
-        (id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,targets,requested_by,status,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, request.ID, request.GroupID, request.GroupName, string(selector),
+        (id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,base_configuration_id,base_configuration_hash,targets,requested_by,reviewed_by,review_comment,reviewed_at,status,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, request.ID, request.GroupID, request.GroupName, string(selector),
 		request.ConfigurationID, request.ConfigurationName, request.ConfigurationVersion, request.ConfigurationHash,
-		string(targets), request.RequestedBy, string(request.Status), formatTime(request.CreatedAt))
+		request.BaseConfigurationID, request.BaseConfigurationHash, string(targets), request.RequestedBy,
+		request.ReviewedBy, request.ReviewComment, formatTimePtr(request.ReviewedAt), string(request.Status), formatTime(request.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("create group deployment request: %w", err)
 	}
@@ -33,8 +35,7 @@ func (s *GroupDeploymentRequestStore) Create(ctx context.Context, request *confi
 }
 
 func (s *GroupDeploymentRequestStore) Get(ctx context.Context, id string) (*configs.GroupDeploymentRequest, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,targets,requested_by,status,created_at
-        FROM group_deployment_requests WHERE id=?`, id)
+	row := s.db.QueryRowContext(ctx, groupDeploymentRequestSelect+` WHERE id=?`, id)
 	item, err := scanGroupDeploymentRequest(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -43,6 +44,24 @@ func (s *GroupDeploymentRequestStore) Get(ctx context.Context, id string) (*conf
 		return nil, err
 	}
 	return item, nil
+}
+
+func (s *GroupDeploymentRequestStore) Review(ctx context.Context, id string, from, to configs.GroupDeploymentRequestStatus, reviewer, comment string) error {
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE group_deployment_requests
+        SET status=?,reviewed_by=?,review_comment=?,reviewed_at=? WHERE id=? AND status=?`,
+		string(to), reviewer, comment, formatTime(now), id, string(from))
+	if err != nil {
+		return fmt.Errorf("review group deployment request: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return storage.ErrGroupDeploymentRequestConflict
+	}
+	return nil
 }
 
 func (s *GroupDeploymentRequestStore) UpdateStatus(ctx context.Context, id string, from, to configs.GroupDeploymentRequestStatus) error {
@@ -64,8 +83,7 @@ func (s *GroupDeploymentRequestStore) ListByGroup(ctx context.Context, groupID s
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,targets,requested_by,status,created_at
-        FROM group_deployment_requests WHERE group_id=? ORDER BY created_at DESC LIMIT ?`, groupID, limit)
+	rows, err := s.db.QueryContext(ctx, groupDeploymentRequestSelect+` WHERE group_id=? ORDER BY created_at DESC LIMIT ?`, groupID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list group deployment requests: %w", err)
 	}
@@ -84,6 +102,28 @@ func (s *GroupDeploymentRequestStore) ListByGroup(ctx context.Context, groupID s
 	return result, nil
 }
 
+func (s *GroupDeploymentRequestStore) List(ctx context.Context, limit int) ([]*configs.GroupDeploymentRequest, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, groupDeploymentRequestSelect+` ORDER BY created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list group deployment requests: %w", err)
+	}
+	defer rows.Close()
+	result := make([]*configs.GroupDeploymentRequest, 0)
+	for rows.Next() {
+		item, err := scanGroupDeploymentRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+const groupDeploymentRequestSelect = `SELECT id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,base_configuration_id,base_configuration_hash,targets,requested_by,reviewed_by,review_comment,reviewed_at,status,created_at FROM group_deployment_requests`
+
 type groupDeploymentRequestScanner interface {
 	Scan(...any) error
 }
@@ -91,7 +131,8 @@ type groupDeploymentRequestScanner interface {
 func scanGroupDeploymentRequest(scanner groupDeploymentRequestScanner) (*configs.GroupDeploymentRequest, error) {
 	var item configs.GroupDeploymentRequest
 	var selector, targets, status, created string
-	if err := scanner.Scan(&item.ID, &item.GroupID, &item.GroupName, &selector, &item.ConfigurationID, &item.ConfigurationName, &item.ConfigurationVersion, &item.ConfigurationHash, &targets, &item.RequestedBy, &status, &created); err != nil {
+	var reviewedAt sql.NullString
+	if err := scanner.Scan(&item.ID, &item.GroupID, &item.GroupName, &selector, &item.ConfigurationID, &item.ConfigurationName, &item.ConfigurationVersion, &item.ConfigurationHash, &item.BaseConfigurationID, &item.BaseConfigurationHash, &targets, &item.RequestedBy, &item.ReviewedBy, &item.ReviewComment, &reviewedAt, &status, &created); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(selector), &item.GroupSelector); err != nil {
@@ -106,6 +147,9 @@ func scanGroupDeploymentRequest(scanner groupDeploymentRequestScanner) (*configs
 		return nil, err
 	}
 	item.CreatedAt = createdAt
+	if item.ReviewedAt, err = parseNullTime(reviewedAt); err != nil {
+		return nil, err
+	}
 	return &item, nil
 }
 

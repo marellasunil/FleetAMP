@@ -104,6 +104,7 @@ func TestUserRolesAndLastAdminProtection(t *testing.T) {
 	}
 	create("primary-admin", "admin")
 	create("operator-one", "operator")
+	create("owner-one", "group_owner")
 
 	if err := store.UpdateRole(ctx, "primary-admin", "viewer"); !errors.Is(err, ErrLastAdmin) {
 		t.Fatalf("demote last Admin error=%v", err)
@@ -121,8 +122,51 @@ func TestUserRolesAndLastAdminProtection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(users) != 2 || users[0].Username != "operator-one" || users[1].Role != "viewer" {
+	if len(users) != 3 || users[0].Username != "operator-one" || users[1].Role != "group_owner" || users[2].Role != "viewer" {
 		t.Fatalf("unexpected users: %#v", users)
+	}
+}
+
+func TestExistingUsersTableMigratesGroupOwnerRole(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy-users.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec(`CREATE TABLE users (
+        username TEXT PRIMARY KEY COLLATE NOCASE,
+        role TEXT NOT NULL CHECK (role IN ('admin','operator','viewer')),
+        enabled INTEGER NOT NULL DEFAULT 1,
+        password_salt BLOB NOT NULL, password_hash BLOB NOT NULL,
+        created_at TEXT NOT NULL, password_changed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := legacy.Exec(`INSERT INTO users VALUES (?,?,?,?,?,?,?,?)`, "existing-admin", "admin", 1, []byte("salt"), []byte("hash"), now, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Authentication().Create(ctx, User{
+		Username: "owner-one", Role: "group_owner", Enabled: true,
+		PasswordSalt: []byte("salt"), PasswordHash: []byte("hash"),
+	}); err != nil {
+		t.Fatalf("create group owner after migration: %v", err)
+	}
+	owner, err := db.Authentication().Get(ctx, "owner-one")
+	if err != nil || owner.Role != "group_owner" {
+		t.Fatalf("owner=%#v err=%v", owner, err)
 	}
 }
 
@@ -192,8 +236,18 @@ func TestDeploymentHistoryPersistenceAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	first.PreviousConfigurationID = "config-previous"
+	first.ApprovalRequestID = "approval-1"
 	if err := db.Deployments().Create(ctx, first); err != nil {
 		t.Fatal(err)
+	}
+	claimed, err := db.Deployments().ClaimRollback(ctx, first.ID)
+	if err != nil || !claimed {
+		t.Fatalf("first rollback claim claimed=%t err=%v", claimed, err)
+	}
+	claimed, err = db.Deployments().ClaimRollback(ctx, first.ID)
+	if err != nil || claimed {
+		t.Fatalf("duplicate rollback claim claimed=%t err=%v", claimed, err)
 	}
 	time.Sleep(time.Millisecond)
 	second, err := configs.NewDeployment("agent-1", configuration, configs.DeploymentActionRollback)
@@ -228,7 +282,9 @@ func TestDeploymentHistoryPersistenceAndStatus(t *testing.T) {
 	if items[0].Status != configs.DeliveryApplied || items[0].AppliedAt == nil {
 		t.Fatalf("latest status=%#v", items[0])
 	}
-	if items[1].ID != first.ID || items[1].Status != configs.DeliveryPending {
+	if items[1].ID != first.ID || items[1].Status != configs.DeliveryPending ||
+		items[1].PreviousConfigurationID != "config-previous" || items[1].ApprovalRequestID != "approval-1" ||
+		items[1].RollbackStartedAt == nil {
 		t.Fatalf("first deployment=%#v", items[1])
 	}
 }
@@ -244,6 +300,7 @@ func TestGroupPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	group.Owners = []string{"operator-one", "operator-two"}
 	if err := db.Groups().Create(ctx, group); err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +316,8 @@ func TestGroupPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != group.Name || got.Selector["team"] != "payments" || got.Selector["environment"] != "prod" {
+	if got.Name != group.Name || got.Selector["team"] != "payments" || got.Selector["environment"] != "prod" ||
+		len(got.Owners) != 2 || got.Owners[0] != "operator-one" {
 		t.Fatalf("group mismatch: %#v", got)
 	}
 }
@@ -294,6 +352,8 @@ func TestGroupDeploymentRequestPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.BaseConfigurationID = "config-baseline"
+	request.BaseConfigurationHash = "baseline-hash"
 	if err := db.GroupDeploymentRequests().Create(ctx, request); err != nil {
 		t.Fatal(err)
 	}
@@ -317,17 +377,19 @@ func TestGroupDeploymentRequestPersistence(t *testing.T) {
 	if got.ID != request.ID || got.Status != configs.GroupDeploymentPendingApproval ||
 		got.RequestedBy != "admin" || len(got.Targets) != 2 ||
 		got.GroupSelector["application"] != "payments" ||
-		got.ConfigurationHash != configuration.Hash {
+		got.ConfigurationHash != configuration.Hash || got.BaseConfigurationID != "config-baseline" ||
+		got.BaseConfigurationHash != "baseline-hash" {
 		t.Fatalf("request mismatch: %#v", got)
 	}
-	if err := reopened.GroupDeploymentRequests().UpdateStatus(ctx, request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentDeploying); err != nil {
+	if err := reopened.GroupDeploymentRequests().Review(ctx, request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentDeploying, "reviewer-admin", "approved after diff review"); err != nil {
 		t.Fatal(err)
 	}
 	updated, err := reopened.GroupDeploymentRequests().Get(ctx, request.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Status != configs.GroupDeploymentDeploying {
+	if updated.Status != configs.GroupDeploymentDeploying || updated.ReviewedBy != "reviewer-admin" ||
+		updated.ReviewComment != "approved after diff review" || updated.ReviewedAt == nil {
 		t.Fatalf("updated status=%q", updated.Status)
 	}
 	if err := reopened.GroupDeploymentRequests().UpdateStatus(ctx, request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentRejected); err == nil {
