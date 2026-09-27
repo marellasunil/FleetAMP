@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 type userSummary struct {
 	Username          string
+	Email             string
 	Role              string
 	Enabled           bool
 	CreatedAt         time.Time
@@ -69,6 +71,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <form class="detailform" method="post" action="/settings/users">
 <input type="hidden" name="action" value="create">
 <label>Username<input class="input" name="username" required minlength="3" maxlength="64"></label>
+<label>Email<input class="input" type="email" name="email" placeholder="owner@example.com"></label>
 <label>Role<select class="select" name="role" required>
 <option value="viewer">Viewer</option><option value="group_owner">Group owner</option><option value="operator">Operator</option>
 <option value="admin">Admin</option></select></label>
@@ -79,10 +82,10 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Managed users</div>
 <div class="cardsub">{{len .Users}} local FleetAMP user(s)</div></div></div>
 {{if .Users}}<div style="overflow:auto"><table><thead><tr>
-<th>User</th><th>Role and access</th><th>Status</th><th>Password</th>
+<th>User and email</th><th>Role and access</th><th>Status</th><th>Password</th>
 </tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Username}}</strong>
 {{if eq .Username $.CurrentUser}}<div class="tiny">Current session</div>{{end}}
-<div class="tiny">Created {{.CreatedAt}}</div></td><td>
+<div class="tiny">Created {{.CreatedAt}}</div><form class="useractions" method="post" action="/settings/users" style="margin-top:8px"><input type="hidden" name="action" value="email"><input type="hidden" name="username" value="{{.Username}}"><input class="input compact" type="email" name="email" value="{{.Email}}" placeholder="No notification email"><button class="btn" type="submit">Save email</button></form></td><td>
 <form class="useractions" method="post" action="/settings/users">
 <input type="hidden" name="action" value="role">
 <input type="hidden" name="username" value="{{.Username}}">
@@ -119,14 +122,21 @@ func validRole(value string) bool {
 	}
 }
 
-func (a *authManager) createUser(ctx context.Context, username, password, roleValue string) error {
+func (a *authManager) createUser(ctx context.Context, username, email, password, roleValue string) error {
 	username = strings.TrimSpace(username)
+	email = strings.TrimSpace(email)
 	roleValue = strings.ToLower(strings.TrimSpace(roleValue))
 	if len(username) < 3 || len(username) > 64 {
 		return fmt.Errorf("username must contain between 3 and 64 characters")
 	}
 	if !validRole(roleValue) {
 		return fmt.Errorf("role must be admin, operator, group_owner, or viewer")
+	}
+	if email != "" {
+		address, err := mail.ParseAddress(email)
+		if err != nil || !strings.EqualFold(address.Address, email) {
+			return fmt.Errorf("email address is invalid")
+		}
 	}
 	if len(password) < minimumAdminPassword {
 		return fmt.Errorf("password must contain at least %d characters", minimumAdminPassword)
@@ -136,7 +146,7 @@ func (a *authManager) createUser(ctx context.Context, username, password, roleVa
 		return err
 	}
 	return a.store.Create(ctx, sqlitestore.User{
-		Username: username, Role: roleValue, Enabled: true,
+		Username: username, Email: email, Role: roleValue, Enabled: true,
 		PasswordSalt: salt, PasswordHash: passwordDigest(password, a.pepper, salt),
 	})
 }
@@ -221,7 +231,7 @@ func (a *authManager) handleUsers(w http.ResponseWriter, r *http.Request) {
 			err = fmt.Errorf("passwords do not match")
 			break
 		}
-		err = a.createUser(r.Context(), target, r.FormValue("password"), r.FormValue("role"))
+		err = a.createUser(r.Context(), target, r.FormValue("email"), r.FormValue("password"), r.FormValue("role"))
 	case "role":
 		nextRole := strings.ToLower(strings.TrimSpace(r.FormValue("role")))
 		if !validRole(nextRole) {
@@ -254,6 +264,16 @@ func (a *authManager) handleUsers(w http.ResponseWriter, r *http.Request) {
 		if err == nil && !enabled {
 			a.revokeUserSessions(target)
 		}
+	case "email":
+		email := strings.TrimSpace(r.FormValue("email"))
+		if email != "" {
+			address, parseErr := mail.ParseAddress(email)
+			if parseErr != nil || !strings.EqualFold(address.Address, email) {
+				err = fmt.Errorf("email address is invalid")
+				break
+			}
+		}
+		err = a.store.UpdateEmail(r.Context(), target, email)
 	case "reset_password":
 		if r.FormValue("password") != r.FormValue("confirm_password") {
 			err = fmt.Errorf("passwords do not match")
@@ -276,7 +296,7 @@ func (a *authManager) handleUsers(w http.ResponseWriter, r *http.Request) {
 		"actor", actor, "target", target, "action", action)
 	message := map[string]string{
 		"create": "User created.", "role": "Role updated.",
-		"status": "User status updated.", "reset_password": "Password reset.",
+		"status": "User status updated.", "email": "Notification email updated.", "reset_password": "Password reset.",
 	}[action]
 	a.redirectUsers(w, r, message, "")
 }
@@ -310,7 +330,7 @@ func (a *authManager) renderUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, user := range users {
 		view.Users = append(view.Users, userSummary{
-			Username: user.Username, Role: user.Role, Enabled: user.Enabled,
+			Username: user.Username, Email: user.Email, Role: user.Role, Enabled: user.Enabled,
 			CreatedAt: user.CreatedAt, PasswordChangedAt: user.PasswordChangedAt,
 		})
 	}

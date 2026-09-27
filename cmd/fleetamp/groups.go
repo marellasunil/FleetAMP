@@ -127,6 +127,21 @@ func normalizeOwners(values []string) []string {
 	return result
 }
 
+func approvalExpiryDays(value string) (int, error) {
+	switch strings.TrimSpace(value) {
+	case "7":
+		return 7, nil
+	case "30", "":
+		return 30, nil
+	case "60":
+		return 60, nil
+	case "90":
+		return 90, nil
+	default:
+		return 0, errors.New("approval validity must be 7, 30, 60, or 90 days")
+	}
+}
+
 // validateConfigurationForApproval enforces the current validation policy before a request enters the approval queue.
 func validateConfigurationForApproval(ctx context.Context, validator *configs.Validator, configuration *configs.Configuration) error {
 	if configuration == nil {
@@ -252,7 +267,7 @@ func sameSelector(left, right map[string]string) bool {
 }
 
 // registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
-func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, auth *authManager, dataDir string) {
+func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, auth *authManager, notifier *approvalNotifier, dataDir string) {
 	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
 	mux.HandleFunc("/agents/{uid}/group", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -510,7 +525,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 	})
 
-	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, validator, adapter, auth)
+	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, validator, adapter, auth, notifier)
 }
 
 // newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
@@ -602,7 +617,7 @@ func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.Ag
 }
 
 // registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
-func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, auth *authManager) {
+func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, auth *authManager, notifier *approvalNotifier) {
 	// /groups displays all groups and accepts creation form submissions.
 	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/groups" {
@@ -685,6 +700,9 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		if r.Method == http.MethodPost {
 			action := strings.TrimSpace(r.FormValue("action"))
+			if action == "approve_deployment" || action == "reject_deployment" {
+				expireApprovalRequests(r.Context(), requestStore, groupStore, notifier)
+			}
 			if action == "set_owners" {
 				if currentRole(auth, r) != roleAdmin {
 					http.Error(w, "only Admins can change group owners", http.StatusForbidden)
@@ -747,6 +765,8 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
 					return
 				}
+				request.Status = configs.GroupDeploymentRejected
+				notifier.notify(r.Context(), "rejected", request, group)
 				http.Redirect(w, r, "/groups/"+group.ID+"?request_updated=rejected", http.StatusSeeOther)
 				return
 			}
@@ -819,6 +839,8 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
 					return
 				}
+				request.Status = configs.GroupDeploymentDeploying
+				notifier.notify(r.Context(), "approved and deploying", request, group)
 				failures := make([]string, 0)
 				for _, member := range readyMembers {
 					previousID, err := lastSuccessfulConfigurationID(r.Context(), member.InstanceUID, deploymentStore)
@@ -890,6 +912,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					internalServerError(w, err)
 					return
 				}
+				expiryDays, err := approvalExpiryDays(r.FormValue("expiry_days"))
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				request.ExpiresAt = request.CreatedAt.Add(time.Duration(expiryDays) * 24 * time.Hour)
 				request.BaseConfigurationID, request.BaseConfigurationHash, err = commonAppliedConfiguration(r.Context(), preview, assignmentStore)
 				if err != nil {
 					internalServerError(w, err)
@@ -899,6 +927,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					internalServerError(w, err)
 					return
 				}
+				notifier.notify(r.Context(), "submitted", request, group)
 				http.Redirect(w, r, "/groups/"+group.ID+"?request_created="+request.ID, http.StatusSeeOther)
 				return
 			}
@@ -1007,11 +1036,15 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			}
 			switch {
 			case failed > 0:
-				_ = requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentFailed)
-				request.Status = configs.GroupDeploymentFailed
+				if err := requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentFailed); err == nil {
+					request.Status = configs.GroupDeploymentFailed
+					notifier.notify(r.Context(), "deployment failed; rollback evaluated", request, group)
+				}
 			case eligible > 0 && applied == eligible:
-				_ = requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentCompleted)
-				request.Status = configs.GroupDeploymentCompleted
+				if err := requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentCompleted); err == nil {
+					request.Status = configs.GroupDeploymentCompleted
+					notifier.notify(r.Context(), "deployment completed", request, group)
+				}
 			}
 		}
 		driftSummary, err := buildGroupDrift(r.Context(), members, configStore, assignmentStore, adapter)

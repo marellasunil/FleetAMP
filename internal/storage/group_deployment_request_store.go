@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/configs"
 )
@@ -19,4 +20,5 @@ type GroupDeploymentRequestStore interface {
 	List(context.Context, int) ([]*configs.GroupDeploymentRequest, error)
 	UpdateStatus(context.Context, string, configs.GroupDeploymentRequestStatus, configs.GroupDeploymentRequestStatus) error
 	Review(context.Context, string, configs.GroupDeploymentRequestStatus, configs.GroupDeploymentRequestStatus, string, string) error
+	ExpirePending(context.Context, time.Time) ([]*configs.GroupDeploymentRequest, error)
 }

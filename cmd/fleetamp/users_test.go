@@ -29,7 +29,7 @@ func newUserTestManager(t *testing.T) (*authManager, *sqlitestore.Database) {
 func TestCreateUserAuthenticationAndDisable(t *testing.T) {
 	manager, db := newUserTestManager(t)
 	defer db.Close()
-	if err := manager.createUser(context.Background(), "operator-one",
+	if err := manager.createUser(context.Background(), "operator-one", "operator@example.com",
 		"a-strong-operator-password", "operator"); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestCreateUserAuthenticationAndDisable(t *testing.T) {
 func TestRoleAndPasswordChangesRevokeSessions(t *testing.T) {
 	manager, db := newUserTestManager(t)
 	defer db.Close()
-	if err := manager.createUser(context.Background(), "viewer-one",
+	if err := manager.createUser(context.Background(), "viewer-one", "",
 		"a-strong-viewer-password", "viewer"); err != nil {
 		t.Fatal(err)
 	}

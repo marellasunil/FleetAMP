@@ -35,6 +35,20 @@ func TestNormalizeOwnersAndOwnershipMatch(t *testing.T) {
 	}
 }
 
+func TestApprovalExpiryDaysHasNinetyDayMaximum(t *testing.T) {
+	for input, want := range map[string]int{"": 30, "7": 7, "30": 30, "60": 60, "90": 90} {
+		got, err := approvalExpiryDays(input)
+		if err != nil || got != want {
+			t.Errorf("approvalExpiryDays(%q)=%d,%v want %d,nil", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"0", "91", "365"} {
+		if _, err := approvalExpiryDays(input); err == nil {
+			t.Errorf("approvalExpiryDays(%q) accepted a value above the supported policy", input)
+		}
+	}
+}
+
 func TestPreviewGroupMembers(t *testing.T) {
 	members := []*agents.ManagedAgent{
 		{InstanceUID: "ready", Connected: true, Capabilities: []string{"accepts_remote_config"}},

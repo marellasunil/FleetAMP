@@ -48,6 +48,7 @@ type userStore interface {
 	ReplacePassword(context.Context, string, []byte, []byte) error
 	UpdateRole(context.Context, string, string) error
 	SetEnabled(context.Context, string, bool) error
+	UpdateEmail(context.Context, string, string) error
 }
 type authSession struct {
 	Username string

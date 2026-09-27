@@ -123,6 +123,7 @@ func (d *Database) initialize(ctx context.Context) error {
             base_configuration_hash TEXT NOT NULL DEFAULT '', targets TEXT NOT NULL,
             requested_by TEXT NOT NULL, reviewed_by TEXT NOT NULL DEFAULT '',
             review_comment TEXT NOT NULL DEFAULT '', reviewed_at TEXT,
+            expires_at TEXT NOT NULL, expired_at TEXT,
             status TEXT NOT NULL, created_at TEXT NOT NULL,
             FOREIGN KEY(group_id) REFERENCES groups(id),
             FOREIGN KEY(configuration_id) REFERENCES configurations(id)
@@ -136,6 +137,7 @@ func (d *Database) initialize(ctx context.Context) error {
         )`,
 		`CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY COLLATE NOCASE,
+            email TEXT NOT NULL DEFAULT '',
             role TEXT NOT NULL CHECK (role IN ('admin','operator','group_owner','viewer')),
             enabled INTEGER NOT NULL DEFAULT 1,
             password_salt BLOB NOT NULL, password_hash BLOB NOT NULL,
@@ -189,10 +191,27 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureGroupOwnerRole(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureUserEmailColumn(ctx); err != nil {
+		return err
+	}
 	if err := d.migrateAdministratorToUsers(ctx); err != nil {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureUserEmailColumn(ctx context.Context) error {
+	present, err := sqliteColumnExists(ctx, d.db, "users", "email")
+	if err != nil {
+		return err
+	}
+	if present {
+		return nil
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add users.email column: %w", err)
+	}
+	return nil
 }
 
 // ensureGroupOwnerRole widens the users role constraint for databases created
@@ -260,6 +279,8 @@ func (d *Database) ensureApprovalReviewColumns(ctx context.Context) error {
 		{"reviewed_by", "TEXT NOT NULL DEFAULT ''"},
 		{"review_comment", "TEXT NOT NULL DEFAULT ''"},
 		{"reviewed_at", "TEXT"},
+		{"expires_at", "TEXT NOT NULL DEFAULT '9999-12-31T23:59:59Z'"},
+		{"expired_at", "TEXT"},
 	}
 	for _, column := range columns {
 		present, err := sqliteColumnExists(ctx, d.db, "group_deployment_requests", column.name)
@@ -272,6 +293,11 @@ func (d *Database) ensureApprovalReviewColumns(ctx context.Context) error {
 		if _, err := d.db.ExecContext(ctx, `ALTER TABLE group_deployment_requests ADD COLUMN `+column.name+` `+column.definition); err != nil {
 			return fmt.Errorf("add group_deployment_requests.%s column: %w", column.name, err)
 		}
+	}
+	if _, err := d.db.ExecContext(ctx, `UPDATE group_deployment_requests
+        SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ',created_at,'+30 days')
+        WHERE expires_at='9999-12-31T23:59:59Z'`); err != nil {
+		return fmt.Errorf("backfill approval expiration: %w", err)
 	}
 	return nil
 }
