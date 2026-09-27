@@ -50,25 +50,42 @@ type groupPreviewAgent struct {
 }
 
 type groupDetailView struct {
-	Page               string
-	Group              *groups.Group
-	Members            []*agents.ManagedAgent
-	Configurations     []*configs.Configuration
-	SelectedConfig     *configs.Configuration
-	SelectedPipeline   *configs.PipelineModel
-	PipelineError      string
-	Preview            []groupPreviewAgent
-	Eligible           int
-	Requests           []*configs.GroupDeploymentRequest
-	DeploymentHistory  []*configs.Deployment
-	DriftSummary       groupDriftSummary
-	ConfigurationSaved string
-	RequestCreated     string
-	RequestUpdated     string
-	Error              string
-	CanAdminister      bool
-	OwnersText         string
+	Page                 string
+	Group                *groups.Group
+	Members              []*agents.ManagedAgent
+	Configurations       []*configs.Configuration
+	SelectedConfig       *configs.Configuration
+	SelectedPipeline     *configs.PipelineModel
+	PipelineError        string
+	Preview              []groupPreviewAgent
+	Eligible             int
+	Requests             []*configs.GroupDeploymentRequest
+	DeploymentHistory    []*configs.Deployment
+	DriftSummary         groupDriftSummary
+	ConfigurationSaved   string
+	RequestCreated       string
+	RequestUpdated       string
+	Error                string
+	CanAdminister        bool
+	OwnersText           string
+	EditorSections       []configurationSectionView
+	EditorBaseline       string
+	EditorBaseID         string
+	EditorError          string
+	CanEditConfiguration bool
 }
+
+const defaultGroupConfiguration = `receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: []
+`
 
 func currentUsername(auth *authManager, r *http.Request) string {
 	if auth != nil {
@@ -266,8 +283,18 @@ func sameSelector(left, right map[string]string) bool {
 	return true
 }
 
+func configurationsForGroup(items []*configs.Configuration, groupID string) []*configs.Configuration {
+	filtered := make([]*configs.Configuration, 0, len(items))
+	for _, configuration := range items {
+		if configuration != nil && configuration.GroupID == groupID {
+			filtered = append(filtered, configuration)
+		}
+	}
+	return filtered
+}
+
 // registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
-func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, auth *authManager, notifier *approvalNotifier, dataDir string) {
+func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
 	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
 	mux.HandleFunc("/agents/{uid}/group", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -525,7 +552,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 	})
 
-	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, validator, adapter, auth, notifier)
+	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, validator, adapter, sectionPolicyStore, auth, notifier)
 }
 
 // newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
@@ -617,7 +644,7 @@ func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.Ag
 }
 
 // registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
-func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, auth *authManager, notifier *approvalNotifier) {
+func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier) {
 	// /groups displays all groups and accepts creation form submissions.
 	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/groups" {
@@ -728,9 +755,31 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			if action == "create_configuration" {
 				name := strings.TrimSpace(r.FormValue("name"))
 				version := strings.TrimSpace(r.FormValue("version"))
-				content := r.FormValue("content")
+				baseline := defaultGroupConfiguration
+				if baseID := strings.TrimSpace(r.FormValue("base_configuration_id")); baseID != "" {
+					base, baseErr := configStore.Get(r.Context(), baseID)
+					if baseErr != nil || base.GroupID != group.ID {
+						http.Error(w, "group configuration baseline not found", http.StatusNotFound)
+						return
+					}
+					baseline = base.Content
+				}
+				content, composeErr := configs.ComposeConfigurationSections(baseline, sectionValuesFromForm(r))
+				if composeErr != nil {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(composeErr.Error()), http.StatusSeeOther)
+					return
+				}
 				if name == "" || version == "" || strings.TrimSpace(content) == "" {
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Name, version and configuration YAML are required."), http.StatusSeeOther)
+					return
+				}
+				policies, policyErr := sectionPolicyStore.List(r.Context())
+				if policyErr != nil {
+					internalServerError(w, policyErr)
+					return
+				}
+				if policyErr := enforceSectionPolicies(baseline, content, policies, currentRole(auth, r)); policyErr != nil {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(policyErr.Error()), http.StatusSeeOther)
 					return
 				}
 				validation := validator.Validate(r.Context(), content)
@@ -742,7 +791,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(message), http.StatusSeeOther)
 					return
 				}
-				configuration := configs.NewConfiguration(name, version, content, "text/yaml")
+				configuration := configs.NewGroupConfiguration(group.ID, name, version, content, "text/yaml")
 				if err := configStore.Put(r.Context(), configuration); err != nil {
 					internalServerError(w, err)
 					return
@@ -790,7 +839,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					return
 				}
 				configuration, err := configStore.Get(r.Context(), request.ConfigurationID)
-				if err != nil || configuration.Hash != request.ConfigurationHash {
+				if err != nil || configuration.GroupID != group.ID || configuration.Hash != request.ConfigurationHash {
 					http.Error(w, "approved configuration no longer matches the request", http.StatusConflict)
 					return
 				}
@@ -867,7 +916,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					return
 				}
 				configuration, err := configStore.Get(r.Context(), strings.TrimSpace(r.FormValue("configuration_id")))
-				if err != nil {
+				if err != nil || configuration.GroupID != group.ID {
 					http.Error(w, "configuration not found", http.StatusNotFound)
 					return
 				}
@@ -995,11 +1044,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			internalServerError(w, err)
 			return
 		}
-		available, err := configStore.List(r.Context())
+		allConfigurations, err := configStore.List(r.Context())
 		if err != nil {
 			internalServerError(w, err)
 			return
 		}
+		available := configurationsForGroup(allConfigurations, group.ID)
 		requests, err := requestStore.ListByGroup(r.Context(), group.ID, 20)
 		if err != nil {
 			internalServerError(w, err)
@@ -1057,6 +1107,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			internalServerError(w, err)
 			return
 		}
+		editorBaseline := defaultGroupConfiguration
+		editorBaseID := ""
+		if len(available) > 0 {
+			editorBaseline = available[0].Content
+			editorBaseID = available[0].ID
+		}
 		view := groupDetailView{
 			Page: "groups", Group: group, Members: members, Configurations: available,
 			Requests: requests, DeploymentHistory: deploymentHistory, DriftSummary: driftSummary,
@@ -1065,6 +1121,18 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			ConfigurationSaved: r.URL.Query().Get("configuration_saved"),
 			RequestCreated:     r.URL.Query().Get("request_created"),
 			RequestUpdated:     r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),
+			EditorBaseline:       editorBaseline,
+			EditorBaseID:         editorBaseID,
+			CanEditConfiguration: true,
+		}
+		policies, policyErr := sectionPolicyStore.List(r.Context())
+		if policyErr != nil {
+			view.EditorError = "Unable to load configuration section policies."
+		} else {
+			view.EditorSections, policyErr = buildConfigurationSectionViews(view.EditorBaseline, policies, currentRole(auth, r))
+			if policyErr != nil {
+				view.EditorError = policyErr.Error()
+			}
 		}
 		if configID := strings.TrimSpace(r.URL.Query().Get("configuration_id")); configID != "" {
 			for _, configuration := range available {

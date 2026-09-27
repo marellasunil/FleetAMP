@@ -8,7 +8,7 @@ FleetAMP is an independent community project and is not an official OpenTelemetr
 
 Documentation: [fleetamp.marellasunil.com](https://fleetamp.marellasunil.com)
 
-Local Docker test with FleetAMP and an OpAMP-managed Collector: [Compose lab](deploy/compose/README.md). The lab builds the current checkout and requires a local Supervisor image; it is not part of the v0.1.0 archives.
+Local Docker test with FleetAMP and an OpAMP-managed Collector: [Compose lab](deploy/compose/README.md). The lab builds the current checkout and requires a local Supervisor image; it is not part of the packaged release archives.
 
 ## Vision
 
@@ -110,23 +110,24 @@ Enrichment providers can eventually include:
 - generic REST CMDB
 - organization-specific metadata services
 
-## v0.1.0 community preview
+## v0.2.0 community preview
 
-[Download FleetAMP v0.1.0](https://github.com/marellasunil/FleetAMP/releases/tag/v0.1.0).
+[Download FleetAMP v0.2.0](https://github.com/marellasunil/FleetAMP/releases/tag/v0.2.0).
 
-FleetAMP v0.1.0 is the first packaged community preview. It is suitable for
+FleetAMP v0.2.0 is the governed fleet-management community preview. It is suitable for
 evaluation and a controlled single-server pilot, but it is not yet a supported
 production release.
 
-The preview includes persistent OpAMP agent inventory, Active/Offline/Retired
-lifecycle state, stable logical-agent reassociation, SQLite-backed groups and
-assignments, versioned configuration deployment and history, rollback, first-login
-administrator setup, session security, optional TLS and mTLS, and Linux systemd
-deployment assets.
+The preview includes persistent OpAMP agent inventory, stable logical-agent
+reassociation, group ownership, role-based access, governed configuration
+sections, validation, immutable approval requests, expiry and notifications,
+deployment history, automatic rollback, configuration drift handling, an
+append-only audit log, optional TLS and mTLS, and Linux systemd deployment assets.
 
-Known gaps include high availability, PostgreSQL, OIDC/RBAC, approval separation,
-certificate-to-agent authorization, Collector binary upgrades, and production
-scale certification. These remain pre-v1.0 work.
+Known gaps include high availability, PostgreSQL, OIDC, certificate-to-agent
+authorization, Collector binary upgrades, canary rollout stages, partial
+`conf.d` delivery, packaged Kubernetes deployment, and production-scale
+certification. These remain pre-v1.0 work.
 
 ## Project structure
 
@@ -155,9 +156,9 @@ for the laptop or server architecture from
 `SHA256SUMS`, and verify the archive before extracting it:
 
 ```bash
-grep -F '  fleetamp_0.1.0_linux_amd64.tar.gz' SHA256SUMS | sha256sum -c -
-tar -xzf fleetamp_0.1.0_linux_amd64.tar.gz
-cd fleetamp_0.1.0_linux_amd64
+grep -F '  fleetamp_0.2.0_linux_amd64.tar.gz' SHA256SUMS | sha256sum -c -
+tar -xzf fleetamp_0.2.0_linux_amd64.tar.gz
+cd fleetamp_0.2.0_linux_amd64
 ./fleetamp --version
 ```
 
@@ -279,9 +280,10 @@ For OS-specific deployment models and initial sizing requirements, see the [OS d
 ## Roadmap
 
 - **v0.1.x** — community preview packaging, single-node pilot validation, hardening and bug fixes
-- **v0.2** — approval workflow, audit trail, RBAC foundation and rollout safeguards
-- **v0.3** — PostgreSQL, high-availability foundations and broader scale testing
-- **v0.4+** — package upgrades, drift detection, canaries, Helm/Kubernetes deployment and additional agent adapters
+- **v0.2** — group ownership, approval workflow, audit trail, RBAC, drift handling and rollout safeguards
+- **v0.3** — instrumentation guides, reusable telemetry blueprints and configuration modules
+- **v0.4** — telemetry contracts, semantic-convention governance, policy as code and telemetry quality
+- **v0.5+** — intelligence, discovery, PostgreSQL/HA, canaries, package upgrades, Kubernetes packaging and additional agent adapters
 - **v1.0** — stable production baseline with documented compatibility, upgrade and support expectations
 
 ## Design principles

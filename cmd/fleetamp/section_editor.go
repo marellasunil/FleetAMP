@@ -98,7 +98,7 @@ func buildConfigurationSectionViews(content string, policies []configs.SectionPo
 	result := make([]configurationSectionView, 0, len(configs.ConfigurationSectionDefinitions))
 	for _, definition := range configs.ConfigurationSectionDefinitions {
 		operatorEditable := policyByKey[definition.Key]
-		editable := principalRole == roleAdmin || (principalRole == roleOperator && operatorEditable)
+		editable := principalRole == roleAdmin || ((principalRole == roleOperator || principalRole == roleGroupOwner) && operatorEditable)
 		result = append(result, configurationSectionView{
 			Key: definition.Key, Title: definition.Title, Description: definition.Description,
 			Content: sections[definition.Key], Editable: editable, OperatorEditable: operatorEditable,
@@ -148,8 +148,8 @@ func enforceSectionPolicies(before, after string, policies []configs.SectionPoli
 	if principalRole == roleAdmin {
 		return nil
 	}
-	if principalRole != roleOperator {
-		return fmt.Errorf("configuration editing requires Operator or Admin access")
+	if principalRole != roleOperator && principalRole != roleGroupOwner {
+		return fmt.Errorf("configuration editing requires Group owner, Operator or Admin access")
 	}
 	changed, err := configs.ChangedConfigurationSections(before, after)
 	if err != nil {

@@ -161,4 +161,9 @@ func TestConfigurationAuthoringIsOnlyShownOnGroupDetail(t *testing.T) {
 	if !strings.Contains(groupDetailHTML, "Create configuration version") {
 		t.Fatal("group detail is missing configuration authoring")
 	}
+	for _, expected := range []string{`id="configuration-editor-form"`, `data-section-tab=`, `src="/assets/configuration-editor.js"`} {
+		if !strings.Contains(groupDetailHTML, expected) {
+			t.Fatalf("group detail editor is missing %q", expected)
+		}
+	}
 }

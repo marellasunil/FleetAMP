@@ -20,8 +20,8 @@ func (s *ConfigStore) Put(ctx context.Context, config *configs.Configuration) er
 		return fmt.Errorf("configuration is required")
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO configurations
-        (id,name,version,content,content_type,hash,created_at) VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO NOTHING`, config.ID, config.Name, config.Version, config.Content,
+		(id,group_id,name,version,content,content_type,hash,created_at) VALUES(?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO NOTHING`, config.ID, config.GroupID, config.Name, config.Version, config.Content,
 		config.ContentType, config.Hash, config.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("store configuration: %w", err)
@@ -31,13 +31,13 @@ func (s *ConfigStore) Put(ctx context.Context, config *configs.Configuration) er
 
 // Get loads one configuration or storage.ErrConfigurationNotFound.
 func (s *ConfigStore) Get(ctx context.Context, id string) (*configs.Configuration, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id,name,version,content,content_type,hash,created_at FROM configurations WHERE id=?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id,group_id,name,version,content,content_type,hash,created_at FROM configurations WHERE id=?`, id)
 	return scanConfiguration(row)
 }
 
 // List loads configurations in newest-first order for API and UI consumers.
 func (s *ConfigStore) List(ctx context.Context) ([]*configs.Configuration, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,version,content,content_type,hash,created_at FROM configurations ORDER BY created_at DESC, id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,group_id,name,version,content,content_type,hash,created_at FROM configurations ORDER BY created_at DESC, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list configurations: %w", err)
 	}
@@ -62,7 +62,7 @@ type configScanner interface{ Scan(dest ...any) error }
 func scanConfiguration(scanner configScanner) (*configs.Configuration, error) {
 	var config configs.Configuration
 	var created string
-	if err := scanner.Scan(&config.ID, &config.Name, &config.Version, &config.Content, &config.ContentType, &config.Hash, &created); err != nil {
+	if err := scanner.Scan(&config.ID, &config.GroupID, &config.Name, &config.Version, &config.Content, &config.ContentType, &config.Hash, &created); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, storage.ErrConfigurationNotFound
 		}
