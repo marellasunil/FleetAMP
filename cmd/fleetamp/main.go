@@ -381,16 +381,14 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			return
 		}
 
-		principalRole := currentRole(auth, r)
 		view := agentDetailView{
-			Page: "fleet", Agent: agent, CanAdminBreakGlass: principalRole == roleAdmin, EffectiveConfig: adapter.EffectiveConfig(uid),
+			Page: "fleet", Agent: agent, EffectiveConfig: adapter.EffectiveConfig(uid),
 			RemoteConfigSupported: hasCapability(agent.Capabilities, "accepts_remote_config"),
 			TargetingMetadata:     groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent),
 			EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields,
-			ConfigurationSaved: r.URL.Query().Get("configuration_saved"), Error: r.URL.Query().Get("error"),
+			Error: r.URL.Query().Get("error"),
 		}
 		view.Deployments, _ = deploymentStore.ListByAgent(r.Context(), uid, 10)
-		view.SavedConfigurations, _ = configStore.List(r.Context())
 		if allGroups, groupErr := groupStore.List(r.Context()); groupErr == nil {
 			for _, group := range allGroups {
 				if group.Enabled {
@@ -424,21 +422,6 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			}
 		} else {
 			view.Drift = configs.CompareDesiredEffective("", view.EffectiveConfig)
-		}
-		view.EditorBaseline = view.EffectiveConfig
-		if strings.TrimSpace(view.EditorBaseline) == "" && view.DesiredConfig != nil {
-			view.EditorBaseline = view.DesiredConfig.Content
-		}
-		policies, policyErr := sectionPolicyStore.List(r.Context())
-		if policyErr != nil {
-			view.EditorError = "Unable to load configuration section policies."
-		} else {
-			view.CanEditConfiguration = principalRole == roleAdmin
-			var editorErr error
-			view.EditorSections, editorErr = buildConfigurationSectionViews(view.EditorBaseline, policies, principalRole)
-			if editorErr != nil {
-				view.EditorError = editorErr.Error()
-			}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := agentDetailPage.Execute(w, view); err != nil {
@@ -638,67 +621,15 @@ func deliverConfigurationWithRollback(ctx context.Context, agentUID string, conf
 func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager) {
 	registerConfigurationUIRoutes(mux, configStore)
 
-	// POST /agents/{uid}/configurations validates and saves an immutable
-	// configuration version originating from the agent detail editor.
+	// Configuration authoring is group-scoped so direct collector requests
+	// cannot bypass group ownership, validation, and approval controls.
 	mux.HandleFunc("POST /agents/{uid}/configurations", func(w http.ResponseWriter, r *http.Request) {
 		uid := r.PathValue("uid")
 		if _, err := agentStore.Get(r.Context(), uid); err != nil {
 			http.NotFound(w, r)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "configuration form is invalid or exceeds 1 MiB", http.StatusBadRequest)
-			return
-		}
-		name := strings.TrimSpace(r.FormValue("name"))
-		version := strings.TrimSpace(r.FormValue("version"))
-		content := r.FormValue("content")
-		baseline, err := configurationBaseline(r.Context(), uid, configStore, assignmentStore, adapter)
-		if err != nil {
-			internalServerError(w, err)
-			return
-		}
-		if r.FormValue("editor_mode") == "sections" {
-			content, err = configs.ComposeConfigurationSections(baseline, sectionValuesFromForm(r))
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
-				return
-			}
-		}
-		if name == "" || version == "" || strings.TrimSpace(content) == "" {
-			http.Error(w, "name, version and configuration YAML are required", http.StatusBadRequest)
-			return
-		}
-		policies := configs.DefaultSectionPolicies()
-		if sectionPolicyStore != nil {
-			policies, err = sectionPolicyStore.List(r.Context())
-			if err != nil {
-				internalServerError(w, err)
-				return
-			}
-		}
-		if err := enforceSectionPolicies(baseline, content, policies, currentRole(auth, r)); err != nil {
-			slog.Warn("configuration section edit rejected", "component", "config", "event", "section_edit_rejected",
-				"agent_uid", uid, "error", err)
-			http.Error(w, err.Error(), http.StatusForbidden)
-			return
-		}
-		validation := validator.Validate(r.Context(), content)
-		if !validation.Valid {
-			message := strings.TrimSpace(validation.Error)
-			if message == "" {
-				message = "configuration validation failed"
-			}
-			http.Error(w, message, http.StatusUnprocessableEntity)
-			return
-		}
-		configuration := configs.NewConfiguration(name, version, content, "text/yaml")
-		if err := configStore.Put(r.Context(), configuration); err != nil {
-			internalServerError(w, err)
-			return
-		}
-		http.Redirect(w, r, "/agents/"+uid+"?configuration_saved="+configuration.ID, http.StatusSeeOther)
+		http.Error(w, "collector-level configuration authoring has moved to Groups", http.StatusGone)
 	})
 
 	// /api/v1/configurations/validate checks Collector YAML without storing or deploying it.
