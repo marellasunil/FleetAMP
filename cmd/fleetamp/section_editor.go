@@ -64,7 +64,7 @@ const sectionPolicyHTML = `<!doctype html><html><head><meta charset="utf-8">
 <style>` + controlPlaneCSS + detailCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main">
 <header class="top"><div><div class="crumb">FleetAMP / Settings / Configuration</div>
 <div class="pagetitle">Configuration section policies</div>
-<div class="subtitle">Delegate specific Collector configuration sections to Operators</div></div>
+<div class="subtitle">Control which Collector configuration sections each role may change.</div></div>
 <div class="topactions"><a class="btn" href="/settings/users">Users & roles</a></div></header>
 <div class="content">
 {{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}

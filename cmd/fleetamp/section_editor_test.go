@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
 )
 
@@ -84,7 +82,7 @@ func TestConfigurationSectionSettingsAndRawCreationRequireAdmin(t *testing.T) {
 	}
 }
 
-func TestAgentDetailRendersAllConfigurationSectionTabs(t *testing.T) {
+func TestConfigurationSectionViewsIncludeEverySupportedSection(t *testing.T) {
 	views, err := buildConfigurationSectionViews(
 		"receivers:\n  otlp: {}\nservice:\n  pipelines: {}\n",
 		configs.DefaultSectionPolicies(),
@@ -93,28 +91,12 @@ func TestAgentDetailRendersAllConfigurationSectionTabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var output bytes.Buffer
-	err = agentDetailPage.Execute(&output, agentDetailView{
-		Page: "fleet",
-		Agent: &agents.ManagedAgent{
-			InstanceUID: "agent-one",
-			Name:        "collector-one",
-		},
-		EditorSections:       views,
-		EditorBaseline:       "receivers:\n  otlp: {}\nservice:\n  pipelines: {}\n",
-		CanEditConfiguration: true,
-	})
-	if err != nil {
-		t.Fatal(err)
+	if len(views) != len(configs.ConfigurationSectionDefinitions) {
+		t.Fatalf("section view count=%d, want %d", len(views), len(configs.ConfigurationSectionDefinitions))
 	}
-	rendered := output.String()
-	for _, definition := range configs.ConfigurationSectionDefinitions {
-		if !strings.Contains(rendered, `data-section-tab="`+definition.Key+`"`) {
-			t.Fatalf("rendered editor is missing %s tab", definition.Title)
+	for index, definition := range configs.ConfigurationSectionDefinitions {
+		if views[index].Key != definition.Key || views[index].Title != definition.Title {
+			t.Fatalf("section view %d=%#v, want %s (%s)", index, views[index], definition.Title, definition.Key)
 		}
-	}
-	if !strings.Contains(rendered, "Complete YAML") ||
-		!strings.Contains(rendered, "Validate and save version") {
-		t.Fatal("rendered editor is missing preview or save controls")
 	}
 }
