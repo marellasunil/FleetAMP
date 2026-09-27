@@ -71,8 +71,10 @@ type groupDetailView struct {
 	EditorSections       []configurationSectionView
 	EditorBaseline       string
 	EditorBaseID         string
+	EditorVersions       []*configs.Configuration
 	EditorError          string
 	CanEditConfiguration bool
+	CanDeleteAgents      bool
 }
 
 const defaultGroupConfiguration = `receivers:
@@ -1110,8 +1112,17 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		editorBaseline := defaultGroupConfiguration
 		editorBaseID := ""
 		if len(available) > 0 {
-			editorBaseline = available[0].Content
-			editorBaseID = available[0].ID
+			selectedBase := available[0]
+			if requestedBaseID := strings.TrimSpace(r.URL.Query().Get("editor_base")); requestedBaseID != "" {
+				for _, candidate := range available {
+					if candidate.ID == requestedBaseID {
+						selectedBase = candidate
+						break
+					}
+				}
+			}
+			editorBaseline = selectedBase.Content
+			editorBaseID = selectedBase.ID
 		}
 		view := groupDetailView{
 			Page: "groups", Group: group, Members: members, Configurations: available,
@@ -1123,7 +1134,9 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			RequestUpdated:     r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),
 			EditorBaseline:       editorBaseline,
 			EditorBaseID:         editorBaseID,
+			EditorVersions:       available,
 			CanEditConfiguration: true,
+			CanDeleteAgents:      currentRole(auth, r) == roleAdmin || currentRole(auth, r) == roleGroupOwner,
 		}
 		policies, policyErr := sectionPolicyStore.List(r.Context())
 		if policyErr != nil {

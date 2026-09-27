@@ -68,7 +68,7 @@ func registerDriftPolicyRoutes(mux *http.ServeMux, store storage.DriftPolicyStor
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := driftPolicyPage.Execute(w, driftPolicyPageData{
-			Page: "settings", Policy: policy, Message: r.URL.Query().Get("message"),
+			Page: "settings-drift", Policy: policy, Message: r.URL.Query().Get("message"),
 		}); err != nil {
 			slog.Error("render drift policy page", "component", "http", "error", err)
 		}

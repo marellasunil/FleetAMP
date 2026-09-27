@@ -200,7 +200,7 @@ func main() {
 	mux := http.NewServeMux()
 	auth.registerRoutes(mux)
 	registerHealthRoutes(mux)
-	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter, sectionPolicyStore, auth)
+	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter, sectionPolicyStore, auth, dataDir)
 	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter, sectionPolicyStore, auth)
 	registerSectionEditorRoutes(mux, sectionPolicyStore, configValidator, auth)
 	registerDriftPolicyRoutes(mux, driftPolicyStore, auth)
@@ -281,7 +281,7 @@ func registerHealthRoutes(mux *http.ServeMux) {
 // registerAgentRoutes serves fleet inventory, agent detail, effective configuration, drift, deployment history, and per-agent deployment actions.
 func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, groupStore storage.GroupStore, eventStore interface {
 	ListSince(context.Context, time.Time) ([]*events.AgentEvent, error)
-}, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager) {
+}, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, dataDir string) {
 	// /api/v1/agents returns the current normalized inventory for automation clients.
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		agentsList, err := agentStore.List(r.Context())
@@ -327,10 +327,11 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			}
 			item := agentListItem{Agent: agent}
 			for _, group := range allGroups {
-				if groups.Matches(group, agent) {
+				if groups.MatchesIdentity(group, agent) {
 					item.Groups = append(item.Groups, group)
 				}
 			}
+			item.CanDelete = currentRole(auth, r) == roleAdmin && !agent.Connected
 			if deployments, depErr := deploymentStore.ListByAgent(r.Context(), agent.InstanceUID, 1); depErr == nil && len(deployments) > 0 {
 				item.LastDeployment = deployments[0]
 			}
@@ -351,6 +352,40 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		if err := agentsPage.Execute(w, view); err != nil {
 			slog.Error("failed to render agents page", "component", "http", "event", "render_failed", "page", "agents", "error", err)
 		}
+	})
+
+	// /agents/{uid}/delete removes a disconnected inventory record. Admins may
+	// remove any record; Group Owners may remove only members of an owned group.
+	mux.HandleFunc("POST /agents/{uid}/delete", func(w http.ResponseWriter, r *http.Request) {
+		uid := strings.TrimSpace(r.PathValue("uid"))
+		agent, err := agentStore.Get(r.Context(), uid)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if agent.Connected {
+			http.Error(w, "connected collectors cannot be deleted; disconnect or retire the collector first", http.StatusConflict)
+			return
+		}
+		allGroups, groupErr := groupStore.List(r.Context())
+		if groupErr != nil {
+			internalServerError(w, groupErr)
+			return
+		}
+		if !canDeleteAgent(currentRole(auth, r), currentUsername(auth, r), agent, allGroups) {
+			http.Error(w, "forbidden: only an Admin or an owner of the assigned group can delete this collector", http.StatusForbidden)
+			return
+		}
+		if err := agentStore.Delete(r.Context(), uid); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			_ = agentStore.Upsert(r.Context(), agent)
+			internalServerError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/agents?deleted=1", http.StatusSeeOther)
 	})
 
 	// /api/v1/agent-events returns lifecycle events inside a requested time range.
@@ -433,6 +468,25 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/agents", http.StatusTemporaryRedirect)
 	})
+}
+
+func canDeleteAgent(principalRole role, username string, agent *agents.ManagedAgent, allGroups []*groups.Group) bool {
+	if principalRole == roleAdmin {
+		return true
+	}
+	if principalRole != roleGroupOwner {
+		return false
+	}
+	matched := false
+	for _, group := range allGroups {
+		if groups.MatchesIdentity(group, agent) {
+			matched = true
+			if !isGroupOwner(group, username) {
+				return false
+			}
+		}
+	}
+	return matched
 }
 
 type agentDetailView struct {
