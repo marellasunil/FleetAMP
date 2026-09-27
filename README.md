@@ -297,7 +297,12 @@ For OS-specific deployment models and initial sizing requirements, see the [OS d
 
 ## License
 
-Apache License 2.0.
+FleetAMP is licensed under the [Apache License 2.0](LICENSE). The license allows
+use, modification, distribution, forks and commercial use when its terms are
+followed. It does not require modified or hosted versions to publish their
+source code. See [project governance and licensing](GOVERNANCE.md) for the
+current maintainer model, contribution terms and the process required for any
+future license change.
 
 ## Upstream projects
 
