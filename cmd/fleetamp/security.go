@@ -148,6 +148,9 @@ func requiredPermission(r *http.Request) permission {
 		// authorized separately through the group approval workflow.
 		return permissionEdit
 	}
+	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/delete") {
+		return permissionEdit
+	}
 	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/groups/") {
 		if err := r.ParseForm(); err != nil {
 			return permissionAdmin
@@ -219,6 +222,7 @@ func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, a
 
 func groupOwnerRoute(path string) bool {
 	return path == "/groups" || strings.HasPrefix(path, "/groups/") ||
+		(strings.HasPrefix(path, "/agents/") && strings.HasSuffix(path, "/delete")) ||
 		path == "/api/v1/groups" || strings.HasPrefix(path, "/api/v1/groups/") ||
 		path == "/api/v1/configurations/sections/compose" ||
 		path == "/logout" || path == "/api/v1/session" || strings.HasPrefix(path, "/assets/")

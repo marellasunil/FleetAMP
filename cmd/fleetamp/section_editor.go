@@ -234,7 +234,7 @@ func registerSectionEditorRoutes(mux *http.ServeMux, policyStore storage.Section
 			internalServerError(w, err)
 			return
 		}
-		view := sectionPolicyPageData{Page: "settings", Message: r.URL.Query().Get("message")}
+		view := sectionPolicyPageData{Page: "settings-sections", Message: r.URL.Query().Get("message")}
 		for _, policy := range policies {
 			definition, _ := configs.SectionDefinitionByKey(policy.SectionKey)
 			view.Policies = append(view.Policies, sectionPolicyView{

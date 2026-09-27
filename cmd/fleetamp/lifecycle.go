@@ -42,6 +42,7 @@ type agentListItem struct {
 	Agent          *agents.ManagedAgent
 	LastDeployment *configs.Deployment
 	Groups         []*groups.Group
+	CanDelete      bool
 }
 
 type agentListView struct {

@@ -324,7 +324,7 @@ func (a *authManager) renderUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	current, _ := a.sessionUsername(r)
 	view := usersPageData{
-		Page: "settings", CurrentUser: current,
+		Page: "settings-users", CurrentUser: current,
 		Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error"),
 		Users: make([]userSummary, 0, len(users)),
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,7 +9,7 @@ import (
 )
 
 func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
-	labels := []string{"Administration", "Management", "Instrumentation", "Intelligence", "Observe"}
+	labels := []string{"Management", "Instrumentation", "Intelligence", "Observe", "Administration"}
 	last := -1
 	for _, label := range labels {
 		index := strings.Index(sideNav, ">"+label+"<")
@@ -24,6 +25,19 @@ func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
 	for _, path := range []string{"/agents", "/groups", "/deployments", "/approvals", "/instrumentation", "/blueprints", "/ai-insights", "/mcp", "/pipelines", "/audit-log"} {
 		if !strings.Contains(sideNav, `href="`+path+`"`) {
 			t.Fatalf("side navigation is missing %q", path)
+		}
+	}
+}
+
+func TestAdministrationNavigationHighlightsOnePage(t *testing.T) {
+	for _, page := range []string{"settings-users", "settings-sections", "settings-drift"} {
+		var output strings.Builder
+		tmpl := template.Must(template.New("navigation").Parse(sideNav))
+		if err := tmpl.Execute(&output, struct{ Page string }{Page: page}); err != nil {
+			t.Fatal(err)
+		}
+		if count := strings.Count(output.String(), "navitem active"); count != 1 {
+			t.Fatalf("page %q highlighted %d navigation items", page, count)
 		}
 	}
 }
