@@ -219,6 +219,12 @@ configuration versions, preview the snapshotted target set, and submit a
 deployment request. They cannot approve their own request or access the global
 fleet, approval queue, audit log, or administration pages.
 
+Approval requests use a selectable validity period of 7, 30, 60, or 90 days;
+30 days is the default and 90 days is the enforced maximum. An unreviewed
+request becomes read-only `expired` when its deadline passes. It is preserved
+for audit history rather than deleted. Admins can filter the approval queue by
+Active, Expired, Completed, Rejected, Failed, or All.
+
 The Admin-only **Approvals** page compares the currently approved working
 configuration with the proposed immutable version and highlights additions and
 removals. Approval revalidates the configuration and target readiness before
@@ -232,6 +238,22 @@ Agent details show the central desired configuration and the effective
 agent-reported configuration side by side. With drift enforcement enabled,
 FleetAMP sends the approved central version again and records the reconciliation
 in the drift audit log.
+
+Approval email notifications are optional. Configure an email address on each
+Admin and group-owner account, then set:
+
+```bash
+FLEETAMP_SMTP_ADDR=smtp.example.com:587
+FLEETAMP_SMTP_USERNAME=fleetamp@example.com
+FLEETAMP_SMTP_PASSWORD=replace-with-a-secret
+FLEETAMP_SMTP_FROM=fleetamp@example.com
+FLEETAMP_PUBLIC_URL=https://fleetamp.example.com
+```
+
+Anonymous SMTP relays may omit the username and password. FleetAMP emails all
+enabled Admins and the affected group's enabled owners when a request is
+submitted, approved, rejected, or expired. Email failures are logged and do not
+block approval or deployment operations.
 
 ## Security
 

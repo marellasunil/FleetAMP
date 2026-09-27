@@ -14,6 +14,7 @@ const (
 	GroupDeploymentCompleted       GroupDeploymentRequestStatus = "completed"
 	GroupDeploymentRejected        GroupDeploymentRequestStatus = "rejected"
 	GroupDeploymentFailed          GroupDeploymentRequestStatus = "failed"
+	GroupDeploymentExpired         GroupDeploymentRequestStatus = "expired"
 )
 
 type GroupDeploymentTarget struct {
@@ -41,6 +42,8 @@ type GroupDeploymentRequest struct {
 	ReviewedBy            string                       `json:"reviewed_by,omitempty"`
 	ReviewComment         string                       `json:"review_comment,omitempty"`
 	ReviewedAt            *time.Time                   `json:"reviewed_at,omitempty"`
+	ExpiresAt             time.Time                    `json:"expires_at"`
+	ExpiredAt             *time.Time                   `json:"expired_at,omitempty"`
 	Status                GroupDeploymentRequestStatus `json:"status"`
 	CreatedAt             time.Time                    `json:"created_at"`
 }
@@ -60,5 +63,6 @@ func NewGroupDeploymentRequest(groupID, groupName string, selector map[string]st
 		ConfigurationName: configuration.Name, ConfigurationVersion: configuration.Version,
 		ConfigurationHash: configuration.Hash, Targets: append([]GroupDeploymentTarget(nil), targets...),
 		RequestedBy: requestedBy, Status: GroupDeploymentPendingApproval, CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(30 * 24 * time.Hour),
 	}, nil
 }

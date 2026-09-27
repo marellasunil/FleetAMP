@@ -68,7 +68,7 @@ func TestAdministratorDefaultsToAdminRole(t *testing.T) {
 	defer db.Close()
 
 	admin := User{
-		Username: "admin", Role: "admin", Enabled: true,
+		Username: "admin", Email: "admin@example.com", Role: "admin", Enabled: true,
 		PasswordSalt: []byte("0123456789abcdef"),
 		PasswordHash: []byte("test-password-hash"),
 	}
@@ -79,7 +79,7 @@ func TestAdministratorDefaultsToAdminRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Role != "admin" {
+	if stored.Role != "admin" || stored.Email != "admin@example.com" {
 		t.Fatalf("administrator role=%q, want admin", stored.Role)
 	}
 }
@@ -394,6 +394,46 @@ func TestGroupDeploymentRequestPersistence(t *testing.T) {
 	}
 	if err := reopened.GroupDeploymentRequests().UpdateStatus(ctx, request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentRejected); err == nil {
 		t.Fatal("stale status transition unexpectedly succeeded")
+	}
+}
+
+func TestPendingGroupDeploymentRequestExpiresWithoutDeletion(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "expiry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	group, _ := groups.New("payments-prod", "", map[string]string{"application": "payments"})
+	if err := db.Groups().Create(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	configuration := configs.NewConfiguration("collector.yaml", "4", "service: {}\n", "text/yaml")
+	if err := db.Configurations().Put(ctx, configuration); err != nil {
+		t.Fatal(err)
+	}
+	request, err := configs.NewGroupDeploymentRequest(group.ID, group.Name, group.Selector, configuration,
+		[]configs.GroupDeploymentTarget{{AgentInstanceUID: "agent-1", Eligible: true}}, "owner-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ExpiresAt = time.Now().UTC().Add(-time.Minute)
+	if err := db.GroupDeploymentRequests().Create(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := db.GroupDeploymentRequests().ExpirePending(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expired) != 1 || expired[0].Status != configs.GroupDeploymentExpired || expired[0].ExpiredAt == nil {
+		t.Fatalf("expired requests=%#v", expired)
+	}
+	stored, err := db.GroupDeploymentRequests().Get(ctx, request.ID)
+	if err != nil || stored.Status != configs.GroupDeploymentExpired {
+		t.Fatalf("stored expired request=%#v err=%v", stored, err)
+	}
+	if second, err := db.GroupDeploymentRequests().ExpirePending(ctx, time.Now().UTC()); err != nil || len(second) != 0 {
+		t.Fatalf("duplicate expiration=%#v err=%v", second, err)
 	}
 }
 

@@ -97,6 +97,10 @@ func main() {
 	if err != nil {
 		fatalLog("initialize authentication", err)
 	}
+	notifier, err := loadApprovalNotifier(database.Authentication())
+	if err != nil {
+		fatalLog("initialize approval notifications", err)
+	}
 	configStore := database.Configurations()
 	assignmentStore := database.Assignments()
 	deploymentStore := database.Deployments()
@@ -107,6 +111,7 @@ func main() {
 	auditStore := database.Audit()
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
+	go runApprovalExpiryLoop(ctx, groupRequestStore, groupStore, notifier)
 
 	go func() {
 		if err := adapter.Start(ctx); err != nil && ctx.Err() == nil {
@@ -200,8 +205,8 @@ func main() {
 	registerSectionEditorRoutes(mux, sectionPolicyStore, configValidator, auth)
 	registerDriftPolicyRoutes(mux, driftPolicyStore, auth)
 	registerAuditRoutes(mux, auditStore)
-	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, auth, dataDir)
-	registerApprovalRoutes(mux, groupRequestStore, configStore)
+	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, auth, notifier, dataDir)
+	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier)
 	registerUIRoutes(mux)
 
 	httpServer := &http.Server{

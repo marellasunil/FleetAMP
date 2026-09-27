@@ -16,6 +16,7 @@ var (
 
 type User struct {
 	Username          string
+	Email             string
 	Role              string
 	Enabled           bool
 	PasswordSalt      []byte
@@ -85,10 +86,10 @@ func (s *AuthStore) Create(ctx context.Context, user User) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
         INSERT INTO users (
-            username, role, enabled, password_salt, password_hash,
+            username, email, role, enabled, password_salt, password_hash,
             created_at, password_changed_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, user.Username, user.Role, enabled, user.PasswordSalt, user.PasswordHash,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, user.Username, user.Email, user.Role, enabled, user.PasswordSalt, user.PasswordHash,
 		user.CreatedAt.Format(time.RFC3339Nano),
 		user.PasswordChangedAt.Format(time.RFC3339Nano),
 		user.UpdatedAt.Format(time.RFC3339Nano))
@@ -96,6 +97,15 @@ func (s *AuthStore) Create(ctx context.Context, user User) error {
 		return fmt.Errorf("create user: %w", err)
 	}
 	return nil
+}
+
+func (s *AuthStore) UpdateEmail(ctx context.Context, username, email string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET email=?,updated_at=? WHERE username=? COLLATE NOCASE`,
+		email, time.Now().UTC().Format(time.RFC3339Nano), username)
+	if err != nil {
+		return fmt.Errorf("update user email: %w", err)
+	}
+	return affectedUser(result)
 }
 
 // ReplacePassword atomically replaces password verifier material.
@@ -213,7 +223,7 @@ func affectedUser(result sql.Result) error {
 	return nil
 }
 
-const userSelect = `SELECT username, role, enabled, password_salt, password_hash,
+const userSelect = `SELECT username, email, role, enabled, password_salt, password_hash,
     created_at, password_changed_at, updated_at FROM users`
 
 type userScanner interface{ Scan(...any) error }
@@ -222,7 +232,7 @@ func scanUser(scanner userScanner) (*User, error) {
 	var user User
 	var enabled int
 	var createdAt, changedAt, updatedAt string
-	if err := scanner.Scan(&user.Username, &user.Role, &enabled,
+	if err := scanner.Scan(&user.Username, &user.Email, &user.Role, &enabled,
 		&user.PasswordSalt, &user.PasswordHash,
 		&createdAt, &changedAt, &updatedAt); err != nil {
 		return nil, err

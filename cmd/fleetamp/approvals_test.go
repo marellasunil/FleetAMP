@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/marellasunil/FleetAMP/internal/configs"
+)
 
 func TestConfigurationLineDiffHighlightsChanges(t *testing.T) {
 	rows := configurationLineDiff("receivers:\n  otlp:\nservice: {}\n", "receivers:\n  otlp:\nprocessors: {}\nservice: {}\n")
@@ -9,6 +13,16 @@ func TestConfigurationLineDiffHighlightsChanges(t *testing.T) {
 	}
 	if rows[0].Kind != "same" || rows[1].Kind != "same" || rows[2].Kind != "added" || rows[2].NewText != "processors: {}" || rows[3].Kind != "same" {
 		t.Fatalf("unexpected diff: %#v", rows)
+	}
+}
+
+func TestApprovalStatusMatches(t *testing.T) {
+	if !approvalStatusMatches("active", configs.GroupDeploymentPendingApproval) ||
+		!approvalStatusMatches("active", configs.GroupDeploymentDeploying) ||
+		approvalStatusMatches("active", configs.GroupDeploymentExpired) ||
+		!approvalStatusMatches("expired", configs.GroupDeploymentExpired) ||
+		!approvalStatusMatches("all", configs.GroupDeploymentRejected) {
+		t.Fatal("approval status filter returned an unexpected result")
 	}
 }
 

@@ -89,6 +89,16 @@ func (s *memoryAdministratorStore) SetEnabled(_ context.Context, username string
 	return nil
 }
 
+func (s *memoryAdministratorStore) UpdateEmail(_ context.Context, username, email string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.user == nil || !strings.EqualFold(s.user.Username, username) {
+		return sqlitestore.ErrUserNotFound
+	}
+	s.user.Email = email
+	return nil
+}
+
 func testAuthManager(store userStore, pepper, bootstrapToken string) *authManager {
 	return &authManager{
 		store: store, pepper: []byte(pepper), now: time.Now,

@@ -23,11 +23,11 @@ func (s *GroupDeploymentRequestStore) Create(ctx context.Context, request *confi
 		return fmt.Errorf("encode deployment targets: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO group_deployment_requests
-        (id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,base_configuration_id,base_configuration_hash,targets,requested_by,reviewed_by,review_comment,reviewed_at,status,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, request.ID, request.GroupID, request.GroupName, string(selector),
+		(id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,base_configuration_id,base_configuration_hash,targets,requested_by,reviewed_by,review_comment,reviewed_at,expires_at,expired_at,status,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, request.ID, request.GroupID, request.GroupName, string(selector),
 		request.ConfigurationID, request.ConfigurationName, request.ConfigurationVersion, request.ConfigurationHash,
 		request.BaseConfigurationID, request.BaseConfigurationHash, string(targets), request.RequestedBy,
-		request.ReviewedBy, request.ReviewComment, formatTimePtr(request.ReviewedAt), string(request.Status), formatTime(request.CreatedAt))
+		request.ReviewedBy, request.ReviewComment, formatTimePtr(request.ReviewedAt), formatTime(request.ExpiresAt), formatTimePtr(request.ExpiredAt), string(request.Status), formatTime(request.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("create group deployment request: %w", err)
 	}
@@ -62,6 +62,26 @@ func (s *GroupDeploymentRequestStore) Review(ctx context.Context, id string, fro
 		return storage.ErrGroupDeploymentRequestConflict
 	}
 	return nil
+}
+
+func (s *GroupDeploymentRequestStore) ExpirePending(ctx context.Context, now time.Time) ([]*configs.GroupDeploymentRequest, error) {
+	rows, err := s.db.QueryContext(ctx, `UPDATE group_deployment_requests
+        SET status=?, expired_at=? WHERE status=? AND expires_at<=?
+        RETURNING id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,base_configuration_id,base_configuration_hash,targets,requested_by,reviewed_by,review_comment,reviewed_at,expires_at,expired_at,status,created_at`,
+		string(configs.GroupDeploymentExpired), formatTime(now), string(configs.GroupDeploymentPendingApproval), formatTime(now))
+	if err != nil {
+		return nil, fmt.Errorf("expire group deployment requests: %w", err)
+	}
+	defer rows.Close()
+	result := make([]*configs.GroupDeploymentRequest, 0)
+	for rows.Next() {
+		item, err := scanGroupDeploymentRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func (s *GroupDeploymentRequestStore) UpdateStatus(ctx context.Context, id string, from, to configs.GroupDeploymentRequestStatus) error {
@@ -122,7 +142,7 @@ func (s *GroupDeploymentRequestStore) List(ctx context.Context, limit int) ([]*c
 	return result, rows.Err()
 }
 
-const groupDeploymentRequestSelect = `SELECT id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,base_configuration_id,base_configuration_hash,targets,requested_by,reviewed_by,review_comment,reviewed_at,status,created_at FROM group_deployment_requests`
+const groupDeploymentRequestSelect = `SELECT id,group_id,group_name,group_selector,configuration_id,configuration_name,configuration_version,configuration_hash,base_configuration_id,base_configuration_hash,targets,requested_by,reviewed_by,review_comment,reviewed_at,expires_at,expired_at,status,created_at FROM group_deployment_requests`
 
 type groupDeploymentRequestScanner interface {
 	Scan(...any) error
@@ -131,8 +151,9 @@ type groupDeploymentRequestScanner interface {
 func scanGroupDeploymentRequest(scanner groupDeploymentRequestScanner) (*configs.GroupDeploymentRequest, error) {
 	var item configs.GroupDeploymentRequest
 	var selector, targets, status, created string
-	var reviewedAt sql.NullString
-	if err := scanner.Scan(&item.ID, &item.GroupID, &item.GroupName, &selector, &item.ConfigurationID, &item.ConfigurationName, &item.ConfigurationVersion, &item.ConfigurationHash, &item.BaseConfigurationID, &item.BaseConfigurationHash, &targets, &item.RequestedBy, &item.ReviewedBy, &item.ReviewComment, &reviewedAt, &status, &created); err != nil {
+	var reviewedAt, expiredAt sql.NullString
+	var expiresAt string
+	if err := scanner.Scan(&item.ID, &item.GroupID, &item.GroupName, &selector, &item.ConfigurationID, &item.ConfigurationName, &item.ConfigurationVersion, &item.ConfigurationHash, &item.BaseConfigurationID, &item.BaseConfigurationHash, &targets, &item.RequestedBy, &item.ReviewedBy, &item.ReviewComment, &reviewedAt, &expiresAt, &expiredAt, &status, &created); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(selector), &item.GroupSelector); err != nil {
@@ -147,7 +168,13 @@ func scanGroupDeploymentRequest(scanner groupDeploymentRequestScanner) (*configs
 		return nil, err
 	}
 	item.CreatedAt = createdAt
+	if item.ExpiresAt, err = parseTime(expiresAt); err != nil {
+		return nil, err
+	}
 	if item.ReviewedAt, err = parseNullTime(reviewedAt); err != nil {
+		return nil, err
+	}
+	if item.ExpiredAt, err = parseNullTime(expiredAt); err != nil {
 		return nil, err
 	}
 	return &item, nil
