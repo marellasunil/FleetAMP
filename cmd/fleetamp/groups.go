@@ -50,25 +50,41 @@ type groupPreviewAgent struct {
 }
 
 type groupDetailView struct {
-	Page               string
-	Group              *groups.Group
-	Members            []*agents.ManagedAgent
-	Configurations     []*configs.Configuration
-	SelectedConfig     *configs.Configuration
-	SelectedPipeline   *configs.PipelineModel
-	PipelineError      string
-	Preview            []groupPreviewAgent
-	Eligible           int
-	Requests           []*configs.GroupDeploymentRequest
-	DeploymentHistory  []*configs.Deployment
-	DriftSummary       groupDriftSummary
-	ConfigurationSaved string
-	RequestCreated     string
-	RequestUpdated     string
-	Error              string
-	CanAdminister      bool
-	OwnersText         string
+	Page                 string
+	Group                *groups.Group
+	Members              []*agents.ManagedAgent
+	Configurations       []*configs.Configuration
+	SelectedConfig       *configs.Configuration
+	SelectedPipeline     *configs.PipelineModel
+	PipelineError        string
+	Preview              []groupPreviewAgent
+	Eligible             int
+	Requests             []*configs.GroupDeploymentRequest
+	DeploymentHistory    []*configs.Deployment
+	DriftSummary         groupDriftSummary
+	ConfigurationSaved   string
+	RequestCreated       string
+	RequestUpdated       string
+	Error                string
+	CanAdminister        bool
+	OwnersText           string
+	EditorSections       []configurationSectionView
+	EditorBaseline       string
+	EditorError          string
+	CanEditConfiguration bool
 }
+
+const defaultGroupConfiguration = `receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: []
+`
 
 func currentUsername(auth *authManager, r *http.Request) string {
 	if auth != nil {
@@ -267,7 +283,7 @@ func sameSelector(left, right map[string]string) bool {
 }
 
 // registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
-func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, auth *authManager, notifier *approvalNotifier, dataDir string) {
+func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
 	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
 	mux.HandleFunc("/agents/{uid}/group", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -525,7 +541,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 	})
 
-	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, validator, adapter, auth, notifier)
+	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, validator, adapter, sectionPolicyStore, auth, notifier)
 }
 
 // newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
@@ -617,7 +633,7 @@ func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.Ag
 }
 
 // registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
-func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, auth *authManager, notifier *approvalNotifier) {
+func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier) {
 	// /groups displays all groups and accepts creation form submissions.
 	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/groups" {
@@ -728,9 +744,22 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			if action == "create_configuration" {
 				name := strings.TrimSpace(r.FormValue("name"))
 				version := strings.TrimSpace(r.FormValue("version"))
-				content := r.FormValue("content")
+				content, composeErr := configs.ComposeConfigurationSections(defaultGroupConfiguration, sectionValuesFromForm(r))
+				if composeErr != nil {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(composeErr.Error()), http.StatusSeeOther)
+					return
+				}
 				if name == "" || version == "" || strings.TrimSpace(content) == "" {
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Name, version and configuration YAML are required."), http.StatusSeeOther)
+					return
+				}
+				policies, policyErr := sectionPolicyStore.List(r.Context())
+				if policyErr != nil {
+					internalServerError(w, policyErr)
+					return
+				}
+				if policyErr := enforceSectionPolicies(defaultGroupConfiguration, content, policies, currentRole(auth, r)); policyErr != nil {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(policyErr.Error()), http.StatusSeeOther)
 					return
 				}
 				validation := validator.Validate(r.Context(), content)
@@ -1065,6 +1094,17 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			ConfigurationSaved: r.URL.Query().Get("configuration_saved"),
 			RequestCreated:     r.URL.Query().Get("request_created"),
 			RequestUpdated:     r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),
+			EditorBaseline:       defaultGroupConfiguration,
+			CanEditConfiguration: true,
+		}
+		policies, policyErr := sectionPolicyStore.List(r.Context())
+		if policyErr != nil {
+			view.EditorError = "Unable to load configuration section policies."
+		} else {
+			view.EditorSections, policyErr = buildConfigurationSectionViews(view.EditorBaseline, policies, currentRole(auth, r))
+			if policyErr != nil {
+				view.EditorError = policyErr.Error()
+			}
 		}
 		if configID := strings.TrimSpace(r.URL.Query().Get("configuration_id")); configID != "" {
 			for _, configuration := range available {

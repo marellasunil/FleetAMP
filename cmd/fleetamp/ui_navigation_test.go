@@ -8,7 +8,7 @@ import (
 )
 
 func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
-	labels := []string{"Management", "Instrumentation", "Intelligence", "Observe", "Administration"}
+	labels := []string{"Administration", "Management", "Instrumentation", "Intelligence", "Observe"}
 	last := -1
 	for _, label := range labels {
 		index := strings.Index(sideNav, ">"+label+"<")

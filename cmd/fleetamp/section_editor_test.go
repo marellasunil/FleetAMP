@@ -31,6 +31,15 @@ func TestSectionViewsApplyRoleAndDefaultPolicy(t *testing.T) {
 	if operatorAccess[configs.SectionExporters] || operatorAccess[configs.SectionServicePipelines] {
 		t.Fatal("exporters and service pipelines must be read-only for Operators by default")
 	}
+	ownerViews, err := buildConfigurationSectionViews(content, policies, roleGroupOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range ownerViews {
+		if ownerViews[index].Editable != operatorViews[index].Editable {
+			t.Fatalf("group owner access for %s does not match section policy", ownerViews[index].Key)
+		}
+	}
 	for _, view := range adminViews {
 		if !view.Editable {
 			t.Fatalf("Admin cannot edit %s", view.Key)
@@ -47,6 +56,9 @@ func TestSectionPolicyRejectsProtectedOperatorChange(t *testing.T) {
 	}
 	if err := enforceSectionPolicies(before, after, configs.DefaultSectionPolicies(), roleAdmin); err != nil {
 		t.Fatalf("Admin edit rejected: %v", err)
+	}
+	if err := enforceSectionPolicies(before, after, configs.DefaultSectionPolicies(), roleGroupOwner); err == nil {
+		t.Fatal("protected Group owner change was accepted")
 	}
 }
 

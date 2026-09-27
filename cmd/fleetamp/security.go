@@ -220,6 +220,7 @@ func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, a
 func groupOwnerRoute(path string) bool {
 	return path == "/groups" || strings.HasPrefix(path, "/groups/") ||
 		path == "/api/v1/groups" || strings.HasPrefix(path, "/api/v1/groups/") ||
+		path == "/api/v1/configurations/sections/compose" ||
 		path == "/logout" || path == "/api/v1/session" || strings.HasPrefix(path, "/assets/")
 }
 
