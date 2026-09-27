@@ -86,7 +86,7 @@ func ComposeConfigurationSections(baseline string, sections map[string]string) (
 		}
 		var value *yaml.Node
 		if strings.TrimSpace(raw) != "" {
-			value, err = parseSectionFragment(raw)
+			value, err = parseSectionFragment(definition.Key, raw)
 			if err != nil {
 				return "", fmt.Errorf("%s: %w", definition.Title, err)
 			}
@@ -137,7 +137,7 @@ func parseConfigurationDocument(content string) (*yaml.Node, error) {
 	return document.Content[0], nil
 }
 
-func parseSectionFragment(content string) (*yaml.Node, error) {
+func parseSectionFragment(sectionKey, content string) (*yaml.Node, error) {
 	var document yaml.Node
 	if err := yaml.Unmarshal([]byte(content), &document); err != nil {
 		return nil, fmt.Errorf("invalid YAML: %w", err)
@@ -145,7 +145,76 @@ func parseSectionFragment(content string) (*yaml.Node, error) {
 	if len(document.Content) != 1 {
 		return nil, fmt.Errorf("section must contain one YAML value")
 	}
-	return document.Content[0], nil
+	value := document.Content[0]
+	if value.Kind != yaml.MappingNode {
+		return value, nil
+	}
+
+	// The editor displays the value below each Collector key, but users often
+	// paste a complete, labelled section. Accept the matching wrapper and remove
+	// it before composition so `receivers:` never becomes
+	// `receivers.receivers`. Service subsections may be pasted either as
+	// `pipelines:` or as `service: { pipelines: ... }`.
+	if parent, nested, nestedSection := sectionLocation(sectionKey); nestedSection {
+		if wrapped := soleMappingValue(value, parent); wrapped != nil {
+			if wrapped.Kind != yaml.MappingNode {
+				return nil, fmt.Errorf("%s must be a YAML mapping", parent)
+			}
+			nestedValue := mappingValue(wrapped, nested)
+			if nestedValue == nil {
+				return nil, fmt.Errorf("%s wrapper must contain %s", parent, nested)
+			}
+			return nestedValue, nil
+		}
+		if wrapped := soleMappingValue(value, nested); wrapped != nil {
+			return wrapped, nil
+		}
+	} else if wrapped := soleMappingValue(value, sectionKey); wrapped != nil {
+		return wrapped, nil
+	}
+
+	// A known Collector root key in a different tab is almost certainly a
+	// misplaced complete section. Failing validation here is safer than saving
+	// a syntactically valid but structurally incorrect desired configuration.
+	if misplaced := misplacedCollectorRoot(value, sectionKey); misplaced != "" {
+		return nil, fmt.Errorf("%s belongs in the %s section, not here", misplaced, sectionTitleForRoot(misplaced))
+	}
+	return value, nil
+}
+
+func soleMappingValue(mapping *yaml.Node, key string) *yaml.Node {
+	if mapping == nil || mapping.Kind != yaml.MappingNode || len(mapping.Content) != 2 {
+		return nil
+	}
+	if mapping.Content[0].Value != key {
+		return nil
+	}
+	return mapping.Content[1]
+}
+
+func misplacedCollectorRoot(value *yaml.Node, sectionKey string) string {
+	if value == nil || value.Kind != yaml.MappingNode || len(value.Content) != 2 {
+		return ""
+	}
+	key := value.Content[0].Value
+	for _, root := range []string{"receivers", "processors", "exporters", "extensions", "connectors", "service"} {
+		if key == root && key != sectionKey {
+			return key
+		}
+	}
+	return ""
+}
+
+func sectionTitleForRoot(root string) string {
+	switch root {
+	case "service":
+		return "Service pipelines, Service extensions, or Telemetry"
+	default:
+		if definition, ok := SectionDefinitionByKey(root); ok {
+			return definition.Title
+		}
+		return root
+	}
 }
 
 func sectionNode(root *yaml.Node, key string) *yaml.Node {

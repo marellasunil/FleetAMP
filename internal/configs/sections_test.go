@@ -88,3 +88,47 @@ func TestComposeRejectsInvalidSectionYAML(t *testing.T) {
 		t.Fatalf("error=%v, want Receivers validation error", err)
 	}
 }
+
+func TestComposeNormalizesLabelledSectionFragments(t *testing.T) {
+	composed, err := ComposeConfigurationSections("", map[string]string{
+		SectionReceivers:        "receivers:\n  otlp:\n    protocols:\n      grpc: {}\n",
+		SectionProcessors:       "processors:\n  batch: {}\n",
+		SectionExporters:        "exporters:\n  debug: {}\n",
+		SectionServicePipelines: "service:\n  pipelines:\n    traces:\n      receivers: [otlp]\n      processors: [batch]\n      exporters: [debug]\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"receivers:\n  receivers:", "processors:\n  processors:", "exporters:\n  exporters:", "connectors:\n  service:"} {
+		if strings.Contains(composed, forbidden) {
+			t.Fatalf("composed configuration contains duplicated wrapper %q:\n%s", forbidden, composed)
+		}
+	}
+	result := CompareDesiredEffective(composed, `receivers:
+  otlp:
+    protocols:
+      grpc: {}
+processors:
+  batch: {}
+exporters:
+  debug: {}
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+`)
+	if result.Status != DriftInSync {
+		t.Fatalf("normalized configuration should be in sync, got %#v\n%s", result, composed)
+	}
+}
+
+func TestComposeRejectsSectionPlacedInWrongTab(t *testing.T) {
+	_, err := ComposeConfigurationSections("", map[string]string{
+		SectionConnectors: "service:\n  pipelines:\n    traces: {}\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "service belongs in the Service pipelines") {
+		t.Fatalf("error=%v, want misplaced service section error", err)
+	}
+}
