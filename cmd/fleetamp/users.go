@@ -59,7 +59,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 </style></head><body><div class="shell">` + sideNav + `<main class="main">
 <header class="top"><div><div class="crumb">FleetAMP / Settings / Users</div>
 <div class="pagetitle">Users and roles</div>
-<div class="subtitle">Admin-controlled local identities and FleetAMP authorization</div></div>
+<div class="subtitle">Create users and manage roles, access, passwords and notification email addresses.</div></div>
 <div class="topactions"><div class="connection"><span class="dot"></span>RBAC enforced</div></div></header>
 <div class="content">
 {{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}
