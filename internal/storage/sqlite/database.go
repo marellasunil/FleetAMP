@@ -83,7 +83,7 @@ func (d *Database) initialize(ctx context.Context) error {
 		`PRAGMA busy_timeout = 5000`,
 		`PRAGMA journal_mode = WAL`,
 		`CREATE TABLE IF NOT EXISTS configurations (
-            id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
+			id TEXT PRIMARY KEY, group_id TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, version TEXT NOT NULL,
             content TEXT NOT NULL, content_type TEXT NOT NULL, hash TEXT NOT NULL,
             created_at TEXT NOT NULL
         )`,
@@ -176,6 +176,9 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureGroupEnabledColumn(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureConfigurationGroupColumn(ctx); err != nil {
+		return err
+	}
 	if err := d.ensureGroupOwnersColumn(ctx); err != nil {
 		return err
 	}
@@ -198,6 +201,20 @@ func (d *Database) initialize(ctx context.Context) error {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureConfigurationGroupColumn(ctx context.Context) error {
+	present, err := sqliteColumnExists(ctx, d.db, "configurations", "group_id")
+	if err != nil {
+		return err
+	}
+	if present {
+		return nil
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE configurations ADD COLUMN group_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add configurations.group_id column: %w", err)
+	}
+	return nil
 }
 
 func (d *Database) ensureUserEmailColumn(ctx context.Context) error {

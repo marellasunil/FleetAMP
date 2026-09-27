@@ -177,7 +177,7 @@ func TestConfigurationAndAssignmentPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configuration := configs.NewConfiguration("test", "1", "service: {}\n", "text/yaml")
+	configuration := configs.NewGroupConfiguration("group-one", "test", "1", "service: {}\n", "text/yaml")
 	if err := db.Configurations().Put(ctx, configuration); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestConfigurationAndAssignmentPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotConfig.Hash != configuration.Hash || gotConfig.Content != configuration.Content {
+	if gotConfig.Hash != configuration.Hash || gotConfig.Content != configuration.Content || gotConfig.GroupID != "group-one" {
 		t.Fatalf("configuration mismatch: %#v", gotConfig)
 	}
 	gotAssignment, err := reopened.Assignments().Get(ctx, "agent-1", configuration.ID)

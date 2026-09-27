@@ -23,6 +23,7 @@ import (
 // Configuration is an immutable configuration artifact managed by FleetAMP.
 type Configuration struct {
 	ID          string    `json:"id"`
+	GroupID     string    `json:"group_id,omitempty"`
 	Name        string    `json:"name"`
 	Version     string    `json:"version"`
 	Content     string    `json:"content"`
@@ -31,16 +32,30 @@ type Configuration struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// NewGroupConfiguration builds an immutable artifact scoped to one FleetAMP
+// group so Group Owners cannot reuse or deploy another group's versions.
+func NewGroupConfiguration(groupID, name, version, content, contentType string) *Configuration {
+	return newConfiguration(groupID, name, version, content, contentType)
+}
+
 // NewConfiguration builds an immutable artifact with deterministic identity and
 // content hashes used for assignment and OpAMP status correlation.
 func NewConfiguration(name, version, content, contentType string) *Configuration {
+	return newConfiguration("", name, version, content, contentType)
+}
+
+func newConfiguration(groupID, name, version, content, contentType string) *Configuration {
 	if contentType == "" {
 		contentType = "text/yaml"
 	}
 	contentHash := sha256.Sum256([]byte(content))
-	identityHash := sha256.Sum256([]byte(strings.Join([]string{name, version, content}, "\x00")))
+	identityParts := []string{name, version, content}
+	if groupID != "" {
+		identityParts = append([]string{groupID}, identityParts...)
+	}
+	identityHash := sha256.Sum256([]byte(strings.Join(identityParts, "\x00")))
 	return &Configuration{
-		ID: hex.EncodeToString(identityHash[:]), Name: name, Version: version,
+		ID: hex.EncodeToString(identityHash[:]), GroupID: groupID, Name: name, Version: version,
 		Content: content, ContentType: contentType,
 		Hash: hex.EncodeToString(contentHash[:]), CreatedAt: time.Now().UTC(),
 	}

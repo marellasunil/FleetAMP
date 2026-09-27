@@ -70,6 +70,7 @@ type groupDetailView struct {
 	OwnersText           string
 	EditorSections       []configurationSectionView
 	EditorBaseline       string
+	EditorBaseID         string
 	EditorError          string
 	CanEditConfiguration bool
 }
@@ -280,6 +281,16 @@ func sameSelector(left, right map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func configurationsForGroup(items []*configs.Configuration, groupID string) []*configs.Configuration {
+	filtered := make([]*configs.Configuration, 0, len(items))
+	for _, configuration := range items {
+		if configuration != nil && configuration.GroupID == groupID {
+			filtered = append(filtered, configuration)
+		}
+	}
+	return filtered
 }
 
 // registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
@@ -744,7 +755,16 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			if action == "create_configuration" {
 				name := strings.TrimSpace(r.FormValue("name"))
 				version := strings.TrimSpace(r.FormValue("version"))
-				content, composeErr := configs.ComposeConfigurationSections(defaultGroupConfiguration, sectionValuesFromForm(r))
+				baseline := defaultGroupConfiguration
+				if baseID := strings.TrimSpace(r.FormValue("base_configuration_id")); baseID != "" {
+					base, baseErr := configStore.Get(r.Context(), baseID)
+					if baseErr != nil || base.GroupID != group.ID {
+						http.Error(w, "group configuration baseline not found", http.StatusNotFound)
+						return
+					}
+					baseline = base.Content
+				}
+				content, composeErr := configs.ComposeConfigurationSections(baseline, sectionValuesFromForm(r))
 				if composeErr != nil {
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(composeErr.Error()), http.StatusSeeOther)
 					return
@@ -758,7 +778,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					internalServerError(w, policyErr)
 					return
 				}
-				if policyErr := enforceSectionPolicies(defaultGroupConfiguration, content, policies, currentRole(auth, r)); policyErr != nil {
+				if policyErr := enforceSectionPolicies(baseline, content, policies, currentRole(auth, r)); policyErr != nil {
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(policyErr.Error()), http.StatusSeeOther)
 					return
 				}
@@ -771,7 +791,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(message), http.StatusSeeOther)
 					return
 				}
-				configuration := configs.NewConfiguration(name, version, content, "text/yaml")
+				configuration := configs.NewGroupConfiguration(group.ID, name, version, content, "text/yaml")
 				if err := configStore.Put(r.Context(), configuration); err != nil {
 					internalServerError(w, err)
 					return
@@ -819,7 +839,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					return
 				}
 				configuration, err := configStore.Get(r.Context(), request.ConfigurationID)
-				if err != nil || configuration.Hash != request.ConfigurationHash {
+				if err != nil || configuration.GroupID != group.ID || configuration.Hash != request.ConfigurationHash {
 					http.Error(w, "approved configuration no longer matches the request", http.StatusConflict)
 					return
 				}
@@ -896,7 +916,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					return
 				}
 				configuration, err := configStore.Get(r.Context(), strings.TrimSpace(r.FormValue("configuration_id")))
-				if err != nil {
+				if err != nil || configuration.GroupID != group.ID {
 					http.Error(w, "configuration not found", http.StatusNotFound)
 					return
 				}
@@ -1024,11 +1044,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			internalServerError(w, err)
 			return
 		}
-		available, err := configStore.List(r.Context())
+		allConfigurations, err := configStore.List(r.Context())
 		if err != nil {
 			internalServerError(w, err)
 			return
 		}
+		available := configurationsForGroup(allConfigurations, group.ID)
 		requests, err := requestStore.ListByGroup(r.Context(), group.ID, 20)
 		if err != nil {
 			internalServerError(w, err)
@@ -1086,6 +1107,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			internalServerError(w, err)
 			return
 		}
+		editorBaseline := defaultGroupConfiguration
+		editorBaseID := ""
+		if len(available) > 0 {
+			editorBaseline = available[0].Content
+			editorBaseID = available[0].ID
+		}
 		view := groupDetailView{
 			Page: "groups", Group: group, Members: members, Configurations: available,
 			Requests: requests, DeploymentHistory: deploymentHistory, DriftSummary: driftSummary,
@@ -1094,7 +1121,8 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			ConfigurationSaved: r.URL.Query().Get("configuration_saved"),
 			RequestCreated:     r.URL.Query().Get("request_created"),
 			RequestUpdated:     r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),
-			EditorBaseline:       defaultGroupConfiguration,
+			EditorBaseline:       editorBaseline,
+			EditorBaseID:         editorBaseID,
 			CanEditConfiguration: true,
 		}
 		policies, policyErr := sectionPolicyStore.List(r.Context())
