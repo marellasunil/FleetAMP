@@ -186,6 +186,20 @@ Expected response:
 {"status":"ok","service":"fleetamp"}
 ```
 
+## End-to-end demo test
+
+Use the [v0.2.0 end-to-end demo and presentation runbook](docs/testing/v0.2.0-e2e-demo.md)
+to verify the governed change workflow and capture a consistent presentation.
+With FleetAMP running and an Admin account available, the companion smoke test
+checks authentication, every navigation destination and configuration validation:
+
+```bash
+export FLEETAMP_BASE_URL=http://127.0.0.1:18080
+export FLEETAMP_ADMIN_USERNAME=admin
+export FLEETAMP_ADMIN_PASSWORD='replace-with-demo-password'
+./scripts/e2e-demo-smoke.sh
+```
+
 ## Running as a Linux service
 
 FleetAMP includes a reference systemd deployment under [`deploy/systemd/`](deploy/systemd/). The service uses a dedicated `fleetamp` account, `/opt/fleetamp/bin/fleetamp` for the binary, `/etc/fleetamp/fleetamp.env` for environment configuration, and `/var/lib/fleetamp` for persistent state.
