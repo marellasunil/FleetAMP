@@ -86,3 +86,13 @@ func TestDescribeAuditAction(t *testing.T) {
 		t.Fatalf("descriptor=%q %q %q", action, resourceType, resourceID)
 	}
 }
+
+func TestDeploymentAuditDetailsRecordsReviewerAndReason(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/groups/group-1", strings.NewReader(
+		"action=request_deployment&assigned_reviewer=owner-one&change_reason=Enable+the+validated+metrics+pipeline"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	details := deploymentAuditDetails(request)
+	if !strings.Contains(details, "reviewer=owner-one") || !strings.Contains(details, "Enable the validated metrics pipeline") {
+		t.Fatalf("details=%q", details)
+	}
+}
