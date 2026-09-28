@@ -117,7 +117,7 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)`,
 		`CREATE TABLE IF NOT EXISTS group_deployment_requests (
             id TEXT PRIMARY KEY, group_id TEXT NOT NULL, group_name TEXT NOT NULL,
-            group_selector TEXT NOT NULL, configuration_id TEXT NOT NULL,
+            group_selector TEXT NOT NULL, label_selector TEXT NOT NULL DEFAULT '{}', configuration_id TEXT NOT NULL,
             configuration_name TEXT NOT NULL, configuration_version TEXT NOT NULL,
             configuration_hash TEXT NOT NULL, base_configuration_id TEXT NOT NULL DEFAULT '',
             base_configuration_hash TEXT NOT NULL DEFAULT '', targets TEXT NOT NULL,
@@ -291,6 +291,7 @@ func (d *Database) ensureDeploymentRollbackColumns(ctx context.Context) error {
 
 func (d *Database) ensureApprovalReviewColumns(ctx context.Context) error {
 	columns := []struct{ name, definition string }{
+		{"label_selector", "TEXT NOT NULL DEFAULT '{}'"},
 		{"base_configuration_id", "TEXT NOT NULL DEFAULT ''"},
 		{"base_configuration_hash", "TEXT NOT NULL DEFAULT ''"},
 		{"reviewed_by", "TEXT NOT NULL DEFAULT ''"},

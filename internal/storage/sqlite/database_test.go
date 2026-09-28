@@ -354,6 +354,7 @@ func TestGroupDeploymentRequestPersistence(t *testing.T) {
 	}
 	request.BaseConfigurationID = "config-baseline"
 	request.BaseConfigurationHash = "baseline-hash"
+	request.LabelSelector = map[string]string{"team": "payments", "tier": "backend"}
 	if err := db.GroupDeploymentRequests().Create(ctx, request); err != nil {
 		t.Fatal(err)
 	}
@@ -377,6 +378,7 @@ func TestGroupDeploymentRequestPersistence(t *testing.T) {
 	if got.ID != request.ID || got.Status != configs.GroupDeploymentPendingApproval ||
 		got.RequestedBy != "admin" || len(got.Targets) != 2 ||
 		got.GroupSelector["application"] != "payments" ||
+		got.LabelSelector["team"] != "payments" || got.LabelSelector["tier"] != "backend" ||
 		got.ConfigurationHash != configuration.Hash || got.BaseConfigurationID != "config-baseline" ||
 		got.BaseConfigurationHash != "baseline-hash" {
 		t.Fatalf("request mismatch: %#v", got)

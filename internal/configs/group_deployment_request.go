@@ -31,6 +31,7 @@ type GroupDeploymentRequest struct {
 	GroupID               string                       `json:"group_id"`
 	GroupName             string                       `json:"group_name"`
 	GroupSelector         map[string]string            `json:"group_selector"`
+	LabelSelector         map[string]string            `json:"label_selector,omitempty"`
 	ConfigurationID       string                       `json:"configuration_id"`
 	ConfigurationName     string                       `json:"configuration_name"`
 	ConfigurationVersion  string                       `json:"configuration_version"`
