@@ -24,7 +24,7 @@ var auditPage = template.Must(template.New("audit").Funcs(template.FuncMap{
 	controlPlaneCSS + detailCSS + `</style></head><body><div class="shell">` + sideNav +
 	`<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Audit</div><div class="pagetitle">Audit log</div><div class="subtitle">Inspect configuration, approval, deployment, drift and security activity.</div></div></header><div class="content">` +
 	`<section class="card"><div class="cardbody"><div class="detailactions" style="margin-bottom:14px"><a class="btn" href="/audit-log">All activity</a><a class="btn" href="/audit-log?category=configuration">Configuration</a><a class="btn" href="/audit-log?category=deployment">Deployments</a><a class="btn" href="/audit-log?category=drift">Drift</a><a class="btn" href="/audit-log?category=security">Security & users</a></div><form class="detailform" method="get" action="/audit-log">{{if .Category}}<input type="hidden" name="category" value="{{.Category}}">{{end}}<label>Actor<input class="input" name="actor" value="{{.Actor}}" placeholder="username"></label><label>Action<input class="input" name="action" value="{{.Action}}" placeholder="deployment.approve"></label><label>Outcome<select class="select" name="outcome"><option value="">All</option><option value="success" {{if eq .Outcome "success"}}selected{{end}}>Success</option><option value="failed" {{if eq .Outcome "failed"}}selected{{end}}>Failed</option><option value="denied" {{if eq .Outcome "denied"}}selected{{end}}>Denied</option></select></label><label>From<input class="input" type="date" name="from" value="{{.From}}"></label><label>To<input class="input" type="date" name="to" value="{{.To}}"></label><button class="btn primary" type="submit">Filter</button><a class="btn" href="/audit-log">Clear</a></form></div></section>` +
-	`<section class="card" style="margin-top:14px"><div class="cardhead"><div><div class="cardtitle">Recorded events</div><div class="cardsub">{{len .Events}} most recent matching event(s)</div></div><span class="badge ok">Append-only</span></div>{{if .Events}}<div style="overflow:auto"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Request</th></tr></thead><tbody>{{range .Events}}<tr><td>{{auditTime .Timestamp}}</td><td>{{.Actor}}</td><td><span class="code">{{.Action}}</span></td><td>{{.ResourceType}}{{if .ResourceID}}<div class="tiny code">{{.ResourceID}}</div>{{end}}</td><td>{{if eq .Outcome "success"}}<span class="badge ok">Success</span>{{else if eq .Outcome "denied"}}<span class="badge warn">Denied</span>{{else}}<span class="badge off">Failed</span>{{end}}</td><td><span class="code">{{.HTTPMethod}} {{.Path}}</span><div class="tiny">HTTP {{.StatusCode}}</div></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No audit events match these filters.</div>{{end}}</section></div></main></div></body></html>`))
+	`<section class="card" style="margin-top:14px"><div class="cardhead"><div><div class="cardtitle">Recorded events</div><div class="cardsub">{{len .Events}} most recent matching event(s)</div></div><span class="badge ok">Append-only</span></div>{{if .Events}}<div style="overflow:auto"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Reason / details</th><th>Request</th></tr></thead><tbody>{{range .Events}}<tr><td>{{auditTime .Timestamp}}</td><td>{{.Actor}}</td><td><span class="code">{{.Action}}</span></td><td>{{.ResourceType}}{{if .ResourceID}}<div class="tiny code">{{.ResourceID}}</div>{{end}}</td><td>{{if eq .Outcome "success"}}<span class="badge ok">Success</span>{{else if eq .Outcome "denied"}}<span class="badge warn">Denied</span>{{else}}<span class="badge off">Failed</span>{{end}}</td><td>{{if .Details}}{{.Details}}{{else}}—{{end}}</td><td><span class="code">{{.HTTPMethod}} {{.Path}}</span><div class="tiny">HTTP {{.StatusCode}}</div></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No audit events match these filters.</div>{{end}}</section></div></main></div></body></html>`))
 
 func registerAuditRoutes(mux *http.ServeMux, store storage.AuditStore) {
 	mux.HandleFunc("/audit-log", func(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +150,7 @@ func auditMiddleware(auth *authManager, store storage.AuditStore, next http.Hand
 			Timestamp: time.Now().UTC(), Actor: actor, Action: action,
 			ResourceType: resourceType, ResourceID: resourceID,
 			Outcome: auditRequestOutcome(r, recorder.status), HTTPMethod: r.Method,
-			Path: r.URL.Path, StatusCode: recorder.status,
+			Path: r.URL.Path, StatusCode: recorder.status, Details: deploymentAuditDetails(r),
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -158,6 +158,24 @@ func auditMiddleware(auth *authManager, store storage.AuditStore, next http.Hand
 			slog.Error("append audit event", "component", "audit", "error", err)
 		}
 	})
+}
+
+func deploymentAuditDetails(r *http.Request) string {
+	action := strings.TrimSpace(r.FormValue("action"))
+	if action != "request_deployment" && action != "approve_deployment" && action != "reject_deployment" && action != "cancel_deployment" {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if reviewer := strings.TrimSpace(r.FormValue("assigned_reviewer")); reviewer != "" {
+		parts = append(parts, "reviewer="+reviewer)
+	}
+	if reason := strings.TrimSpace(r.FormValue("change_reason")); reason != "" {
+		parts = append(parts, "change reason: "+reason)
+	}
+	if comment := strings.TrimSpace(r.FormValue("review_comment")); comment != "" {
+		parts = append(parts, "decision reason: "+comment)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func auditMethod(method string) bool {
@@ -208,7 +226,7 @@ func describeAuditAction(r *http.Request) (string, string, string) {
 		return "user." + action, "user", firstNonEmpty(r.FormValue("username"), resourceID)
 	}
 	if strings.HasPrefix(r.URL.Path, "/groups/") && action != "" {
-		if action == "request_deployment" || action == "approve_deployment" || action == "reject_deployment" {
+		if action == "request_deployment" || action == "approve_deployment" || action == "reject_deployment" || action == "cancel_deployment" {
 			return "deployment." + action, "group", resourceID
 		}
 		if action == "create_configuration" {
