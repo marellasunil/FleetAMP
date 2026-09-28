@@ -121,7 +121,8 @@ func (d *Database) initialize(ctx context.Context) error {
             configuration_name TEXT NOT NULL, configuration_version TEXT NOT NULL,
             configuration_hash TEXT NOT NULL, base_configuration_id TEXT NOT NULL DEFAULT '',
             base_configuration_hash TEXT NOT NULL DEFAULT '', targets TEXT NOT NULL,
-            requested_by TEXT NOT NULL, reviewed_by TEXT NOT NULL DEFAULT '',
+			requested_by TEXT NOT NULL, assigned_reviewer TEXT NOT NULL DEFAULT '',
+			change_reason TEXT NOT NULL DEFAULT '', reviewed_by TEXT NOT NULL DEFAULT '',
             review_comment TEXT NOT NULL DEFAULT '', reviewed_at TEXT,
             expires_at TEXT NOT NULL, expired_at TEXT,
             status TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -161,7 +162,7 @@ func (d *Database) initialize(ctx context.Context) error {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             occurred_at TEXT NOT NULL, actor TEXT NOT NULL,
             action TEXT NOT NULL, resource_type TEXT NOT NULL,
-            resource_id TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL,
+			resource_id TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL, details TEXT NOT NULL DEFAULT '',
             http_method TEXT NOT NULL, path TEXT NOT NULL, status_code INTEGER NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_occurred ON audit_events(occurred_at DESC,id DESC)`,
@@ -185,6 +186,9 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureApprovalReviewColumns(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureApprovalGovernanceColumns(ctx); err != nil {
+		return err
+	}
 	if err := d.ensureDeploymentRollbackColumns(ctx); err != nil {
 		return err
 	}
@@ -197,10 +201,24 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureUserEmailColumn(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureAuditDetailsColumn(ctx); err != nil {
+		return err
+	}
 	if err := d.migrateAdministratorToUsers(ctx); err != nil {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureAuditDetailsColumn(ctx context.Context) error {
+	present, err := sqliteColumnExists(ctx, d.db, "audit_events", "details")
+	if err != nil || present {
+		return err
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE audit_events ADD COLUMN details TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add audit_events.details column: %w", err)
+	}
+	return nil
 }
 
 func (d *Database) ensureConfigurationGroupColumn(ctx context.Context) error {
@@ -316,6 +334,26 @@ func (d *Database) ensureApprovalReviewColumns(ctx context.Context) error {
         SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ',created_at,'+30 days')
         WHERE expires_at='9999-12-31T23:59:59Z'`); err != nil {
 		return fmt.Errorf("backfill approval expiration: %w", err)
+	}
+	return nil
+}
+
+func (d *Database) ensureApprovalGovernanceColumns(ctx context.Context) error {
+	columns := []struct{ name, definition string }{
+		{"assigned_reviewer", "TEXT NOT NULL DEFAULT ''"},
+		{"change_reason", "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, column := range columns {
+		present, err := sqliteColumnExists(ctx, d.db, "group_deployment_requests", column.name)
+		if err != nil {
+			return err
+		}
+		if present {
+			continue
+		}
+		if _, err := d.db.ExecContext(ctx, `ALTER TABLE group_deployment_requests ADD COLUMN `+column.name+` `+column.definition); err != nil {
+			return fmt.Errorf("add group_deployment_requests.%s column: %w", column.name, err)
+		}
 	}
 	return nil
 }
