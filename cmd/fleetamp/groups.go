@@ -828,7 +828,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		if r.Method == http.MethodPost {
 			action := strings.TrimSpace(r.FormValue("action"))
-			if action == "approve_deployment" || action == "reject_deployment" || action == "cancel_deployment" {
+			if action == "approve_deployment" || action == "reject_deployment" || action == "send_back_deployment" || action == "cancel_deployment" {
 				expireApprovalRequests(r.Context(), requestStore, groupStore, notifier)
 			}
 			if action == "set_owners" {
@@ -900,7 +900,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				http.Redirect(w, r, "/groups/"+group.ID+"?configuration_saved="+configuration.ID, http.StatusSeeOther)
 				return
 			}
-			if action == "reject_deployment" {
+			if action == "reject_deployment" || action == "send_back_deployment" {
 				request, err := requestStore.Get(r.Context(), strings.TrimSpace(r.FormValue("request_id")))
 				if err != nil || request.GroupID != group.ID {
 					http.Error(w, "deployment request not found", http.StatusNotFound)
@@ -921,13 +921,28 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 						return
 					}
 				}
-				if err := requestStore.Review(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentRejected, reviewer, strings.TrimSpace(r.FormValue("review_comment"))); err != nil {
+				comment := strings.TrimSpace(r.FormValue("review_comment"))
+				if comment == "" {
+					http.Error(w, "review reason is required", http.StatusUnprocessableEntity)
+					return
+				}
+				if len(comment) > 500 {
+					http.Error(w, "review reason must not exceed 500 characters", http.StatusUnprocessableEntity)
+					return
+				}
+				nextStatus := configs.GroupDeploymentRejected
+				event := "rejected"
+				if action == "send_back_deployment" {
+					nextStatus = configs.GroupDeploymentSentBack
+					event = "sent back for changes"
+				}
+				if err := requestStore.Review(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, nextStatus, reviewer, comment); err != nil {
 					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
 					return
 				}
-				request.Status = configs.GroupDeploymentRejected
-				notifier.notify(r.Context(), "rejected", request, group)
-				http.Redirect(w, r, "/groups/"+group.ID+"?request_updated=rejected", http.StatusSeeOther)
+				request.Status = nextStatus
+				notifier.notify(r.Context(), event, request, group)
+				http.Redirect(w, r, "/groups/"+group.ID+"?request_updated="+url.QueryEscape(string(nextStatus)), http.StatusSeeOther)
 				return
 			}
 			if action == "cancel_deployment" {
