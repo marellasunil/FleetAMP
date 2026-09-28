@@ -348,7 +348,7 @@ func TestGroupDeploymentRequestPersistence(t *testing.T) {
 	request, err := configs.NewGroupDeploymentRequest(group.ID, group.Name, group.Selector, configuration, []configs.GroupDeploymentTarget{
 		{AgentInstanceUID: "agent-ready", AgentName: "ready", Readiness: "Ready", Eligible: true},
 		{AgentInstanceUID: "agent-offline", AgentName: "offline", Readiness: "Offline", Eligible: false},
-	}, "admin")
+	}, "admin", "owner-one", "Roll out the validated payments configuration")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,8 @@ func TestGroupDeploymentRequestPersistence(t *testing.T) {
 	}
 	got := items[0]
 	if got.ID != request.ID || got.Status != configs.GroupDeploymentPendingApproval ||
-		got.RequestedBy != "admin" || len(got.Targets) != 2 ||
+		got.RequestedBy != "admin" || got.AssignedReviewer != "owner-one" ||
+		got.ChangeReason != "Roll out the validated payments configuration" || len(got.Targets) != 2 ||
 		got.GroupSelector["application"] != "payments" ||
 		got.LabelSelector["team"] != "payments" || got.LabelSelector["tier"] != "backend" ||
 		got.ConfigurationHash != configuration.Hash || got.BaseConfigurationID != "config-baseline" ||
@@ -415,7 +416,7 @@ func TestPendingGroupDeploymentRequestExpiresWithoutDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	request, err := configs.NewGroupDeploymentRequest(group.ID, group.Name, group.Selector, configuration,
-		[]configs.GroupDeploymentTarget{{AgentInstanceUID: "agent-1", Eligible: true}}, "owner-one")
+		[]configs.GroupDeploymentTarget{{AgentInstanceUID: "agent-1", Eligible: true}}, "owner-one", "admin", "Routine approved configuration update")
 	if err != nil {
 		t.Fatal(err)
 	}
