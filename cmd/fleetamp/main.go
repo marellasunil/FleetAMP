@@ -206,7 +206,7 @@ func main() {
 	registerDriftPolicyRoutes(mux, driftPolicyStore, auth)
 	registerAuditRoutes(mux, auditStore)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
-	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier)
+	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
 	registerUIRoutes(mux)
 
 	httpServer := &http.Server{
