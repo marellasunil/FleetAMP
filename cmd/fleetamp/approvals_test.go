@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/marellasunil/FleetAMP/internal/configs"
@@ -21,8 +23,33 @@ func TestApprovalStatusMatches(t *testing.T) {
 		!approvalStatusMatches("active", configs.GroupDeploymentDeploying) ||
 		approvalStatusMatches("active", configs.GroupDeploymentExpired) ||
 		!approvalStatusMatches("expired", configs.GroupDeploymentExpired) ||
+		!approvalStatusMatches("sent_back", configs.GroupDeploymentSentBack) ||
 		!approvalStatusMatches("all", configs.GroupDeploymentRejected) {
 		t.Fatal("approval status filter returned an unexpected result")
+	}
+}
+
+func TestApprovalQueueLinksGroupAndShowsReviewerActions(t *testing.T) {
+	request := &configs.GroupDeploymentRequest{
+		ID: "request-1", GroupID: "group-1", GroupName: "payments · prod · eu",
+		ConfigurationName: "collector.yaml", ConfigurationVersion: "7",
+		Status: configs.GroupDeploymentPendingApproval, AssignedReviewer: "reviewer-admin",
+	}
+	view := approvalsView{Page: "approvals", Status: "active", Items: []approvalItem{{
+		Request: request, ValidationStatus: "Passed at submission", CanReview: true,
+	}}}
+	var output bytes.Buffer
+	if err := approvalsPage.Execute(&output, view); err != nil {
+		t.Fatal(err)
+	}
+	body := output.String()
+	for _, expected := range []string{
+		`href="/groups/group-1"`, `action="/groups/group-1"`,
+		`value="approve_deployment"`, `value="reject_deployment"`, `value="send_back_deployment"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("approval queue does not contain %q", expected)
+		}
 	}
 }
 
