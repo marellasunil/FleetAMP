@@ -16,6 +16,7 @@ const (
 	GroupDeploymentFailed          GroupDeploymentRequestStatus = "failed"
 	GroupDeploymentExpired         GroupDeploymentRequestStatus = "expired"
 	GroupDeploymentCancelled       GroupDeploymentRequestStatus = "cancelled"
+	GroupDeploymentSentBack        GroupDeploymentRequestStatus = "sent_back"
 )
 
 type GroupDeploymentTarget struct {
