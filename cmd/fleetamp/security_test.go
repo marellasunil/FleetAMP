@@ -282,6 +282,9 @@ func TestSecurityMiddlewareEnforcesSessionRole(t *testing.T) {
 	if got := testRequest(roleAdmin, http.MethodPost, "/groups/g", "action=approve_deployment"); got != http.StatusNoContent {
 		t.Fatalf("admin approval status=%d", got)
 	}
+	if got := testRequest(roleGroupOwner, http.MethodPost, "/groups/g", "action=send_back_deployment"); got != http.StatusNoContent {
+		t.Fatalf("group-owner send-back status=%d", got)
+	}
 	if got := testRequest(roleOperator, http.MethodGet, "/settings/users", ""); got != http.StatusForbidden {
 		t.Fatalf("operator user-management status=%d", got)
 	}
