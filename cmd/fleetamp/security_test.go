@@ -191,7 +191,7 @@ func TestRolePermissionMatrix(t *testing.T) {
 		{"operator cannot approve", roleOperator, permissionApprove, false},
 		{"operator cannot administer", roleOperator, permissionAdmin, false},
 		{"group owner can edit owned group routes", roleGroupOwner, permissionEdit, true},
-		{"group owner cannot approve", roleGroupOwner, permissionApprove, false},
+		{"group owner can enter assigned-reviewer route", roleGroupOwner, permissionApprove, true},
 		{"group owner cannot administer", roleGroupOwner, permissionAdmin, false},
 		{"viewer can read", roleViewer, permissionRead, true},
 		{"viewer cannot edit", roleViewer, permissionEdit, false},
@@ -207,13 +207,13 @@ func TestRolePermissionMatrix(t *testing.T) {
 }
 
 func TestGroupOwnerRouteScope(t *testing.T) {
-	allowed := []string{"/groups", "/groups/group-1", "/api/v1/groups", "/api/v1/groups/group-1/members", "/api/v1/configurations/sections/compose", "/api/v1/session", "/assets/session.js", "/logout"}
+	allowed := []string{"/groups", "/groups/group-1", "/approvals", "/approvals/request-1", "/api/v1/groups", "/api/v1/groups/group-1/members", "/api/v1/configurations/sections/compose", "/api/v1/session", "/assets/session.js", "/logout"}
 	for _, path := range allowed {
 		if !groupOwnerRoute(path) {
 			t.Errorf("expected group-owner route %q to be allowed", path)
 		}
 	}
-	for _, path := range []string{"/agents", "/agents/agent-1", "/deployments", "/approvals", "/settings/users", "/audit-log"} {
+	for _, path := range []string{"/agents", "/agents/agent-1", "/deployments", "/settings/users", "/audit-log"} {
 		if groupOwnerRoute(path) {
 			t.Errorf("expected non-group route %q to be denied", path)
 		}
@@ -290,6 +290,12 @@ func TestSecurityMiddlewareEnforcesSessionRole(t *testing.T) {
 	}
 	if got := testRequest(roleOperator, http.MethodGet, "/audit-log", ""); got != http.StatusForbidden {
 		t.Fatalf("operator audit-log status=%d", got)
+	}
+	if got := testRequest(roleOperator, http.MethodGet, "/approvals", ""); got != http.StatusForbidden {
+		t.Fatalf("operator approvals status=%d", got)
+	}
+	if got := testRequest(roleGroupOwner, http.MethodGet, "/approvals", ""); got != http.StatusNoContent {
+		t.Fatalf("group-owner approvals status=%d", got)
 	}
 	if got := testRequest(roleAdmin, http.MethodGet, "/audit-log", ""); got != http.StatusNoContent {
 		t.Fatalf("admin audit-log status=%d", got)

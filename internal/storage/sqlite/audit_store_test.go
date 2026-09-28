@@ -19,7 +19,7 @@ func TestAuditStoreAppendsAndFilters(t *testing.T) {
 	store := database.Audit()
 	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
 	events := []*audit.Event{
-		{Timestamp: base, Actor: "admin", Action: "configuration.deploy", ResourceType: "agent", Outcome: "success", HTTPMethod: "POST", Path: "/agents/a/config", StatusCode: 303},
+		{Timestamp: base, Actor: "admin", Action: "configuration.deploy", ResourceType: "agent", Outcome: "success", HTTPMethod: "POST", Path: "/agents/a/config", StatusCode: 303, Details: "change reason: approved maintenance"},
 		{Timestamp: base.Add(time.Minute), Actor: "operator", Action: "configuration.deploy", ResourceType: "agent", Outcome: "denied", HTTPMethod: "POST", Path: "/agents/a/config", StatusCode: 403},
 		{Timestamp: base.Add(2 * time.Minute), Actor: "admin", Action: "policy.drift_update", ResourceType: "configuration_policy", Outcome: "success", HTTPMethod: "POST", Path: "/settings/configuration-drift", StatusCode: 303},
 	}
@@ -38,6 +38,9 @@ func TestAuditStoreAppendsAndFilters(t *testing.T) {
 	}
 	if result[0].Action != "policy.drift_update" {
 		t.Fatalf("newest action=%q", result[0].Action)
+	}
+	if result[1].Details != "change reason: approved maintenance" {
+		t.Fatalf("details=%q", result[1].Details)
 	}
 	result, err = store.List(ctx, audit.Filter{
 		Since: base.Add(30 * time.Second), Until: base.Add(90 * time.Second), Limit: 10,

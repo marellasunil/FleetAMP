@@ -39,6 +39,7 @@ service:
 		Page: "groups", Group: group, Members: []*agents.ManagedAgent{agent},
 		Configurations: []*configs.Configuration{configuration}, SelectedConfig: configuration,
 		SelectedPipeline: pipeline, Preview: []groupPreviewAgent{{Agent: agent, Reason: "Ready"}}, Eligible: 1,
+		EligibleReviewers: []reviewerOption{{Username: "reviewer-admin", Role: "admin"}},
 	}
 
 	var output bytes.Buffer

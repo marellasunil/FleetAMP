@@ -51,6 +51,11 @@ type groupPreviewAgent struct {
 	LabelMatch string
 }
 
+type reviewerOption struct {
+	Username string
+	Role     string
+}
+
 type groupDetailView struct {
 	Page                 string
 	Group                *groups.Group
@@ -79,6 +84,7 @@ type groupDetailView struct {
 	EditorError          string
 	CanEditConfiguration bool
 	CanDeleteAgents      bool
+	EligibleReviewers    []reviewerOption
 }
 
 const defaultGroupConfiguration = `receivers:
@@ -112,6 +118,48 @@ func isGroupOwner(group *groups.Group, username string) bool {
 		}
 	}
 	return false
+}
+
+func eligibleDeploymentReviewers(ctx context.Context, auth *authManager, group *groups.Group, requester string, requesterRole role) ([]reviewerOption, error) {
+	users, err := auth.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]reviewerOption, 0)
+	for _, user := range users {
+		if !user.Enabled || strings.EqualFold(user.Username, requester) {
+			continue
+		}
+		switch requesterRole {
+		case roleAdmin:
+			if user.Role == string(roleAdmin) || (user.Role == string(roleGroupOwner) && isGroupOwner(group, user.Username)) {
+				result = append(result, reviewerOption{Username: user.Username, Role: user.Role})
+			}
+		case roleGroupOwner:
+			if user.Role == string(roleAdmin) {
+				result = append(result, reviewerOption{Username: user.Username, Role: user.Role})
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].Username) < strings.ToLower(result[j].Username) })
+	return result, nil
+}
+
+func validateAssignedReviewer(ctx context.Context, auth *authManager, group *groups.Group, requester, assigned string) error {
+	requesterUser, err := auth.store.Get(ctx, requester)
+	if err != nil {
+		return fmt.Errorf("requester is no longer a valid user")
+	}
+	options, err := eligibleDeploymentReviewers(ctx, auth, group, requester, role(requesterUser.Role))
+	if err != nil {
+		return err
+	}
+	for _, option := range options {
+		if strings.EqualFold(option.Username, assigned) {
+			return nil
+		}
+	}
+	return fmt.Errorf("selected reviewer is not eligible for this group and requester")
 }
 
 func canAccessGroup(auth *authManager, r *http.Request, group *groups.Group) bool {
@@ -780,7 +828,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		if r.Method == http.MethodPost {
 			action := strings.TrimSpace(r.FormValue("action"))
-			if action == "approve_deployment" || action == "reject_deployment" {
+			if action == "approve_deployment" || action == "reject_deployment" || action == "cancel_deployment" {
 				expireApprovalRequests(r.Context(), requestStore, groupStore, notifier)
 			}
 			if action == "set_owners" {
@@ -863,6 +911,16 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Error(w, "requesters cannot review their own deployment request", http.StatusForbidden)
 					return
 				}
+				if request.AssignedReviewer != "" && !strings.EqualFold(reviewer, request.AssignedReviewer) {
+					http.Error(w, "only the assigned reviewer can reject this deployment request", http.StatusForbidden)
+					return
+				}
+				if request.AssignedReviewer != "" {
+					if err := validateAssignedReviewer(r.Context(), auth, group, request.RequestedBy, reviewer); err != nil {
+						http.Error(w, err.Error(), http.StatusForbidden)
+						return
+					}
+				}
 				if err := requestStore.Review(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentRejected, reviewer, strings.TrimSpace(r.FormValue("review_comment"))); err != nil {
 					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
 					return
@@ -870,6 +928,31 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				request.Status = configs.GroupDeploymentRejected
 				notifier.notify(r.Context(), "rejected", request, group)
 				http.Redirect(w, r, "/groups/"+group.ID+"?request_updated=rejected", http.StatusSeeOther)
+				return
+			}
+			if action == "cancel_deployment" {
+				request, err := requestStore.Get(r.Context(), strings.TrimSpace(r.FormValue("request_id")))
+				if err != nil || request.GroupID != group.ID {
+					http.Error(w, "deployment request not found", http.StatusNotFound)
+					return
+				}
+				actor := currentUsername(auth, r)
+				if currentRole(auth, r) != roleAdmin && !strings.EqualFold(actor, request.RequestedBy) {
+					http.Error(w, "only the requester or an Admin can cancel this deployment request", http.StatusForbidden)
+					return
+				}
+				comment := strings.TrimSpace(r.FormValue("review_comment"))
+				if comment == "" {
+					http.Error(w, "cancellation reason is required", http.StatusUnprocessableEntity)
+					return
+				}
+				if err := requestStore.Review(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentCancelled, actor, comment); err != nil {
+					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
+					return
+				}
+				request.Status = configs.GroupDeploymentCancelled
+				notifier.notify(r.Context(), "cancelled", request, group)
+				http.Redirect(w, r, "/groups/"+group.ID+"?request_updated=cancelled", http.StatusSeeOther)
 				return
 			}
 			if action == "approve_deployment" {
@@ -886,6 +969,16 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				if strings.EqualFold(reviewer, request.RequestedBy) {
 					http.Error(w, "requesters cannot approve their own deployment request", http.StatusForbidden)
 					return
+				}
+				if request.AssignedReviewer != "" && !strings.EqualFold(reviewer, request.AssignedReviewer) {
+					http.Error(w, "only the assigned reviewer can approve this deployment request", http.StatusForbidden)
+					return
+				}
+				if request.AssignedReviewer != "" {
+					if err := validateAssignedReviewer(r.Context(), auth, group, request.RequestedBy, reviewer); err != nil {
+						http.Error(w, err.Error(), http.StatusForbidden)
+						return
+					}
 				}
 				if !group.Enabled || !sameSelector(group.Selector, request.GroupSelector) {
 					http.Error(w, "group changed after preview; create a new deployment request", http.StatusConflict)
@@ -1016,7 +1109,21 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Error(w, "authenticated requester identity is required", http.StatusUnauthorized)
 					return
 				}
-				request, err := configs.NewGroupDeploymentRequest(group.ID, group.Name, group.Selector, configuration, targets, requestedBy)
+				assignedReviewer := strings.TrimSpace(r.FormValue("assigned_reviewer"))
+				changeReason := strings.TrimSpace(r.FormValue("change_reason"))
+				if changeReason == "" {
+					http.Error(w, "change reason is required", http.StatusUnprocessableEntity)
+					return
+				}
+				if len(changeReason) > 1000 {
+					http.Error(w, "change reason must not exceed 1000 characters", http.StatusUnprocessableEntity)
+					return
+				}
+				if err := validateAssignedReviewer(r.Context(), auth, group, requestedBy, assignedReviewer); err != nil {
+					http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+					return
+				}
+				request, err := configs.NewGroupDeploymentRequest(group.ID, group.Name, group.Selector, configuration, targets, requestedBy, assignedReviewer, changeReason)
 				if err != nil {
 					internalServerError(w, err)
 					return
@@ -1196,6 +1303,11 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			EditorVersions:       available,
 			CanEditConfiguration: true,
 			CanDeleteAgents:      currentRole(auth, r) == roleAdmin || currentRole(auth, r) == roleGroupOwner,
+		}
+		view.EligibleReviewers, err = eligibleDeploymentReviewers(r.Context(), auth, group, currentUsername(auth, r), currentRole(auth, r))
+		if err != nil {
+			internalServerError(w, err)
+			return
 		}
 		policies, policyErr := sectionPolicyStore.List(r.Context())
 		if policyErr != nil {
