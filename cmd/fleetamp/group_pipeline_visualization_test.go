@@ -47,7 +47,7 @@ service:
 	}
 	body := output.String()
 	for _, want := range []string{
-		"Review the target, configuration flow and readiness before approval",
+		"Review the group, optional label filter, configuration flow and readiness before approval",
 		"metrics telemetry", "hostmetrics", "batch", "otlp/central",
 		"Target: payments · prod · eu", "1 ready", "collector-1", "Request approval",
 		"/configurations/" + configuration.ID,
