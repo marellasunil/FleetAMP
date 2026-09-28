@@ -160,7 +160,7 @@ func requiredPermission(r *http.Request) permission {
 		switch strings.TrimSpace(r.FormValue("action")) {
 		case "request_deployment", "create_configuration", "cancel_deployment":
 			return permissionEdit
-		case "approve_deployment", "reject_deployment":
+		case "approve_deployment", "reject_deployment", "send_back_deployment":
 			return permissionApprove
 		default:
 			return permissionAdmin
