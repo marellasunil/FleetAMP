@@ -94,8 +94,7 @@ type ManagedAgent struct {
 	// k8s.cluster.name, or k8s.namespace.name.
 	Attributes map[string]string `json:"attributes,omitempty"`
 
-	// GroupFields are FleetAMP-owned overrides for the controlled group identity.
-	// Allowed keys are application, environment and place.
+	// GroupFields are FleetAMP-owned overrides for flexible ownership identity.
 	GroupFields map[string]string `json:"group_fields,omitempty"`
 
 	// ReportedGroupFields are group identity values reported by the agent through OpAMP.
@@ -107,7 +106,7 @@ type ManagedAgent struct {
 	// ReportedLabels are optional labels reported by the agent through OpAMP.
 	ReportedLabels map[string]string `json:"reported_labels,omitempty"`
 
-	// UnknownGroupFields contains FleetAMP group-prefixed keys that are not supported.
+	// UnknownGroupFields contains malformed FleetAMP group-prefixed metadata.
 	UnknownGroupFields map[string]string `json:"unknown_group_fields,omitempty"`
 
 	// Capabilities contains normalized management capabilities advertised

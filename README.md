@@ -84,14 +84,15 @@ Initial and planned agent types include:
 
 A compatibility alias named `Collector` remains while the codebase evolves.
 
-## Attributes vs labels
+## Attributes, ownership identity, and labels
 
 FleetAMP deliberately separates reported metadata from management metadata:
 
 - **Attributes** — reported by the agent/protocol, such as `host.name`, `os.type`, `service.version`, or `cloud.region`
-- **Labels** — owned by FleetAMP/operators, such as `team=payments`, `environment=prod`, or `role=agent`
+- **Ownership identity** — managed or approved `key=value` metadata used by an exact-match group selector; a Collector can belong to only one active ownership group
+- **Labels** — optional FleetAMP/operator metadata used to narrow a deployment inside an ownership group, such as `role=agent` or `release-ring=canary`
 
-Labels are intended for grouping, policy and deployment targeting. CMDB/CSDM enrichment can add approved business metadata without overwriting raw reported attributes.
+The Groups UI provides an **Add condition** control for flexible selectors. `application`, `environment`, and `place` are suggested starting keys rather than mandatory fields. FleetAMP rejects active selectors whose rules could overlap. Future CMDB/CSDM and platform imports can populate approved ownership metadata without overwriting raw reported attributes.
 
 ## Provider model
 

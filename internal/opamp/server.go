@@ -351,11 +351,10 @@ func splitFleetAMPMetadata(attrs map[string]string) (map[string]string, map[stri
 	groupFields, labels, unknown := map[string]string{}, map[string]string{}, map[string]string{}
 	for key, value := range attrs {
 		if strings.HasPrefix(key, "fleetamp.group.") {
-			field := strings.TrimPrefix(key, "fleetamp.group.")
-			switch field {
-			case "application", "environment", "place":
+			field := strings.TrimSpace(strings.TrimPrefix(key, "fleetamp.group."))
+			if field != "" && strings.TrimSpace(value) != "" {
 				groupFields[field] = value
-			default:
+			} else {
 				unknown[field] = value
 			}
 		}

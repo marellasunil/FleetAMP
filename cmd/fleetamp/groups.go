@@ -35,6 +35,15 @@ type groupRequest struct {
 	Enabled     *bool             `json:"enabled,omitempty"`
 }
 
+type groupSelectorPreviewRequest struct {
+	Selector  map[string]string `json:"selector"`
+	ExcludeID string            `json:"exclude_id,omitempty"`
+}
+
+type groupSelectorPreviewResponse struct {
+	Matched int `json:"matched"`
+}
+
 type groupListItem struct {
 	Group       *groups.Group
 	MemberCount int
@@ -362,6 +371,7 @@ func lastSuccessfulConfigurationID(ctx context.Context, agentUID string, deploym
 }
 
 const maxManagedLabels = 5
+const maxGroupSelectorConditions = 12
 
 // copyStringMap returns an independent map so request updates cannot mutate stored agent metadata by aliasing.
 func copyStringMap(in map[string]string) map[string]string {
@@ -382,6 +392,39 @@ func sameSelector(left, right map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// selectorsOverlap reports whether one agent identity could satisfy both
+// exact-match selectors. Ownership groups must remain mutually exclusive.
+func selectorsOverlap(left, right map[string]string) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	for key, leftValue := range left {
+		if rightValue, shared := right[key]; shared && rightValue != leftValue {
+			return false
+		}
+	}
+	return true
+}
+
+func validateGroupOverlap(ctx context.Context, store storage.GroupStore, candidate *groups.Group, excludeID string) error {
+	if candidate == nil || !candidate.Enabled {
+		return nil
+	}
+	existing, err := store.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, other := range existing {
+		if other == nil || !other.Enabled || other.ID == excludeID {
+			continue
+		}
+		if selectorsOverlap(candidate.Selector, other.Selector) {
+			return fmt.Errorf("selector overlaps active ownership group %q; add or change a condition so membership is exclusive", other.Name)
+		}
+	}
+	return nil
 }
 
 func configurationsForGroup(items []*configs.Configuration, groupID string) []*configs.Configuration {
@@ -412,12 +455,9 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 			http.Error(w, "group not found", http.StatusNotFound)
 			return
 		}
-		if agent.GroupFields == nil {
-			agent.GroupFields = map[string]string{}
-		}
-		for key, value := range group.Selector {
-			agent.GroupFields[key] = value
-		}
+		// Assignment replaces the complete FleetAMP-owned identity. Retaining
+		// keys from the previous group can make the agent match stale selectors.
+		agent.GroupFields = copyStringMap(group.Selector)
 		if err := agentStore.Upsert(r.Context(), agent); err != nil {
 			internalServerError(w, err)
 			return
@@ -569,6 +609,10 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				http.Error(w, err.Error(), 400)
 				return
 			}
+			if err := validateGroupOverlap(r.Context(), groupStore, group, ""); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			if err := groupStore.Create(r.Context(), group); err != nil {
 				http.Error(w, err.Error(), 409)
 				return
@@ -584,6 +628,30 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/groups/"), "/"), "/")
 		if len(parts) == 0 || parts[0] == "" {
 			http.NotFound(w, r)
+			return
+		}
+		if len(parts) == 1 && parts[0] == "preview" && r.Method == http.MethodPost {
+			var req groupSelectorPreviewRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid JSON body", http.StatusBadRequest)
+				return
+			}
+			selector := cleanSelector(req.Selector)
+			if err := validateGroupSelector(selector); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			candidate := &groups.Group{Selector: selector, Enabled: true}
+			if err := validateGroupOverlap(r.Context(), groupStore, candidate, strings.TrimSpace(req.ExcludeID)); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			members, err := membersForGroupIdentity(r.Context(), candidate, agentStore)
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, groupSelectorPreviewResponse{Matched: len(members)})
 			return
 		}
 		group, err := groupStore.Get(r.Context(), parts[0])
@@ -621,12 +689,24 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				http.Error(w, err.Error(), 400)
 				return
 			}
-			group.Name, group.Description, group.Selector, group.UpdatedAt = canonicalGroupName(selector), strings.TrimSpace(req.Description), selector, time.Now().UTC()
+			name := strings.TrimSpace(req.Name)
+			if name == "" {
+				name = group.Name
+			}
+			if err := validateGroupName(name); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			group.Name, group.Description, group.Selector, group.UpdatedAt = name, strings.TrimSpace(req.Description), selector, time.Now().UTC()
 			if currentRole(auth, r) == roleAdmin && req.Owners != nil {
 				group.Owners = normalizeOwners(req.Owners)
 			}
 			if req.Enabled != nil {
 				group.Enabled = *req.Enabled
+			}
+			if err := validateGroupOverlap(r.Context(), groupStore, group, group.ID); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
 			}
 			if err := groupStore.Update(r.Context(), group); err != nil {
 				internalServerError(w, err)
@@ -664,27 +744,70 @@ func newValidatedGroup(req groupRequest) (*groups.Group, error) {
 	if err := validateGroupSelector(req.Selector); err != nil {
 		return nil, err
 	}
-	req.Name = canonicalGroupName(req.Selector)
+	if req.Name == "" {
+		req.Name = canonicalGroupName(req.Selector)
+	}
+	if err := validateGroupName(req.Name); err != nil {
+		return nil, err
+	}
 	return groups.New(req.Name, req.Description, req.Selector)
 }
 
 // validateGroupSelector rejects empty keys and values that cannot safely target agents.
 func validateGroupSelector(selector map[string]string) error {
-	if strings.TrimSpace(selector["application"]) == "" {
-		return errors.New("application selector is required")
+	if len(selector) == 0 {
+		return errors.New("at least one ownership selector condition is required")
 	}
-	if strings.TrimSpace(selector["environment"]) == "" {
-		return errors.New("environment selector is required")
+	if len(selector) > maxGroupSelectorConditions {
+		return fmt.Errorf("ownership selector supports at most %d conditions", maxGroupSelectorConditions)
 	}
-	if strings.TrimSpace(selector["place"]) == "" {
-		return errors.New("place selector is required")
+	for key, value := range selector {
+		if !validMetadataKey(key) {
+			return fmt.Errorf("invalid selector key %q; use letters, numbers, dots, underscores, slashes, or hyphens", key)
+		}
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("selector value is required for %q", key)
+		}
 	}
 	return nil
 }
 
+func validateGroupName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("group name is required")
+	}
+	if len(name) > 120 {
+		return errors.New("group name must be 120 characters or fewer")
+	}
+	return nil
+}
+
+func validMetadataKey(key string) bool {
+	if key == "" || len(key) > 128 {
+		return false
+	}
+	for _, char := range key {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '.' || char == '_' || char == '-' || char == '/' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // canonicalGroupName derives a stable display name from a selector when the request omits one.
 func canonicalGroupName(selector map[string]string) string {
-	parts := []string{selector["application"], selector["environment"], selector["place"]}
+	keys := make([]string, 0, len(selector))
+	for key := range selector {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, selector[key])
+	}
 	for i, part := range parts {
 		part = strings.ToLower(strings.TrimSpace(part))
 		var b strings.Builder
@@ -758,9 +881,13 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			group, err := newValidatedGroup(groupRequest{Selector: selector})
+			group, err := newValidatedGroup(groupRequest{Name: r.FormValue("name"), Description: r.FormValue("description"), Selector: selector})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := validateGroupOverlap(r.Context(), groupStore, group, ""); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
 			if err := groupStore.Create(r.Context(), group); err != nil {
@@ -1192,6 +1319,10 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			if action == "disable" || action == "enable" {
 				group.Enabled = action == "enable"
 				group.UpdatedAt = time.Now().UTC()
+				if err := validateGroupOverlap(r.Context(), groupStore, group, group.ID); err != nil {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
 				if err := groupStore.Update(r.Context(), group); err != nil {
 					internalServerError(w, err)
 					return
@@ -1206,8 +1337,16 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					return
 				}
 				group.Selector = selector
-				group.Name = canonicalGroupName(selector)
+				group.Name = strings.TrimSpace(r.FormValue("name"))
+				if err := validateGroupName(group.Name); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
 				group.UpdatedAt = time.Now().UTC()
+				if err := validateGroupOverlap(r.Context(), groupStore, group, group.ID); err != nil {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
 				if err := groupStore.Update(r.Context(), group); err != nil {
 					http.Error(w, err.Error(), 409)
 					return
@@ -1369,10 +1508,31 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 
 // parseGroupSelectorForm accepts structured form fields and converts them into a normalized selector map.
 func parseGroupSelectorForm(r *http.Request) (map[string]string, error) {
-	selector := map[string]string{
-		"application": strings.TrimSpace(r.FormValue("application")),
-		"environment": strings.TrimSpace(r.FormValue("environment")),
-		"place":       strings.TrimSpace(r.FormValue("place")),
+	if err := r.ParseForm(); err != nil {
+		return nil, errors.New("invalid group form")
+	}
+	keys, values := r.Form["selector_key"], r.Form["selector_value"]
+	// Compatibility for forms and automation created before flexible selectors.
+	if len(keys) == 0 && len(values) == 0 {
+		keys = []string{"application", "environment", "place"}
+		values = []string{r.FormValue("application"), r.FormValue("environment"), r.FormValue("place")}
+	}
+	if len(keys) != len(values) {
+		return nil, errors.New("each selector key must have one value")
+	}
+	selector := make(map[string]string, len(keys))
+	for index := range keys {
+		key, value := strings.TrimSpace(keys[index]), strings.TrimSpace(values[index])
+		if key == "" && value == "" {
+			continue
+		}
+		if key == "" || value == "" {
+			return nil, errors.New("selector key and value are both required")
+		}
+		if _, duplicate := selector[key]; duplicate {
+			return nil, fmt.Errorf("duplicate selector key: %s", key)
+		}
+		selector[key] = value
 	}
 	if err := validateGroupSelector(selector); err != nil {
 		return nil, err
