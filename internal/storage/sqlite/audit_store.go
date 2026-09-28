@@ -21,11 +21,11 @@ func (s *AuditStore) Append(ctx context.Context, event *audit.Event) error {
 		event.Timestamp = time.Now().UTC()
 	}
 	result, err := s.db.ExecContext(ctx, `INSERT INTO audit_events
-        (occurred_at,actor,action,resource_type,resource_id,outcome,http_method,path,status_code)
-        VALUES(?,?,?,?,?,?,?,?,?)`,
+		(occurred_at,actor,action,resource_type,resource_id,outcome,http_method,path,status_code,details)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`,
 		event.Timestamp.UTC().Format(time.RFC3339Nano), event.Actor, event.Action,
 		event.ResourceType, event.ResourceID, event.Outcome, event.HTTPMethod,
-		event.Path, event.StatusCode)
+		event.Path, event.StatusCode, event.Details)
 	if err != nil {
 		return fmt.Errorf("append audit event: %w", err)
 	}
@@ -35,7 +35,7 @@ func (s *AuditStore) Append(ctx context.Context, event *audit.Event) error {
 func (s *AuditStore) List(ctx context.Context, filter audit.Filter) ([]*audit.Event, error) {
 	filter = filter.Normalized()
 	query := `SELECT id,occurred_at,actor,action,resource_type,resource_id,
-        outcome,http_method,path,status_code FROM audit_events WHERE 1=1`
+		outcome,http_method,path,status_code,details FROM audit_events WHERE 1=1`
 	args := make([]any, 0, 4)
 	if filter.Actor != "" {
 		query += " AND actor=?"
@@ -70,7 +70,7 @@ func (s *AuditStore) List(ctx context.Context, filter audit.Filter) ([]*audit.Ev
 		var occurred string
 		if err := rows.Scan(&event.ID, &occurred, &event.Actor, &event.Action,
 			&event.ResourceType, &event.ResourceID, &event.Outcome,
-			&event.HTTPMethod, &event.Path, &event.StatusCode); err != nil {
+			&event.HTTPMethod, &event.Path, &event.StatusCode, &event.Details); err != nil {
 			return nil, fmt.Errorf("scan audit event: %w", err)
 		}
 		event.Timestamp, err = time.Parse(time.RFC3339Nano, strings.TrimSpace(occurred))
