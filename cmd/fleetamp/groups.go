@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -45,8 +46,9 @@ type groupsView struct {
 	Items []groupListItem
 }
 type groupPreviewAgent struct {
-	Agent  *agents.ManagedAgent
-	Reason string
+	Agent      *agents.ManagedAgent
+	Reason     string
+	LabelMatch string
 }
 
 type groupDetailView struct {
@@ -59,6 +61,8 @@ type groupDetailView struct {
 	PipelineError        string
 	Preview              []groupPreviewAgent
 	Eligible             int
+	LabelSelector        map[string]string
+	LabelSelectorText    string
 	Requests             []*configs.GroupDeploymentRequest
 	DeploymentHistory    []*configs.Deployment
 	DriftSummary         groupDriftSummary
@@ -199,6 +203,43 @@ func previewGroupMembers(members []*agents.ManagedAgent, enabled bool) ([]groupP
 	return result, eligible
 }
 
+// membersMatchingLabels narrows an owned group using exact-match AND
+// semantics. FleetAMP-managed labels override agent-reported labels through
+// EffectiveLabels. An empty selector retains every group member.
+func membersMatchingLabels(members []*agents.ManagedAgent, selector map[string]string) []*agents.ManagedAgent {
+	if len(selector) == 0 {
+		return members
+	}
+	result := make([]*agents.ManagedAgent, 0, len(members))
+	for _, agent := range members {
+		labels := groups.EffectiveLabels(agent)
+		matched := true
+		for key, expected := range selector {
+			if labels[key] != expected {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			result = append(result, agent)
+		}
+	}
+	return result
+}
+
+func labelSelectorText(selector map[string]string) string {
+	keys := make([]string, 0, len(selector))
+	for key := range selector {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+selector[key])
+	}
+	return strings.Join(parts, ", ")
+}
+
 func previewGroupConfiguration(ctx context.Context, members []*agents.ManagedAgent, enabled bool, configuration *configs.Configuration, assignmentStore storage.AssignmentStore) ([]groupPreviewAgent, int, error) {
 	preview, _ := previewGroupMembers(members, enabled)
 	eligible := 0
@@ -220,6 +261,16 @@ func previewGroupConfiguration(ctx context.Context, members []*agents.ManagedAge
 		}
 	}
 	return preview, eligible, nil
+}
+
+func addLabelMatchExplanation(preview []groupPreviewAgent, selector map[string]string) {
+	explanation := "All group members"
+	if len(selector) > 0 {
+		explanation = "Matched " + labelSelectorText(selector)
+	}
+	for index := range preview {
+		preview[index].LabelMatch = explanation
+	}
 }
 
 func commonAppliedConfiguration(ctx context.Context, preview []groupPreviewAgent, assignmentStore storage.AssignmentStore) (string, string, error) {
@@ -864,6 +915,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					internalServerError(w, err)
 					return
 				}
+				currentMembers = membersMatchingLabels(currentMembers, request.LabelSelector)
 				currentByID := make(map[string]*agents.ManagedAgent, len(currentMembers))
 				for _, member := range currentMembers {
 					currentByID[member.InstanceUID] = member
@@ -934,6 +986,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					internalServerError(w, err)
 					return
 				}
+				labelSelector, err := parseOptionalLabelSelector(r.FormValue("label_selector"))
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				members = membersMatchingLabels(members, labelSelector)
 				preview, eligible, err := previewGroupConfiguration(r.Context(), members, group.Enabled, configuration, assignmentStore)
 				if err != nil {
 					internalServerError(w, err)
@@ -963,6 +1021,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					internalServerError(w, err)
 					return
 				}
+				request.LabelSelector = labelSelector
 				expiryDays, err := approvalExpiryDays(r.FormValue("expiry_days"))
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1158,11 +1217,19 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				http.Error(w, "configuration not found", http.StatusNotFound)
 				return
 			}
-			view.Preview, view.Eligible, err = previewGroupConfiguration(r.Context(), members, group.Enabled, view.SelectedConfig, assignmentStore)
+			view.LabelSelector, err = parseOptionalLabelSelector(r.URL.Query().Get("labels"))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			view.LabelSelectorText = labelSelectorText(view.LabelSelector)
+			targetMembers := membersMatchingLabels(members, view.LabelSelector)
+			view.Preview, view.Eligible, err = previewGroupConfiguration(r.Context(), targetMembers, group.Enabled, view.SelectedConfig, assignmentStore)
 			if err != nil {
 				internalServerError(w, err)
 				return
 			}
+			addLabelMatchExplanation(view.Preview, view.LabelSelector)
 			view.SelectedPipeline, err = configs.ParsePipelineModel(view.SelectedConfig.Content)
 			if err != nil {
 				view.PipelineError = err.Error()
@@ -1198,12 +1265,30 @@ func parseSelectorText(input string) (map[string]string, error) {
 		if len(pieces) != 2 || strings.TrimSpace(pieces[0]) == "" || strings.TrimSpace(pieces[1]) == "" {
 			return nil, errors.New("selector must use key=value pairs separated by commas")
 		}
-		result[strings.TrimSpace(pieces[0])] = strings.TrimSpace(pieces[1])
+		key := strings.TrimSpace(pieces[0])
+		if _, exists := result[key]; exists {
+			return nil, fmt.Errorf("duplicate selector label: %s", key)
+		}
+		result[key] = strings.TrimSpace(pieces[1])
 	}
 	if len(result) == 0 {
 		return nil, errors.New("at least one selector label is required")
 	}
 	return result, nil
+}
+
+func parseOptionalLabelSelector(input string) (map[string]string, error) {
+	if strings.TrimSpace(input) == "" {
+		return map[string]string{}, nil
+	}
+	selector, err := parseSelectorText(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(selector) > maxManagedLabels {
+		return nil, fmt.Errorf("label deployment selector supports at most %d exact-match labels", maxManagedLabels)
+	}
+	return selector, nil
 }
 
 var legacyGroupDetailPage = template.Must(template.New("group-detail").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>FleetAMP Group</title><style>

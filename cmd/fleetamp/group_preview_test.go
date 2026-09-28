@@ -77,6 +77,32 @@ func TestPreviewGroupMembers(t *testing.T) {
 	}
 }
 
+func TestMembersMatchingLabelsUsesExactAndManagedPrecedence(t *testing.T) {
+	members := []*agents.ManagedAgent{
+		{InstanceUID: "managed-match", ReportedLabels: map[string]string{"team": "other", "tier": "backend"}, Labels: map[string]string{"team": "payments"}},
+		{InstanceUID: "partial-match", Labels: map[string]string{"team": "payments", "tier": "frontend"}},
+		{InstanceUID: "reported-match", ReportedLabels: map[string]string{"team": "payments", "tier": "backend"}},
+	}
+	selector := map[string]string{"team": "payments", "tier": "backend"}
+	matched := membersMatchingLabels(members, selector)
+	if len(matched) != 2 || matched[0].InstanceUID != "managed-match" || matched[1].InstanceUID != "reported-match" {
+		t.Fatalf("matched=%v, want managed-match and reported-match", matched)
+	}
+	if all := membersMatchingLabels(members, nil); len(all) != len(members) {
+		t.Fatalf("empty selector returned %d members, want %d", len(all), len(members))
+	}
+}
+
+func TestParseOptionalLabelSelector(t *testing.T) {
+	selector, err := parseOptionalLabelSelector("team=payments, tier=backend")
+	if err != nil || selector["team"] != "payments" || selector["tier"] != "backend" {
+		t.Fatalf("selector=%v error=%v", selector, err)
+	}
+	if _, err := parseOptionalLabelSelector("team=payments, team=platform"); err == nil {
+		t.Fatal("duplicate label selector was accepted")
+	}
+}
+
 func TestPreviewGroupConfigurationSkipsCurrentButAllowsOlderVersion(t *testing.T) {
 	ctx := context.Background()
 	store := memory.NewAssignmentStore()
