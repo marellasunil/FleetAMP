@@ -15,6 +15,7 @@ const (
 	GroupDeploymentRejected        GroupDeploymentRequestStatus = "rejected"
 	GroupDeploymentFailed          GroupDeploymentRequestStatus = "failed"
 	GroupDeploymentExpired         GroupDeploymentRequestStatus = "expired"
+	GroupDeploymentCancelled       GroupDeploymentRequestStatus = "cancelled"
 )
 
 type GroupDeploymentTarget struct {
@@ -40,6 +41,8 @@ type GroupDeploymentRequest struct {
 	BaseConfigurationHash string                       `json:"base_configuration_hash,omitempty"`
 	Targets               []GroupDeploymentTarget      `json:"targets"`
 	RequestedBy           string                       `json:"requested_by"`
+	AssignedReviewer      string                       `json:"assigned_reviewer"`
+	ChangeReason          string                       `json:"change_reason"`
 	ReviewedBy            string                       `json:"reviewed_by,omitempty"`
 	ReviewComment         string                       `json:"review_comment,omitempty"`
 	ReviewedAt            *time.Time                   `json:"reviewed_at,omitempty"`
@@ -49,7 +52,7 @@ type GroupDeploymentRequest struct {
 	CreatedAt             time.Time                    `json:"created_at"`
 }
 
-func NewGroupDeploymentRequest(groupID, groupName string, selector map[string]string, configuration *Configuration, targets []GroupDeploymentTarget, requestedBy string) (*GroupDeploymentRequest, error) {
+func NewGroupDeploymentRequest(groupID, groupName string, selector map[string]string, configuration *Configuration, targets []GroupDeploymentTarget, requestedBy, assignedReviewer, changeReason string) (*GroupDeploymentRequest, error) {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
 		return nil, err
@@ -63,7 +66,8 @@ func NewGroupDeploymentRequest(groupID, groupName string, selector map[string]st
 		GroupSelector: selectorCopy, ConfigurationID: configuration.ID,
 		ConfigurationName: configuration.Name, ConfigurationVersion: configuration.Version,
 		ConfigurationHash: configuration.Hash, Targets: append([]GroupDeploymentTarget(nil), targets...),
-		RequestedBy: requestedBy, Status: GroupDeploymentPendingApproval, CreatedAt: time.Now().UTC(),
+		RequestedBy: requestedBy, AssignedReviewer: assignedReviewer, ChangeReason: changeReason,
+		Status: GroupDeploymentPendingApproval, CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(30 * 24 * time.Hour),
 	}, nil
 }
