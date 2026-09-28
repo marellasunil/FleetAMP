@@ -119,9 +119,11 @@ const (
 // The section-policy feature can extend this map without relying on UI state.
 func requiredPermission(r *http.Request) permission {
 	if r.URL.Path == "/settings" || strings.HasPrefix(r.URL.Path, "/settings/") ||
-		r.URL.Path == "/approvals" || strings.HasPrefix(r.URL.Path, "/approvals/") ||
 		r.URL.Path == "/audit-log" || strings.HasPrefix(r.URL.Path, "/api/v1/audit-events") {
 		return permissionAdmin
+	}
+	if r.URL.Path == "/approvals" || strings.HasPrefix(r.URL.Path, "/approvals/") {
+		return permissionApprove
 	}
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/configurations" {
 		// Raw complete-document creation bypasses per-section baselines, so it
@@ -156,7 +158,7 @@ func requiredPermission(r *http.Request) permission {
 			return permissionAdmin
 		}
 		switch strings.TrimSpace(r.FormValue("action")) {
-		case "request_deployment", "create_configuration":
+		case "request_deployment", "create_configuration", "cancel_deployment":
 			return permissionEdit
 		case "approve_deployment", "reject_deployment":
 			return permissionApprove
@@ -178,7 +180,10 @@ func roleAllows(principalRole role, required permission) bool {
 	case roleOperator:
 		return required == permissionRead || required == permissionEdit
 	case roleGroupOwner:
-		return required == permissionRead || required == permissionEdit
+		// Approval handlers additionally require ownership and an exact assigned-
+		// reviewer match. Allowing the route here lets an Admin delegate review
+		// to a Group Owner without granting broad approval authority.
+		return required == permissionRead || required == permissionEdit || required == permissionApprove
 	case roleViewer:
 		return required == permissionRead
 	default:
@@ -222,6 +227,7 @@ func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, a
 
 func groupOwnerRoute(path string) bool {
 	return path == "/groups" || strings.HasPrefix(path, "/groups/") ||
+		path == "/approvals" || strings.HasPrefix(path, "/approvals/") ||
 		(strings.HasPrefix(path, "/agents/") && strings.HasSuffix(path, "/delete")) ||
 		path == "/api/v1/groups" || strings.HasPrefix(path, "/api/v1/groups/") ||
 		path == "/api/v1/configurations/sections/compose" ||
