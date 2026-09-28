@@ -17,6 +17,7 @@ type Event struct {
 	HTTPMethod   string    `json:"http_method"`
 	Path         string    `json:"path"`
 	StatusCode   int       `json:"status_code"`
+	Details      string    `json:"details,omitempty"`
 }
 
 type Filter struct {
