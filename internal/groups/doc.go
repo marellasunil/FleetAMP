@@ -1,2 +1,2 @@
-// Package groups manages controlled fleet group identity and dynamic membership.
+// Package groups manages flexible, controlled fleet ownership identity and dynamic membership.
 package groups

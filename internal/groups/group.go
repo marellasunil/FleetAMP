@@ -1,8 +1,8 @@
-// FleetAMP dynamic group domain model.
+// FleetAMP dynamic ownership-group domain model.
 //
-// Groups target managed agents through exact-match targeting metadata.
-// Reported agent attributes participate in targeting, while FleetAMP-owned
-// labels override reported values with the same key. Membership is dynamic.
+// Groups target managed agents through flexible exact-match identity metadata.
+// Reported group fields participate in targeting, while FleetAMP-owned group
+// fields override reported values with the same key. Membership is dynamic.
 package groups
 
 import (
