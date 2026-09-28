@@ -162,7 +162,7 @@ func auditMiddleware(auth *authManager, store storage.AuditStore, next http.Hand
 
 func deploymentAuditDetails(r *http.Request) string {
 	action := strings.TrimSpace(r.FormValue("action"))
-	if action != "request_deployment" && action != "approve_deployment" && action != "reject_deployment" && action != "cancel_deployment" {
+	if action != "request_deployment" && action != "approve_deployment" && action != "reject_deployment" && action != "send_back_deployment" && action != "cancel_deployment" {
 		return ""
 	}
 	parts := make([]string, 0, 3)
@@ -226,7 +226,7 @@ func describeAuditAction(r *http.Request) (string, string, string) {
 		return "user." + action, "user", firstNonEmpty(r.FormValue("username"), resourceID)
 	}
 	if strings.HasPrefix(r.URL.Path, "/groups/") && action != "" {
-		if action == "request_deployment" || action == "approve_deployment" || action == "reject_deployment" || action == "cancel_deployment" {
+		if action == "request_deployment" || action == "approve_deployment" || action == "reject_deployment" || action == "send_back_deployment" || action == "cancel_deployment" {
 			return "deployment." + action, "group", resourceID
 		}
 		if action == "create_configuration" {
