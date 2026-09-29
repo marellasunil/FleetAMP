@@ -39,6 +39,7 @@ type usersPageData struct {
 	Page        string
 	CurrentUser string
 	Users       []userSummary
+	Owners      []userSummary
 	Groups      []*groups.Group
 	Message     string
 	Error       string
@@ -68,6 +69,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <title>Users · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `
 .userforms{display:grid;gap:8px}.useractions{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
 .useractions label{display:grid;gap:5px}.compact{min-width:125px}
+.owner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}.owner-card{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:13px;border:1px solid #253a55;border-radius:9px;background:#0b1727}.owner-card .chips{justify-content:flex-end}
 </style></head><body><div class="shell">` + sideNav + `<main class="main">
 <header class="top"><div><div class="crumb">FleetAMP / Settings / Users</div>
 <div class="pagetitle">Users, groups and roles</div>
@@ -92,6 +94,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <label>Confirm password<input class="input" type="password" name="confirm_password" required minlength="16" autocomplete="new-password"></label>
 <button class="btn primary" type="submit">Create user</button>
 </form></div></section>
+<section class="card" id="group-owners" style="margin-bottom:16px"><div class="cardhead"><div><div class="cardtitle">Group owners</div><div class="cardsub">Ownership is assigned from each user’s role and group membership</div></div><span class="badge off">{{len .Owners}} owner(s)</span></div><div class="cardbody">{{if .Owners}}<div class="owner-grid">{{range .Owners}}<div class="owner-card"><div><strong>{{.Username}}</strong>{{if .Email}}<div class="tiny">{{.Email}}</div>{{end}}</div><div class="chips">{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a>{{else}}<span class="tiny">No group assigned</span>{{end}}</div></div>{{end}}</div>{{else}}<div class="empty">No Group Owners configured. Set a user’s role to Group owner and assign one or more groups below.</div>{{end}}<p class="tiny" style="margin-top:14px">To add or remove an owner, update that user’s role and group access in Managed users. FleetAMP keeps group ownership synchronized automatically.</p></div></section>
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Managed users</div>
 <div class="cardsub">{{len .Users}} local FleetAMP user(s)</div></div></div>
 {{if .Users}}<div style="overflow:auto"><table><thead><tr>
@@ -536,6 +539,9 @@ func (a *authManager) renderUsers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		view.Users = append(view.Users, summary)
+		if user.Role == string(roleGroupOwner) {
+			view.Owners = append(view.Owners, summary)
+		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := usersPage.Execute(w, view); err != nil {

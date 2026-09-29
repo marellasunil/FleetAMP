@@ -85,6 +85,8 @@ type groupDetailView struct {
 	RequestUpdated       string
 	Error                string
 	CanAdminister        bool
+	CanManage            bool
+	ShowEdit             bool
 	OwnersText           string
 	EditorSections       []configurationSectionView
 	EditorBaseline       string
@@ -194,6 +196,11 @@ func canAccessGroup(auth *authManager, r *http.Request, group *groups.Group) boo
 	username := currentUsername(auth, r)
 	return userAssignedToGroup(r.Context(), auth, username, group.ID) ||
 		(currentRole(auth, r) == roleGroupOwner && isGroupOwner(group, username))
+}
+
+func canManageGroup(auth *authManager, r *http.Request, group *groups.Group) bool {
+	principalRole := currentRole(auth, r)
+	return principalRole == roleAdmin || (principalRole == roleGroupOwner && isGroupOwner(group, currentUsername(auth, r)))
 }
 
 func groupsVisibleToUser(ctx context.Context, auth *authManager, username string, principalRole role, all []*groups.Group) []*groups.Group {
@@ -996,6 +1003,10 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		if r.Method == http.MethodPost {
 			action := strings.TrimSpace(r.FormValue("action"))
+			if (action == "update" || action == "delete" || action == "disable" || action == "enable") && !canManageGroup(auth, r, group) {
+				http.Error(w, "only an Admin or assigned Group Owner can manage this group", http.StatusForbidden)
+				return
+			}
 			if action == "approve_deployment" || action == "reject_deployment" || action == "send_back_deployment" || action == "cancel_deployment" {
 				expireApprovalRequests(r.Context(), requestStore, groupStore, notifier)
 			}
@@ -1489,6 +1500,8 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			Page: "groups", Group: group, Members: members, Configurations: available,
 			Requests: requests, DeploymentHistory: deploymentHistory, DriftSummary: driftSummary,
 			CanAdminister:      currentRole(auth, r) == roleAdmin,
+			CanManage:          canManageGroup(auth, r, group),
+			ShowEdit:           r.URL.Query().Get("edit") == "1",
 			OwnersText:         strings.Join(group.Owners, ", "),
 			ConfigurationSaved: r.URL.Query().Get("configuration_saved"),
 			RequestCreated:     r.URL.Query().Get("request_created"),
