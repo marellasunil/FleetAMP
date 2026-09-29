@@ -33,6 +33,21 @@ func TestGroupDetailUsesOverflowManagementAndSummarySelector(t *testing.T) {
 	}
 }
 
+func TestGroupsPageProvidesSafeCardActions(t *testing.T) {
+	for _, expected := range []string{
+		`aria-label="Actions for {{.Group.Name}}"`,
+		`/groups/{{.Group.ID}}?edit=1#edit-group`,
+		`name="action" value="{{if .Group.Enabled}}disable{{else}}enable{{end}}"`,
+		`Deletion blocked: {{.MemberCount}} Collector(s) still belong to this group`,
+		`including {{.ActiveMemberCount}} active`,
+		`Delete this empty ownership group?`,
+	} {
+		if !strings.Contains(groupsHTML, expected) {
+			t.Fatalf("groups page is missing %q", expected)
+		}
+	}
+}
+
 func TestGroupMoveAuditDetailsPreserveDeploymentContext(t *testing.T) {
 	request := httptest.NewRequest("POST", "/agents/collector-1/group", strings.NewReader(url.Values{
 		"audit_previous_group": {"Payments NL Dev"},

@@ -45,9 +45,11 @@ type groupSelectorPreviewResponse struct {
 }
 
 type groupListItem struct {
-	Group       *groups.Group
-	MemberCount int
-	Drifted     int
+	Group             *groups.Group
+	MemberCount       int
+	ActiveMemberCount int
+	Drifted           int
+	CanManage         bool
 }
 
 type groupsView struct {
@@ -1012,7 +1014,10 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				internalServerError(w, driftErr)
 				return
 			}
-			view.Items = append(view.Items, groupListItem{Group: group, MemberCount: len(members), Drifted: drift.Drifted})
+			view.Items = append(view.Items, groupListItem{
+				Group: group, MemberCount: len(members), ActiveMemberCount: activeGroupMemberCount(members),
+				Drifted: drift.Drifted, CanManage: canManageGroup(auth, r, group),
+			})
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = groupsPage.Execute(w, view)
