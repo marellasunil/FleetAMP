@@ -49,9 +49,11 @@ type composeSectionsResponse struct {
 }
 
 const sectionEditorCSS = `
-.section-tabs{display:flex;gap:7px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:10px}
-.section-tab{border:1px solid #2b405e;background:#0c1726;color:var(--muted);border-radius:8px;padding:9px 12px;cursor:pointer}
-.section-tab.active{color:var(--text);border-color:var(--blue);background:#17294a}
+.section-tabs{display:flex;gap:6px;overflow-x:auto;padding:6px;background:#091523;border:1px solid #243750;border-radius:12px;scrollbar-width:thin}
+.section-tab{position:relative;flex:0 0 auto;border:0;background:transparent;color:#91a2bb;border-radius:8px;padding:10px 13px;cursor:pointer;font-weight:650;transition:background .16s ease,color .16s ease,box-shadow .16s ease}
+.section-tab:hover{color:var(--text);background:#12233a}
+.section-tab.active{color:#f4f7ff;background:linear-gradient(135deg,#294b91,#3e61ad);box-shadow:0 5px 16px #050b1566}
+.section-tab.active:after{content:"";position:absolute;left:30%;right:30%;bottom:3px;height:2px;border-radius:9px;background:#9db4ff}
 .section-panel{display:none;padding-top:14px}.section-panel.active{display:block}
 .section-heading{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:9px}
 .section-editor{width:100%;min-height:330px;resize:vertical;background:#07111e;border:1px solid #29405f;border-radius:8px;padding:13px;color:#d8e5ff;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
