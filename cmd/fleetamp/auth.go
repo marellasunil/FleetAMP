@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/marellasunil/FleetAMP/internal/storage"
 	sqlitestore "github.com/marellasunil/FleetAMP/internal/storage/sqlite"
 	"golang.org/x/crypto/argon2"
 )
@@ -49,6 +50,9 @@ type userStore interface {
 	UpdateRole(context.Context, string, string) error
 	SetEnabled(context.Context, string, bool) error
 	UpdateEmail(context.Context, string, string) error
+	UpdateGroups(context.Context, string, []string) error
+	UpdateTimezone(context.Context, string, string) error
+	RecordLogin(context.Context, string, time.Time) error
 }
 type authSession struct {
 	Username string
@@ -58,6 +62,7 @@ type authSession struct {
 
 type authManager struct {
 	store            userStore
+	groupStore       storage.GroupStore
 	pepper           []byte
 	bootstrapDigest  [sha256.Size]byte
 	bootstrapExpires time.Time
@@ -463,7 +468,7 @@ const authPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 .authform .input{width:100%}.autherror{border:1px solid #70404a;background:#351923;color:#ffabb5;padding:11px;border-radius:8px}
 .authhelp{font-size:11px;color:var(--muted);line-height:1.6}</style></head>
 <body><main class="authshell"><section class="card authcard"><div class="authbrand">
-<div class="brandmark" style="margin:auto">∿</div><h1>FleetAMP</h1>
+<img class="brandmark" src="/assets/fleetamp-logo.svg" alt="FleetAMP" style="margin:auto"><h1>FleetAMP</h1>
 <div class="subtitle">{{if .Setup}}Secure administrator setup{{else}}Control-plane login{{end}}</div></div>
 {{if .Message}}<div class="autherror">{{.Message}}</div>{{end}}
 <form class="authform" method="post" action="{{if .Setup}}/setup{{else}}/login{{end}}">
@@ -559,13 +564,17 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 		a.renderAuthPage(w, authPageData{Title: "Sign in", Message: "Invalid username or password."})
 		return
 	}
-	token, err := a.createSessionForRole(strings.TrimSpace(r.FormValue("username")), principalRole)
+	username := strings.TrimSpace(r.FormValue("username"))
+	if err := a.store.RecordLogin(r.Context(), username, a.now().UTC()); err != nil {
+		slog.Warn("record login time", "component", "auth", "username", username, "error", err)
+	}
+	token, err := a.createSessionForRole(username, principalRole)
 	if err != nil {
 		internalServerError(w, err)
 		return
 	}
 	a.setSessionCookie(w, token)
-	slog.Info("administrator signed in", "component", "auth", "event", "login_succeeded", "username", strings.TrimSpace(r.FormValue("username")))
+	slog.Info("user signed in", "component", "auth", "event", "login_succeeded", "username", username)
 	if principalRole == roleGroupOwner {
 		http.Redirect(w, r, "/groups", http.StatusSeeOther)
 		return

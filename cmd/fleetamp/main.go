@@ -105,6 +105,7 @@ func main() {
 	assignmentStore := database.Assignments()
 	deploymentStore := database.Deployments()
 	groupStore := database.Groups()
+	auth.groupStore = groupStore
 	groupRequestStore := database.GroupDeploymentRequests()
 	sectionPolicyStore := database.SectionPolicies()
 	driftPolicyStore := database.DriftPolicy()
@@ -289,6 +290,24 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			internalServerError(w, err)
 			return
 		}
+		if currentRole(auth, r) != roleAdmin {
+			allGroups, groupErr := groupStore.List(r.Context())
+			if groupErr != nil {
+				internalServerError(w, groupErr)
+				return
+			}
+			visibleGroups := groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), allGroups)
+			filtered := make([]*agents.ManagedAgent, 0, len(agentsList))
+			for _, agent := range agentsList {
+				for _, group := range visibleGroups {
+					if groups.MatchesIdentity(group, agent) {
+						filtered = append(filtered, agent)
+						break
+					}
+				}
+			}
+			agentsList = filtered
+		}
 		writeJSON(w, http.StatusOK, agentsList)
 	})
 
@@ -311,6 +330,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		}
 		selectedGroup := r.URL.Query().Get("group")
 		allGroups, _ := groupStore.List(r.Context())
+		allGroups = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), allGroups)
 		var selected *groups.Group
 		if selectedGroup != "" {
 			for _, group := range allGroups {
@@ -322,6 +342,18 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		}
 		view := agentListView{Page: "fleet", StatusFilter: statusFilter, Groups: allGroups, SelectedGroup: selectedGroup, Items: make([]agentListItem, 0, len(agentsList))}
 		for _, agent := range agentsList {
+			if currentRole(auth, r) != roleAdmin {
+				visible := false
+				for _, group := range allGroups {
+					if groups.MatchesIdentity(group, agent) {
+						visible = true
+						break
+					}
+				}
+				if !visible {
+					continue
+				}
+			}
 			if selected != nil && !groups.Matches(selected, agent) {
 				continue
 			}
@@ -425,13 +457,18 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		}
 		view.Deployments, _ = deploymentStore.ListByAgent(r.Context(), uid, 10)
 		if allGroups, groupErr := groupStore.List(r.Context()); groupErr == nil {
+			allGroups = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), allGroups)
 			for _, group := range allGroups {
-				if group.Enabled {
+				if group.Enabled && currentRole(auth, r) == roleAdmin {
 					view.AllGroups = append(view.AllGroups, group)
 				}
 				if groups.Matches(group, agent) {
 					view.Groups = append(view.Groups, group)
 				}
+			}
+			if currentRole(auth, r) != roleAdmin && len(view.Groups) == 0 {
+				http.Error(w, "forbidden: collector is outside your assigned groups", http.StatusForbidden)
+				return
 			}
 		}
 		view.DeploymentSummary = summarizeDeployments(view.Deployments)
@@ -950,7 +987,7 @@ body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;margin:0;
 <section class="card"><h2>Ownership identity</h2><p class="muted">Flexible managed key/value fields used for exclusive group membership. FleetAMP-managed values override Collector-reported values.</p>{{if .GroupIdentity}}<div class="chips">{{range $k,$v := .GroupIdentity}}<span class="chip"><code>{{$k}}={{$v}}</code></span>{{end}}</div>{{else}}<p class="muted">No ownership identity reported or assigned.</p>{{end}}{{if .UnknownGroupFields}}<div class="bad" style="margin-top:12px"><strong>Malformed group field(s):</strong> {{range $k,$v := .UnknownGroupFields}}<code>{{$k}}={{$v}}</code> {{end}}</div>{{end}}</section>
 <section class="card"><h2>Labels</h2><p class="muted">Optional metadata. Maximum 5 FleetAMP-managed labels per agent. Collector-reported labels and FleetAMP-managed labels are combined; FleetAMP values override duplicate keys.</p>{{if .EffectiveLabels}}<div class="chips">{{range $k,$v := .EffectiveLabels}}<span class="chip"><code>{{$k}}={{$v}}</code></span>{{end}}</div>{{else}}<p class="muted">No labels available.</p>{{end}}<form method="post" action="/agents/{{.Agent.InstanceUID}}/label" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap"><input name="key" placeholder="label key (team)" required style="padding:8px;background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:7px"><input name="value" placeholder="value (payments)" required style="padding:8px;background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:7px"><button type="submit" style="padding:8px 12px">+ Add label</button></form></section>
 <section class="card"><h2>Reported OTel attributes</h2><p class="muted">Raw AgentDescription metadata reported by the Collector/OpAMP.</p>{{if .Agent.Attributes}}<div class="chips">{{range $k,$v := .Agent.Attributes}}<span class="chip"><code>{{$k}}={{$v}}</code></span>{{end}}</div>{{else}}<p class="muted">No reported attributes available.</p>{{end}}</section>
-<section class="card"><h2>Groups</h2>{{if .Groups}}<div class="chips">{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a>{{end}}</div>{{else}}<p class="muted">This agent does not match any group.</p>{{end}}{{if .AllGroups}}<form method="post" action="/agents/{{.Agent.InstanceUID}}/group" style="margin-top:14px"><label>Add to group: <select name="group_id" required style="padding:8px;background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:7px"><option value="">Select group</option>{{range .AllGroups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><button type="submit" style="margin-left:8px;padding:8px 12px">Assign group</button></form><p class="muted">This assigns the controlled Application, Environment and Place values to this Collector in FleetAMP.</p>{{end}}</section>
+<section class="card"><h2>Ownership group</h2>{{if .Groups}}<div class="chips">{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a>{{end}}</div>{{else}}<p class="muted">This agent does not match an ownership group.</p>{{end}}{{if .AllGroups}}<form method="post" action="/agents/{{.Agent.InstanceUID}}/group" style="margin-top:14px"><label>Assign group by name: <select name="group_id" required style="padding:8px;background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:7px"><option value="">Select group</option>{{range .AllGroups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><button type="submit" style="margin-left:8px;padding:8px 12px">Assign group</button></form><p class="muted">FleetAMP displays the group name while storing its immutable backend group ID.</p>{{end}}</section>
 <section class="card"><h2>Deployment status</h2>{{if .DeploymentSummary.LastDeployment}}<div class="kv"><span>Current deployed</span><span>{{if .DeploymentSummary.CurrentDeployedVersion}}v{{.DeploymentSummary.CurrentDeployedVersion}}{{else}}Unknown{{end}}</span><span>Last deployment</span><span>{{.DeploymentSummary.LastDeployment.ConfigurationName}} v{{.DeploymentSummary.LastDeployment.ConfigurationVersion}}</span><span>Status</span><span class="{{if eq .DeploymentSummary.LastDeployment.Status "applied"}}ok{{else if eq .DeploymentSummary.LastDeployment.Status "failed"}}bad{{else}}warn{{end}}">{{.DeploymentSummary.LastDeployment.Status}}</span><span>Duration</span><span>{{if .DeploymentSummary.LastDeploymentDuration}}{{.DeploymentSummary.LastDeploymentDuration}}{{else}}—{{end}}</span>{{if .DeploymentSummary.LastSuccessful}}<span>Last successful</span><span>{{.DeploymentSummary.LastSuccessful.ConfigurationName}} v{{.DeploymentSummary.LastSuccessful.ConfigurationVersion}} · {{.DeploymentSummary.LastSuccessful.AppliedAt}}</span>{{end}}</div>{{else}}<p class="muted">No FleetAMP deployment history has been recorded yet.</p>{{end}}</section>
 <section class="card"><h2>Latest assignment</h2>{{if .Assignment}}<div class="kv"><span>Status</span><span>{{.Assignment.Status}}</span><span>Config ID</span><span><code>{{.Assignment.ConfigurationID}}</code></span><span>Hash</span><span><code>{{.Assignment.ConfigurationHash}}</code></span><span>Updated</span><span>{{.Assignment.UpdatedAt}}</span>{{if .Assignment.Error}}<span>Error</span><span class="bad">{{.Assignment.Error}}</span>{{end}}</div>{{else}}<p class="muted">No FleetAMP configuration has been assigned.</p>{{end}}</section>
 <section class="card"><h2>Configuration drift</h2><div class="kv"><span>Status</span><span class="{{if .Drift.InSync}}ok{{else if eq .Drift.Status "drift"}}bad{{else}}warn{{end}}">{{.Drift.Status}}</span>{{if .Drift.Reason}}<span>Reason</span><span>{{.Drift.Reason}}</span>{{end}}</div>{{if .Drift.Differences}}<div style="margin-top:12px">{{range .Drift.Differences}}<div style="margin:8px 0;padding:10px;background:#0b1220;border-radius:8px"><code>{{.Path}}</code> <span class="warn">{{.Kind}}</span><br><span class="muted">Desired:</span> <code>{{printf "%v" .Desired}}</code><br><span class="muted">Effective:</span> <code>{{printf "%v" .Effective}}</code></div>{{end}}</div>{{end}}</section></div>

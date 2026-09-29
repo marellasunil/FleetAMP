@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/fleetamp-logo.svg" width="88" alt="FleetAMP logo"></p>
+
 # FleetAMP
 
 FleetAMP is a lightweight, self-hosted, open-source fleet management control plane for telemetry agents, with OpenTelemetry Collector and OpAMP as the first implementation target.
@@ -92,7 +94,9 @@ FleetAMP deliberately separates reported metadata from management metadata:
 - **Ownership identity** — managed or approved `key=value` metadata used by an exact-match group selector; a Collector can belong to only one active ownership group
 - **Labels** — optional FleetAMP/operator metadata used to narrow a deployment inside an ownership group, such as `role=agent` or `release-ring=canary`
 
-The Groups UI provides an **Add condition** control for flexible selectors. `application`, `environment`, and `place` are suggested starting keys rather than mandatory fields. FleetAMP rejects active selectors whose rules could overlap. Future CMDB/CSDM and platform imports can populate approved ownership metadata without overwriting raw reported attributes.
+The **Groups & Labels** UI provides an **Add condition** control for flexible selectors. Groups are built from centrally managed ownership labels: `application`, `environment`, and `place` are suggested starting keys rather than mandatory fields. FleetAMP rejects active selectors whose rules could overlap. Optional deployment labels narrow a rollout inside its ownership group. Future CMDB/CSDM and platform imports can populate approved ownership metadata without overwriting raw reported attributes.
+
+New groups receive a readable immutable backend ID derived from their display name—for example, **Payment API NL Prod** becomes `payment-api-nl-prod`. Existing group IDs remain unchanged during upgrades so configuration, approval, deployment, and audit relationships are not broken.
 
 ## Provider model
 

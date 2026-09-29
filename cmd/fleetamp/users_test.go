@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marellasunil/FleetAMP/internal/groups"
 	sqlitestore "github.com/marellasunil/FleetAMP/internal/storage/sqlite"
 )
 
@@ -18,6 +19,17 @@ func newUserTestManager(t *testing.T) (*authManager, *sqlitestore.Database) {
 		t.Fatal(err)
 	}
 	manager := testAuthManager(db.Authentication(), strings.Repeat("p", 32), "bootstrap")
+	manager.groupStore = db.Groups()
+	group, err := groups.New("Test group", "", map[string]string{"team": "test"})
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	group.ID = "test-group"
+	if err := db.Groups().Create(context.Background(), group); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
 	if err := manager.createAdministrator(context.Background(), "admin",
 		"a-strong-admin-password", "bootstrap"); err != nil {
 		db.Close()
@@ -30,7 +42,7 @@ func TestCreateUserAuthenticationAndDisable(t *testing.T) {
 	manager, db := newUserTestManager(t)
 	defer db.Close()
 	if err := manager.createUser(context.Background(), "operator-one", "operator@example.com",
-		"a-strong-operator-password", "operator"); err != nil {
+		"a-strong-operator-password", "operator", []string{"test-group"}); err != nil {
 		t.Fatal(err)
 	}
 	principalRole, ok := manager.authenticateRole(context.Background(),
@@ -50,7 +62,7 @@ func TestRoleAndPasswordChangesRevokeSessions(t *testing.T) {
 	manager, db := newUserTestManager(t)
 	defer db.Close()
 	if err := manager.createUser(context.Background(), "viewer-one", "",
-		"a-strong-viewer-password", "viewer"); err != nil {
+		"a-strong-viewer-password", "viewer", []string{"test-group"}); err != nil {
 		t.Fatal(err)
 	}
 	token, err := manager.createSessionForRole("viewer-one", roleViewer)
@@ -129,7 +141,7 @@ func TestUsersPageDoesNotRenderPasswordMaterial(t *testing.T) {
 		t.Fatalf("users page status=%d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, "Users and roles") || !strings.Contains(body, "admin") {
+	if !strings.Contains(body, "Users, groups and roles") || !strings.Contains(body, "admin") {
 		t.Fatal("users page is missing expected identity information")
 	}
 	user, err := db.Authentication().Get(context.Background(), "admin")

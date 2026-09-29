@@ -99,6 +99,33 @@ func (s *memoryAdministratorStore) UpdateEmail(_ context.Context, username, emai
 	return nil
 }
 
+func (s *memoryAdministratorStore) UpdateGroups(_ context.Context, username string, groupIDs []string) error {
+	user, err := s.Get(context.Background(), username)
+	if err != nil {
+		return err
+	}
+	user.GroupIDs = append([]string(nil), groupIDs...)
+	return nil
+}
+
+func (s *memoryAdministratorStore) UpdateTimezone(_ context.Context, username, timezone string) error {
+	user, err := s.Get(context.Background(), username)
+	if err != nil {
+		return err
+	}
+	user.Timezone = timezone
+	return nil
+}
+
+func (s *memoryAdministratorStore) RecordLogin(_ context.Context, username string, at time.Time) error {
+	user, err := s.Get(context.Background(), username)
+	if err != nil {
+		return err
+	}
+	user.LastLoginAt = &at
+	return nil
+}
+
 func testAuthManager(store userStore, pepper, bootstrapToken string) *authManager {
 	return &authManager{
 		store: store, pepper: []byte(pepper), now: time.Now,

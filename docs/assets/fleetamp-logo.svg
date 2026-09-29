@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">FleetAMP</title>
+  <defs>
+    <linearGradient id="g" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#75a7ff"/>
+      <stop offset="1" stop-color="#765ee8"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="#101c2e" stroke="#365b9e" stroke-width="2"/>
+  <path d="M14 39c7 0 7-14 14-14s7 14 14 14 7-14 12-14" fill="none" stroke="url(#g)" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="14" cy="39" r="4" fill="#35d6a1"/>
+  <circle cx="28" cy="25" r="4" fill="#75a7ff"/>
+  <circle cx="42" cy="39" r="4" fill="#9878ff"/>
+  <circle cx="54" cy="25" r="4" fill="#35d6a1"/>
+</svg>
