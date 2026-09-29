@@ -129,6 +129,22 @@ func isGroupOwner(group *groups.Group, username string) bool {
 	return false
 }
 
+func userAssignedToGroup(ctx context.Context, auth *authManager, username, groupID string) bool {
+	if auth == nil || auth.store == nil {
+		return false
+	}
+	user, err := auth.store.Get(ctx, username)
+	if err != nil {
+		return false
+	}
+	for _, assigned := range user.GroupIDs {
+		if assigned == groupID {
+			return true
+		}
+	}
+	return false
+}
+
 func eligibleDeploymentReviewers(ctx context.Context, auth *authManager, group *groups.Group, requester string, requesterRole role) ([]reviewerOption, error) {
 	users, err := auth.store.List(ctx)
 	if err != nil {
@@ -141,7 +157,7 @@ func eligibleDeploymentReviewers(ctx context.Context, auth *authManager, group *
 		}
 		switch requesterRole {
 		case roleAdmin:
-			if user.Role == string(roleAdmin) || (user.Role == string(roleGroupOwner) && isGroupOwner(group, user.Username)) {
+			if user.Role == string(roleAdmin) || (user.Role == string(roleGroupOwner) && (userAssignedToGroup(ctx, auth, user.Username, group.ID) || isGroupOwner(group, user.Username))) {
 				result = append(result, reviewerOption{Username: user.Username, Role: user.Role})
 			}
 		case roleGroupOwner:
@@ -172,10 +188,25 @@ func validateAssignedReviewer(ctx context.Context, auth *authManager, group *gro
 }
 
 func canAccessGroup(auth *authManager, r *http.Request, group *groups.Group) bool {
-	if currentRole(auth, r) != roleGroupOwner {
+	if currentRole(auth, r) == roleAdmin {
 		return true
 	}
-	return isGroupOwner(group, currentUsername(auth, r))
+	username := currentUsername(auth, r)
+	return userAssignedToGroup(r.Context(), auth, username, group.ID) ||
+		(currentRole(auth, r) == roleGroupOwner && isGroupOwner(group, username))
+}
+
+func groupsVisibleToUser(ctx context.Context, auth *authManager, username string, principalRole role, all []*groups.Group) []*groups.Group {
+	if principalRole == roleAdmin {
+		return all
+	}
+	result := make([]*groups.Group, 0, len(all))
+	for _, group := range all {
+		if userAssignedToGroup(ctx, auth, username, group.ID) || (principalRole == roleGroupOwner && isGroupOwner(group, username)) {
+			result = append(result, group)
+		}
+	}
+	return result
 }
 
 func requireGroupAccess(w http.ResponseWriter, r *http.Request, auth *authManager, group *groups.Group) bool {
@@ -587,16 +618,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				internalServerError(w, err)
 				return
 			}
-			if currentRole(auth, r) == roleGroupOwner {
-				username := currentUsername(auth, r)
-				filtered := make([]*groups.Group, 0, len(items))
-				for _, item := range items {
-					if isGroupOwner(item, username) {
-						filtered = append(filtered, item)
-					}
-				}
-				items = filtered
-			}
+			items = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), items)
 			writeJSON(w, http.StatusOK, items)
 		case http.MethodPost:
 			var req groupRequest
@@ -750,7 +772,35 @@ func newValidatedGroup(req groupRequest) (*groups.Group, error) {
 	if err := validateGroupName(req.Name); err != nil {
 		return nil, err
 	}
-	return groups.New(req.Name, req.Description, req.Selector)
+	group, err := groups.New(req.Name, req.Description, req.Selector)
+	if err != nil {
+		return nil, err
+	}
+	group.ID = groupIDFromName(req.Name)
+	return group, nil
+}
+
+func groupIDFromName(name string) string {
+	value := strings.ToLower(strings.TrimSpace(name))
+	var result strings.Builder
+	dash := false
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') {
+			result.WriteRune(char)
+			dash = false
+		} else if !dash && result.Len() > 0 {
+			result.WriteByte('-')
+			dash = true
+		}
+	}
+	id := strings.Trim(result.String(), "-")
+	if len(id) > 80 {
+		id = strings.Trim(id[:80], "-")
+	}
+	if id == "" {
+		return "group"
+	}
+	return id
 }
 
 // validateGroupSelector rejects empty keys and values that cannot safely target agents.
@@ -906,16 +956,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			internalServerError(w, err)
 			return
 		}
-		if currentRole(auth, r) == roleGroupOwner {
-			username := currentUsername(auth, r)
-			filtered := make([]*groups.Group, 0, len(groupsList))
-			for _, item := range groupsList {
-				if isGroupOwner(item, username) {
-					filtered = append(filtered, item)
-				}
-			}
-			groupsList = filtered
-		}
+		groupsList = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), groupsList)
 		view := groupsView{Page: "groups", Items: make([]groupListItem, 0, len(groupsList))}
 		for _, group := range groupsList {
 			members, memberErr := membersForGroupIdentity(r.Context(), group, agentStore)

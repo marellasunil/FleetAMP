@@ -62,4 +62,13 @@ func TestNewValidatedGroupKeepsExplicitNameAndFlexibleKeys(t *testing.T) {
 	if group.Name != "Payments EU production" || group.Selector["cloud.region"] != "eu-west-1" {
 		t.Fatalf("unexpected group: %#v", group)
 	}
+	if group.ID != "payments-eu-production" {
+		t.Fatalf("group ID=%q, want payments-eu-production", group.ID)
+	}
+}
+
+func TestGroupIDFromNameIsStableAndURLSafe(t *testing.T) {
+	if got := groupIDFromName("Payment API — NL Prod"); got != "payment-api-nl-prod" {
+		t.Fatalf("groupIDFromName()=%q", got)
+	}
 }

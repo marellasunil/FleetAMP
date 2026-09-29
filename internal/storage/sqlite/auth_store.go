@@ -4,6 +4,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -19,6 +20,9 @@ type User struct {
 	Email             string
 	Role              string
 	Enabled           bool
+	GroupIDs          []string
+	Timezone          string
+	LastLoginAt       *time.Time
 	PasswordSalt      []byte
 	PasswordHash      []byte
 	CreatedAt         time.Time
@@ -86,10 +90,10 @@ func (s *AuthStore) Create(ctx context.Context, user User) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
         INSERT INTO users (
-            username, email, role, enabled, password_salt, password_hash,
-            created_at, password_changed_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, user.Username, user.Email, user.Role, enabled, user.PasswordSalt, user.PasswordHash,
+			username, email, role, enabled, group_ids, timezone, last_login_at,
+			password_salt, password_hash, created_at, password_changed_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, user.Username, user.Email, user.Role, enabled, encodeStringList(user.GroupIDs), normalizedTimezone(user.Timezone), nullableTime(user.LastLoginAt), user.PasswordSalt, user.PasswordHash,
 		user.CreatedAt.Format(time.RFC3339Nano),
 		user.PasswordChangedAt.Format(time.RFC3339Nano),
 		user.UpdatedAt.Format(time.RFC3339Nano))
@@ -97,6 +101,33 @@ func (s *AuthStore) Create(ctx context.Context, user User) error {
 		return fmt.Errorf("create user: %w", err)
 	}
 	return nil
+}
+
+func (s *AuthStore) UpdateGroups(ctx context.Context, username string, groupIDs []string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET group_ids=?,updated_at=? WHERE username=? COLLATE NOCASE`,
+		encodeStringList(groupIDs), time.Now().UTC().Format(time.RFC3339Nano), username)
+	if err != nil {
+		return fmt.Errorf("update user groups: %w", err)
+	}
+	return affectedUser(result)
+}
+
+func (s *AuthStore) UpdateTimezone(ctx context.Context, username, timezone string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET timezone=?,updated_at=? WHERE username=? COLLATE NOCASE`,
+		normalizedTimezone(timezone), time.Now().UTC().Format(time.RFC3339Nano), username)
+	if err != nil {
+		return fmt.Errorf("update user timezone: %w", err)
+	}
+	return affectedUser(result)
+}
+
+func (s *AuthStore) RecordLogin(ctx context.Context, username string, at time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET last_login_at=?,updated_at=? WHERE username=? COLLATE NOCASE`,
+		at.UTC().Format(time.RFC3339Nano), at.UTC().Format(time.RFC3339Nano), username)
+	if err != nil {
+		return fmt.Errorf("record user login: %w", err)
+	}
+	return affectedUser(result)
 }
 
 func (s *AuthStore) UpdateEmail(ctx context.Context, username, email string) error {
@@ -223,22 +254,35 @@ func affectedUser(result sql.Result) error {
 	return nil
 }
 
-const userSelect = `SELECT username, email, role, enabled, password_salt, password_hash,
-    created_at, password_changed_at, updated_at FROM users`
+const userSelect = `SELECT username, email, role, enabled, group_ids, timezone, last_login_at,
+    password_salt, password_hash, created_at, password_changed_at, updated_at FROM users`
 
 type userScanner interface{ Scan(...any) error }
 
 func scanUser(scanner userScanner) (*User, error) {
 	var user User
 	var enabled int
+	var groupIDs, timezone string
+	var lastLoginAt sql.NullString
 	var createdAt, changedAt, updatedAt string
-	if err := scanner.Scan(&user.Username, &user.Email, &user.Role, &enabled,
+	if err := scanner.Scan(&user.Username, &user.Email, &user.Role, &enabled, &groupIDs, &timezone, &lastLoginAt,
 		&user.PasswordSalt, &user.PasswordHash,
 		&createdAt, &changedAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	var err error
 	user.Enabled = enabled != 0
+	user.Timezone = normalizedTimezone(timezone)
+	if err := json.Unmarshal([]byte(groupIDs), &user.GroupIDs); err != nil {
+		return nil, fmt.Errorf("decode user groups: %w", err)
+	}
+	if lastLoginAt.Valid && lastLoginAt.String != "" {
+		parsed, parseErr := time.Parse(time.RFC3339Nano, lastLoginAt.String)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		user.LastLoginAt = &parsed
+	}
 	if user.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
 		return nil, err
 	}
@@ -249,4 +293,23 @@ func scanUser(scanner userScanner) (*User, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+
+func encodeStringList(values []string) string {
+	encoded, _ := json.Marshal(values)
+	return string(encoded)
+}
+
+func normalizedTimezone(value string) string {
+	if value == "" {
+		return "UTC"
+	}
+	return value
+}
+
+func nullableTime(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }

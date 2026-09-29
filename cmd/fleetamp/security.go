@@ -226,7 +226,7 @@ func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, a
 }
 
 func groupOwnerRoute(path string) bool {
-	return path == "/groups" || strings.HasPrefix(path, "/groups/") ||
+	return path == "/account" || path == "/groups" || strings.HasPrefix(path, "/groups/") ||
 		path == "/approvals" || strings.HasPrefix(path, "/approvals/") ||
 		(strings.HasPrefix(path, "/agents/") && strings.HasSuffix(path, "/delete")) ||
 		path == "/api/v1/groups" || strings.HasPrefix(path, "/api/v1/groups/") ||
@@ -254,7 +254,8 @@ func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler
 			return
 		}
 		publicHealth := r.URL.Path == "/health" || r.URL.Path == "/ready"
-		publicAuthentication := r.URL.Path == "/setup" || r.URL.Path == "/login" || r.URL.Path == "/assets/theme.js"
+		publicAuthentication := r.URL.Path == "/setup" || r.URL.Path == "/login" ||
+			r.URL.Path == "/assets/theme.js" || r.URL.Path == "/assets/fleetamp-logo.svg"
 		protected := !publicHealth && !publicAuthentication
 		if protected {
 			if auth != nil && !auth.authorize(w, r, cfg) {

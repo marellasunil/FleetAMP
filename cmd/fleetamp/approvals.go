@@ -144,9 +144,12 @@ func registerApprovalRoutes(mux *http.ServeMux, requestStore storage.GroupDeploy
 		}
 		view := approvalsView{Page: "approvals", Status: status, Items: make([]approvalItem, 0, len(requests))}
 		for _, request := range requests {
+			group, groupErr := groupStore.Get(r.Context(), request.GroupID)
+			if groupErr == nil {
+				request.GroupName = group.Name
+			}
 			if currentRole(auth, r) == roleGroupOwner {
-				group, groupErr := groupStore.Get(r.Context(), request.GroupID)
-				if groupErr != nil || (!isGroupOwner(group, currentUsername(auth, r)) && !strings.EqualFold(request.AssignedReviewer, currentUsername(auth, r))) {
+				if groupErr != nil || (!canAccessGroup(auth, r, group) && !strings.EqualFold(request.AssignedReviewer, currentUsername(auth, r))) {
 					continue
 				}
 			}
@@ -185,6 +188,7 @@ func registerApprovalRoutes(mux *http.ServeMux, requestStore storage.GroupDeploy
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		request.GroupName = group.Name
 		item, err := buildApprovalItem(request, configStore, true, r)
 		if err != nil {
 			internalServerError(w, err)

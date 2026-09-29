@@ -140,7 +140,10 @@ func (d *Database) initialize(ctx context.Context) error {
             username TEXT PRIMARY KEY COLLATE NOCASE,
             email TEXT NOT NULL DEFAULT '',
             role TEXT NOT NULL CHECK (role IN ('admin','operator','group_owner','viewer')),
-            enabled INTEGER NOT NULL DEFAULT 1,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			group_ids TEXT NOT NULL DEFAULT '[]',
+			timezone TEXT NOT NULL DEFAULT 'UTC',
+			last_login_at TEXT,
             password_salt BLOB NOT NULL, password_hash BLOB NOT NULL,
             created_at TEXT NOT NULL, password_changed_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -201,6 +204,9 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureUserEmailColumn(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureUserProfileColumns(ctx); err != nil {
+		return err
+	}
 	if err := d.ensureAuditDetailsColumn(ctx); err != nil {
 		return err
 	}
@@ -208,6 +214,27 @@ func (d *Database) initialize(ctx context.Context) error {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureUserProfileColumns(ctx context.Context) error {
+	columns := []struct{ name, definition string }{
+		{"group_ids", "TEXT NOT NULL DEFAULT '[]'"},
+		{"timezone", "TEXT NOT NULL DEFAULT 'UTC'"},
+		{"last_login_at", "TEXT"},
+	}
+	for _, column := range columns {
+		present, err := sqliteColumnExists(ctx, d.db, "users", column.name)
+		if err != nil {
+			return err
+		}
+		if present {
+			continue
+		}
+		if _, err := d.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN `+column.name+` `+column.definition); err != nil {
+			return fmt.Errorf("add users.%s column: %w", column.name, err)
+		}
+	}
+	return nil
 }
 
 func (d *Database) ensureAuditDetailsColumn(ctx context.Context) error {
