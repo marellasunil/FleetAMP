@@ -69,6 +69,7 @@ type groupDetailView struct {
 	Page                 string
 	Group                *groups.Group
 	Members              []*agents.ManagedAgent
+	ActiveMembers        int
 	Configurations       []*configs.Configuration
 	SelectedConfig       *configs.Configuration
 	SelectedPipeline     *configs.PipelineModel
@@ -298,6 +299,16 @@ func previewGroupMembers(members []*agents.ManagedAgent, enabled bool) ([]groupP
 	return result, eligible
 }
 
+func activeGroupMemberCount(members []*agents.ManagedAgent) int {
+	active := 0
+	for _, agent := range members {
+		if agent.Connected && agent.Status != agents.LifecycleRetired {
+			active++
+		}
+	}
+	return active
+}
+
 // membersMatchingLabels narrows an owned group using exact-match AND
 // semantics. FleetAMP-managed labels override agent-reported labels through
 // EffectiveLabels. An empty selector retains every group member.
@@ -475,6 +486,21 @@ func configurationsForGroup(items []*configs.Configuration, groupID string) []*c
 	return filtered
 }
 
+func groupNamesForAgent(ctx context.Context, store storage.GroupStore, agent *agents.ManagedAgent) []string {
+	all, err := store.List(ctx)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, 1)
+	for _, group := range all {
+		if groups.MatchesIdentity(group, agent) {
+			names = append(names, group.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
 func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
 	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
@@ -488,6 +514,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 			http.NotFound(w, r)
 			return
 		}
+		previousGroups := groupNamesForAgent(r.Context(), groupStore, agent)
 		group, err := groupStore.Get(r.Context(), strings.TrimSpace(r.FormValue("group_id")))
 		if err != nil {
 			http.Error(w, "group not found", http.StatusNotFound)
@@ -504,6 +531,15 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 			internalServerError(w, err)
 			return
 		}
+		if r.Form == nil {
+			_ = r.ParseForm()
+		}
+		previous := "Unassigned"
+		if len(previousGroups) > 0 {
+			previous = strings.Join(previousGroups, ", ")
+		}
+		r.Form.Set("audit_previous_group", previous)
+		r.Form.Set("audit_new_group", group.Name)
 		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
 	})
 	// /agents/{uid}/labels replaces the complete operator-label set submitted by the agent detail form.
@@ -1349,7 +1385,9 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					return
 				}
 				if len(members) > 0 {
-					http.Redirect(w, r, "/groups/"+group.ID+"?error=Cannot+delete+group%3A+unassign+all+agents+from+this+group+first", http.StatusSeeOther)
+					active := activeGroupMemberCount(members)
+					message := fmt.Sprintf("Cannot delete group: %d Collector(s) still belong to this group, including %d active. Reassign or remove them first to prevent orphaned Collectors.", len(members), active)
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(message), http.StatusSeeOther)
 					return
 				}
 				requests, err := requestStore.ListByGroup(r.Context(), group.ID, 1)
@@ -1497,7 +1535,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			editorBaseID = selectedBase.ID
 		}
 		view := groupDetailView{
-			Page: "groups", Group: group, Members: members, Configurations: available,
+			Page: "groups", Group: group, Members: members, ActiveMembers: activeGroupMemberCount(members), Configurations: available,
 			Requests: requests, DeploymentHistory: deploymentHistory, DriftSummary: driftSummary,
 			CanAdminister:      currentRole(auth, r) == roleAdmin,
 			CanManage:          canManageGroup(auth, r, group),
