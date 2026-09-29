@@ -161,6 +161,13 @@ func auditMiddleware(auth *authManager, store storage.AuditStore, next http.Hand
 }
 
 func deploymentAuditDetails(r *http.Request) string {
+	if strings.HasSuffix(r.URL.Path, "/group") {
+		previous := strings.TrimSpace(r.FormValue("audit_previous_group"))
+		next := strings.TrimSpace(r.FormValue("audit_new_group"))
+		if previous != "" || next != "" {
+			return "ownership group moved: " + firstNonEmpty(previous, "Unassigned") + " → " + firstNonEmpty(next, "Unassigned") + " · existing deployment history retained; new group desired state must be evaluated"
+		}
+	}
 	action := strings.TrimSpace(r.FormValue("action"))
 	if action != "request_deployment" && action != "approve_deployment" && action != "reject_deployment" && action != "send_back_deployment" && action != "cancel_deployment" {
 		return ""
