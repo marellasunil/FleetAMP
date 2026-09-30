@@ -51,6 +51,9 @@ type userStore interface {
 	SetEnabled(context.Context, string, bool) error
 	UpdateEmail(context.Context, string, string) error
 	UpdateGroups(context.Context, string, []string) error
+	ListMemberships(context.Context) ([]sqlitestore.GroupMembership, error)
+	ReplaceMemberships(context.Context, string, []sqlitestore.GroupMembership) error
+	ListRBACRoles(context.Context) ([]sqlitestore.RBACRole, error)
 	UpdateTimezone(context.Context, string, string) error
 	RecordLogin(context.Context, string, time.Time) error
 }

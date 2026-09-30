@@ -161,6 +161,31 @@ func userAssignedToGroup(ctx context.Context, auth *authManager, username, group
 	return false
 }
 
+func userHasGroupRole(ctx context.Context, auth *authManager, username, groupID string, roleIDs ...string) bool {
+	if auth == nil || auth.store == nil {
+		return false
+	}
+	allowed := map[string]bool{}
+	for _, roleID := range roleIDs {
+		allowed[roleID] = true
+	}
+	memberships, err := auth.store.ListMemberships(ctx)
+	if err != nil {
+		return false
+	}
+	for _, membership := range memberships {
+		if !strings.EqualFold(membership.Username, username) || membership.GroupID != groupID {
+			continue
+		}
+		for _, roleID := range membership.RoleIDs {
+			if allowed[roleID] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func eligibleDeploymentReviewers(ctx context.Context, auth *authManager, group *groups.Group, requester string, requesterRole role) ([]reviewerOption, error) {
 	users, err := auth.store.List(ctx)
 	if err != nil {
@@ -173,7 +198,7 @@ func eligibleDeploymentReviewers(ctx context.Context, auth *authManager, group *
 		}
 		switch requesterRole {
 		case roleAdmin:
-			if user.Role == string(roleAdmin) || (user.Role == string(roleGroupOwner) && (userAssignedToGroup(ctx, auth, user.Username, group.ID) || isGroupOwner(group, user.Username))) {
+			if user.Role == string(roleAdmin) || userHasGroupRole(ctx, auth, user.Username, group.ID, "group_owner", "deployment_approver") {
 				result = append(result, reviewerOption{Username: user.Username, Role: user.Role})
 			}
 		case roleGroupOwner:
@@ -214,7 +239,7 @@ func canAccessGroup(auth *authManager, r *http.Request, group *groups.Group) boo
 
 func canManageGroup(auth *authManager, r *http.Request, group *groups.Group) bool {
 	principalRole := currentRole(auth, r)
-	return principalRole == roleAdmin || (principalRole == roleGroupOwner && isGroupOwner(group, currentUsername(auth, r)))
+	return principalRole == roleAdmin || userHasGroupRole(r.Context(), auth, currentUsername(auth, r), group.ID, "group_owner")
 }
 
 func groupsVisibleToUser(ctx context.Context, auth *authManager, username string, principalRole role, all []*groups.Group) []*groups.Group {
@@ -1099,6 +1124,22 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		if r.Method == http.MethodPost {
 			action := strings.TrimSpace(r.FormValue("action"))
+			if currentRole(auth, r) != roleAdmin {
+				username := currentUsername(auth, r)
+				allowed := true
+				switch action {
+				case "create_configuration", "request_deployment":
+					allowed = userHasGroupRole(r.Context(), auth, username, group.ID, "group_owner", "configuration_editor")
+				case "approve_deployment", "reject_deployment", "send_back_deployment":
+					allowed = userHasGroupRole(r.Context(), auth, username, group.ID, "group_owner", "deployment_approver")
+				case "cancel_deployment":
+					allowed = userHasGroupRole(r.Context(), auth, username, group.ID, "group_owner", "configuration_editor", "deployment_operator")
+				}
+				if !allowed {
+					http.Error(w, "your group role does not allow this action", http.StatusForbidden)
+					return
+				}
+			}
 			if (action == "update" || action == "delete" || action == "disable" || action == "enable") && !canManageGroup(auth, r, group) {
 				http.Error(w, "only an Admin or assigned Group Owner can manage this group", http.StatusForbidden)
 				return

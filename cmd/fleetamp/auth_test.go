@@ -15,8 +15,9 @@ import (
 )
 
 type memoryAdministratorStore struct {
-	mu   sync.Mutex
-	user *sqlitestore.User
+	mu          sync.Mutex
+	user        *sqlitestore.User
+	memberships []sqlitestore.GroupMembership
 }
 
 func (s *memoryAdministratorStore) Exists(context.Context) (bool, error) {
@@ -106,6 +107,29 @@ func (s *memoryAdministratorStore) UpdateGroups(_ context.Context, username stri
 	}
 	user.GroupIDs = append([]string(nil), groupIDs...)
 	return nil
+}
+
+func (s *memoryAdministratorStore) ListMemberships(context.Context) ([]sqlitestore.GroupMembership, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]sqlitestore.GroupMembership(nil), s.memberships...), nil
+}
+
+func (s *memoryAdministratorStore) ReplaceMemberships(_ context.Context, username string, memberships []sqlitestore.GroupMembership) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.memberships = append([]sqlitestore.GroupMembership(nil), memberships...)
+	if s.user != nil && strings.EqualFold(s.user.Username, username) {
+		s.user.GroupIDs = nil
+		for _, membership := range memberships {
+			s.user.GroupIDs = append(s.user.GroupIDs, membership.GroupID)
+		}
+	}
+	return nil
+}
+
+func (s *memoryAdministratorStore) ListRBACRoles(context.Context) ([]sqlitestore.RBACRole, error) {
+	return append([]sqlitestore.RBACRole(nil), sqlitestore.BuiltinRBACRoles...), nil
 }
 
 func (s *memoryAdministratorStore) UpdateTimezone(_ context.Context, username, timezone string) error {

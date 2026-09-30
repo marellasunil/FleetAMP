@@ -120,10 +120,13 @@ func canReviewApprovalRequest(request *configs.GroupDeploymentRequest, auth *aut
 	if strings.EqualFold(username, request.RequestedBy) {
 		return false
 	}
-	if request.AssignedReviewer == "" {
-		return currentRole(auth, r) == roleAdmin
+	if currentRole(auth, r) == roleAdmin {
+		return request.AssignedReviewer == "" || strings.EqualFold(username, request.AssignedReviewer)
 	}
-	return strings.EqualFold(username, request.AssignedReviewer)
+	if !strings.EqualFold(username, request.AssignedReviewer) {
+		return false
+	}
+	return userHasGroupRole(r.Context(), auth, username, request.GroupID, "group_owner", "deployment_approver")
 }
 
 func registerApprovalRoutes(mux *http.ServeMux, requestStore storage.GroupDeploymentRequestStore, configStore storage.ConfigurationStore, groupStore storage.GroupStore, notifier *approvalNotifier, auth *authManager) {

@@ -51,20 +51,18 @@ func TestGroupsPageProvidesSafeCardActions(t *testing.T) {
 	}
 }
 
-func TestUserAdministrationSeparatesRoleAndMultiGroupMembership(t *testing.T) {
+func TestUserAdministrationSeparatesRolesAndGroupMembership(t *testing.T) {
 	for _, expected := range []string{
-		`<th>Role</th><th>Groups</th>`,
-		`type="checkbox" name="group_ids"`,
-		`Save selected`,
-		`Remove all`,
-		`Check or uncheck several groups, then save once.`,
+		`<th>Assigned roles</th><th>Group access</th>`,
+		`name="group_ids"`,
+		`name="group_role_ids"`,
+		`data-selected-chips`,
+		`Search groups`,
+		`Group Members`,
 	} {
 		if !strings.Contains(usersPageHTML, expected) {
 			t.Fatalf("user administration is missing %q", expected)
 		}
-	}
-	if strings.Contains(usersPageHTML, `Role and group access`) {
-		t.Fatal("user administration still combines role and groups in one column")
 	}
 }
 
@@ -93,14 +91,15 @@ func TestActiveGroupMemberCount(t *testing.T) {
 	}
 }
 
-func TestUserAdministrationOwnsGroupOwnerAssignment(t *testing.T) {
+func TestGroupMembershipAdministrationSupportsScopedRoles(t *testing.T) {
 	for _, expected := range []string{
-		`id="group-owners"`,
-		`Set a user’s role to Group owner`,
-		`FleetAMP keeps group ownership synchronized automatically`,
+		`Add member`,
+		`Save roles`,
+		`Remove member`,
+		`Platform Admin`,
 	} {
 		if !strings.Contains(usersPageHTML, expected) {
-			t.Fatalf("user administration is missing %q", expected)
+			t.Fatalf("group membership administration is missing %q", expected)
 		}
 	}
 }

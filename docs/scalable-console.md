@@ -56,3 +56,20 @@ The sidebar contains stable product areas; closely related views live in tabs.
 Pipelines and AI Insights therefore live under Fleet rather than appearing as
 duplicate sidebar destinations. Upcoming features are visibly marked Preview or
 Upcoming and existing authorization checks continue to apply to every route.
+
+## Group-scoped RBAC
+
+FleetAMP separates organization-wide administration from group responsibilities.
+Platform Admin is the only global role. All other permissions are attached to a
+user's membership in a specific Collector Group.
+
+Built-in group roles are Group Owner, Configuration Editor, Deployment
+Approver, Deployment Operator, Auditor, and Viewer. A member may hold several
+roles in one group and different roles in another group. FleetAMP preserves the
+legacy role and group fields during the compatibility period, while normalized
+membership tables are the source of truth for new assignments.
+
+The Users tab is an identity summary. Group membership and role assignment are
+managed from Group Members. Administrators reset another user's password from a
+confirmation dialog; users continue to manage their own password and timezone
+from My Account.

@@ -42,7 +42,7 @@ func TestCreateUserAuthenticationAndDisable(t *testing.T) {
 	manager, db := newUserTestManager(t)
 	defer db.Close()
 	if err := manager.createUser(context.Background(), "operator-one", "operator@example.com",
-		"a-strong-operator-password", "operator", []string{"test-group"}); err != nil {
+		"a-strong-operator-password", "member", []string{"test-group"}, []string{"configuration_editor", "deployment_operator"}); err != nil {
 		t.Fatal(err)
 	}
 	principalRole, ok := manager.authenticateRole(context.Background(),
@@ -62,7 +62,7 @@ func TestRoleAndPasswordChangesRevokeSessions(t *testing.T) {
 	manager, db := newUserTestManager(t)
 	defer db.Close()
 	if err := manager.createUser(context.Background(), "viewer-one", "",
-		"a-strong-viewer-password", "viewer", []string{"test-group"}); err != nil {
+		"a-strong-viewer-password", "member", []string{"test-group"}, []string{"viewer"}); err != nil {
 		t.Fatal(err)
 	}
 	token, err := manager.createSessionForRole("viewer-one", roleViewer)
@@ -181,5 +181,37 @@ func TestUsersPageDoesNotRenderPasswordMaterial(t *testing.T) {
 	if strings.Contains(body, string(user.PasswordHash)) ||
 		strings.Contains(body, string(user.PasswordSalt)) {
 		t.Fatal("users page exposed password material")
+	}
+}
+
+func TestGroupOwnershipFollowsPerGroupRole(t *testing.T) {
+	manager, db := newUserTestManager(t)
+	defer db.Close()
+	ctx := context.Background()
+	second, err := groups.New("Read only group", "", map[string]string{"team": "readonly"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.ID = "read-only-group"
+	if err := db.Groups().Create(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.createUser(ctx, "alice", "alice@example.com", "a-strong-alice-password",
+		"member", []string{"test-group"}, []string{"group_owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.updateGroupMembership(ctx, "alice", second.ID, []string{"viewer"}, false); err != nil {
+		t.Fatal(err)
+	}
+	owned, err := db.Groups().Get(ctx, "test-group")
+	if err != nil || !isGroupOwner(owned, "alice") {
+		t.Fatalf("alice should own test-group: group=%+v err=%v", owned, err)
+	}
+	readOnly, err := db.Groups().Get(ctx, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isGroupOwner(readOnly, "alice") {
+		t.Fatal("viewer membership incorrectly granted group ownership")
 	}
 }
