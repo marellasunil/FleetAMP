@@ -123,6 +123,36 @@ func TestSavingUnchangedRoleKeepsSession(t *testing.T) {
 	}
 }
 
+func TestSavingCurrentUserGroupsKeepsSession(t *testing.T) {
+	manager, db := newUserTestManager(t)
+	defer db.Close()
+	token, err := manager.createSessionForRole("admin", roleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/settings/users",
+		strings.NewReader("action=groups&username=admin&group_ids=test-group"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(&http.Cookie{Name: manager.cookieName(), Value: token})
+	response := httptest.NewRecorder()
+	manager.handleUsers(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("save groups status=%d body=%s", response.Code, response.Body.String())
+	}
+	check := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	check.AddCookie(&http.Cookie{Name: manager.cookieName(), Value: token})
+	if !manager.validSession(check) {
+		t.Fatal("saving group membership revoked the current session")
+	}
+	user, err := db.Authentication().Get(context.Background(), "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(user.GroupIDs) != 1 || user.GroupIDs[0] != "test-group" {
+		t.Fatalf("saved group IDs = %v", user.GroupIDs)
+	}
+}
+
 func TestUsersPageDoesNotRenderPasswordMaterial(t *testing.T) {
 	manager, db := newUserTestManager(t)
 	defer db.Close()
