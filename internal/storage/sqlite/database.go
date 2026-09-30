@@ -218,6 +218,9 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureUserProfileColumns(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureRBACSchema(ctx); err != nil {
+		return err
+	}
 	if err := d.ensureAuditDetailsColumn(ctx); err != nil {
 		return err
 	}
