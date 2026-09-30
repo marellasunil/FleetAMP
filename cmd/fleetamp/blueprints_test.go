@@ -64,12 +64,12 @@ func TestGenerateBlueprintRequiresSignal(t *testing.T) {
 
 func TestDestinationConfigEncryption(t *testing.T) {
 	pepper := []byte("0123456789abcdef0123456789abcdef")
-	plaintext := "endpoint: https://example.invalid/otlp\nheaders:\n  Authorization: ${env:OTLP_TOKEN}"
+	plaintext := "endpoint: https://example.invalid/otlp\ntls:\n  insecure: false"
 	encrypted, err := encryptDestinationConfig(pepper, plaintext)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if encrypted == plaintext || strings.Contains(encrypted, "Authorization") {
+	if encrypted == plaintext || strings.Contains(encrypted, "example.invalid") {
 		t.Fatal("destination configuration was stored in clear text")
 	}
 	decrypted, err := decryptDestinationConfig(pepper, encrypted)
