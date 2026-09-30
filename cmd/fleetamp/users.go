@@ -461,9 +461,6 @@ func (a *authManager) handleUsers(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			err = a.syncGroupOwnership(r.Context(), target, existing.Role, groupIDs)
 		}
-		if err == nil {
-			a.revokeUserSessions(target)
-		}
 	case "reset_password":
 		if r.FormValue("password") != r.FormValue("confirm_password") {
 			err = fmt.Errorf("passwords do not match")
