@@ -80,15 +80,13 @@ func (n *approvalNotifier) notify(ctx context.Context, event string, request *co
 	if len(recipients) == 0 {
 		return
 	}
-	safeHeader := strings.NewReplacer("\r", " ", "\n", " ").Replace
-	subject := safeHeader(fmt.Sprintf("[FleetAMP] Approval %s: %s v%s", event, request.ConfigurationName, request.ConfigurationVersion))
+	subject := "[FleetAMP] Approval request update"
 	link := ""
 	if n.publicURL != "" {
 		link = "\nReview: " + n.publicURL + "/approvals/" + url.PathEscape(request.ID)
 	}
-	body := fmt.Sprintf("FleetAMP approval request status: %s\n\nGroup: %s\nConfiguration: %s\nVersion: %s\nCollectors: %d\nRequester: %s\nStatus: %s\nExpires: %s\n\nOpen the authenticated approval page to view the assigned reviewer and change reason.%s\n",
-		event, request.GroupName, request.ConfigurationName, request.ConfigurationVersion, len(request.Targets), request.RequestedBy, request.Status,
-		request.ExpiresAt.UTC().Format(time.RFC3339), link)
+	body := fmt.Sprintf("A FleetAMP approval request was updated.\n\nCollectors: %d\nExpires: %s\n\nOpen the authenticated approval page to view its status, group, configuration, assigned reviewer and change reason.%s\n",
+		len(request.Targets), request.ExpiresAt.UTC().Format(time.RFC3339), link)
 	message := []byte("To: " + strings.Join(recipients, ", ") + "\r\nSubject: " + subject + "\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + body)
 	go func() {
 		host, _, _ := net.SplitHostPort(n.addr)
