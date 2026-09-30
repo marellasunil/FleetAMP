@@ -169,6 +169,13 @@ func deploymentAuditDetails(r *http.Request) string {
 		}
 	}
 	action := strings.TrimSpace(r.FormValue("action"))
+	if r.URL.Path == "/blueprints" && action == "generate" {
+		parts := []string{"pattern=" + strings.TrimSpace(r.FormValue("pattern")), "version=" + strings.TrimSpace(r.FormValue("version"))}
+		if r.FormValue("submit_for_approval") == "true" {
+			parts = append(parts, "approval requested", "reviewer="+strings.TrimSpace(r.FormValue("assigned_reviewer")), "change reason: "+strings.TrimSpace(r.FormValue("change_reason")))
+		}
+		return strings.Join(parts, " · ")
+	}
 	if action != "request_deployment" && action != "approve_deployment" && action != "reject_deployment" && action != "send_back_deployment" && action != "cancel_deployment" {
 		return ""
 	}
@@ -226,6 +233,19 @@ func describeAuditAction(r *http.Request) (string, string, string) {
 		return "policy.section_update", "configuration_policy", r.FormValue("section")
 	}
 	action := strings.TrimSpace(r.FormValue("action"))
+	if r.URL.Path == "/blueprints" {
+		switch action {
+		case "create_destination":
+			return "blueprint.destination_create", "destination_profile", ""
+		case "delete_destination":
+			return "blueprint.destination_delete", "destination_profile", r.FormValue("destination_id")
+		case "generate":
+			if r.FormValue("submit_for_approval") == "true" {
+				return "blueprint.generate_and_request", "group", r.FormValue("group_id")
+			}
+			return "blueprint.generate", "group", r.FormValue("group_id")
+		}
+	}
 	if strings.HasPrefix(r.URL.Path, "/settings/users") {
 		if action == "" {
 			action = "create"

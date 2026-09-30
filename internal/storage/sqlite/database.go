@@ -64,6 +64,11 @@ func (d *Database) GroupDeploymentRequests() *GroupDeploymentRequestStore {
 	return &GroupDeploymentRequestStore{db: d.db}
 }
 
+// DestinationProfiles returns administrator-controlled exporter destinations.
+func (d *Database) DestinationProfiles() *DestinationProfileStore {
+	return &DestinationProfileStore{db: d.db}
+}
+
 // Authentication returns the SQLite-backed user repository.
 func (d *Database) Authentication() *AuthStore { return &AuthStore{db: d.db} }
 
@@ -115,6 +120,12 @@ func (d *Database) initialize(ctx context.Context) error {
             selector TEXT NOT NULL, owners TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)`,
+		`CREATE TABLE IF NOT EXISTS destination_profiles (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, environment TEXT NOT NULL,
+			exporter_id TEXT NOT NULL, exporter_config TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			UNIQUE(name,environment)
+		)`,
 		`CREATE TABLE IF NOT EXISTS group_deployment_requests (
             id TEXT PRIMARY KEY, group_id TEXT NOT NULL, group_name TEXT NOT NULL,
             group_selector TEXT NOT NULL, label_selector TEXT NOT NULL DEFAULT '{}', configuration_id TEXT NOT NULL,

@@ -134,6 +134,20 @@ authorization, Collector binary upgrades, canary rollout stages, partial
 `conf.d` delivery, packaged Kubernetes deployment, and production-scale
 certification. These remain pre-v1.0 work.
 
+## v0.3.0 development target
+
+FleetAMP v0.3.0 introduces guided [Telemetry Blueprints](docs/blueprints.md).
+Users choose a pattern, an accessible ownership group, signals, and an
+administrator-approved Destination Profile. FleetAMP generates explicit
+Collector YAML, validates it, saves an immutable group version, and can submit
+the same artifact into the existing approval and OpAMP deployment workflow.
+The first patterns are OTLP application services and host observability.
+
+Blueprints remain governed: administrators own destination endpoint, auth and
+TLS configuration; Group Owners remain scoped to their groups; deployments
+still require an eligible reviewer and retain existing rollback, drift and
+audit behavior. See the [v0.3.0 release plan](docs/releases/v0.3.0.md).
+
 ## Project structure
 
 ```text
@@ -286,7 +300,7 @@ For OS-specific deployment models and initial sizing requirements, see the [OS d
 
 - **v0.1.x** — community preview packaging, single-node pilot validation, hardening and bug fixes
 - **v0.2** — group ownership, approval workflow, audit trail, RBAC, drift handling and rollout safeguards
-- **v0.3** — instrumentation guides, reusable telemetry blueprints and configuration modules
+- **v0.3** — guided telemetry blueprints, administrator-controlled destination profiles, validated immutable generation, and the existing approval/deployment lifecycle
 - **v0.4** — telemetry contracts, semantic-convention governance, policy as code and telemetry quality
 - **v0.5+** — intelligence, discovery, PostgreSQL/HA, canaries, package upgrades, Kubernetes packaging and additional agent adapters
 - **v1.0** — stable production baseline with documented compatibility, upgrade and support expectations
