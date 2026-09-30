@@ -35,14 +35,28 @@ type userGroupOption struct {
 	Selected bool
 }
 
+type accessGroupSummary struct {
+	Group   *groups.Group
+	Members []userSummary
+}
+
+type roleSummary struct {
+	Name, ID, Scope, Description string
+	Permissions                  []string
+}
+
 type usersPageData struct {
-	Page        string
-	CurrentUser string
-	Users       []userSummary
-	Owners      []userSummary
-	Groups      []*groups.Group
-	Message     string
-	Error       string
+	Page         string
+	Tab          string
+	CurrentUser  string
+	Users        []userSummary
+	Owners       []userSummary
+	Groups       []*groups.Group
+	AccessGroups []accessGroupSummary
+	Roles        []roleSummary
+	Pagination   paginationView
+	Message      string
+	Error        string
 }
 
 const sessionJS = `(() => {
@@ -79,7 +93,8 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <div class="content">
 {{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}
 {{if .Error}}<div class="configerror" role="alert">{{.Error}}</div>{{end}}
-<section class="card" style="margin-bottom:16px"><div class="cardhead"><div>
+<nav class="tabs" aria-label="Identity administration"><a class="tab {{if eq .Tab "users"}}active{{end}}" href="/settings/users?tab=users">Users</a><a class="tab {{if eq .Tab "access-groups"}}active{{end}}" href="/settings/users?tab=access-groups">Access Groups</a><a class="tab {{if eq .Tab "roles"}}active{{end}}" href="/settings/users?tab=roles">Roles</a></nav>
+{{if eq .Tab "users"}}<section class="card" style="margin-bottom:16px"><div class="cardhead"><div>
 <div class="cardtitle">Create user</div>
 <div class="cardsub">Passwords are protected by the server-specific FleetAMP pepper</div>
 </div></div><div class="cardbody">
@@ -125,8 +140,8 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <input class="input" type="password" name="confirm_password" placeholder="Confirm password" required minlength="16" autocomplete="new-password">
 <button class="btn" type="submit">Reset password</button>
 </form><div class="tiny">Changed {{.PasswordChangedAt}}</div></td></tr>{{end}}
-</tbody></table></div>{{else}}<div class="empty">No users configured.</div>{{end}}
-</section></div></main></div></body></html>`
+</tbody></table></div>{{else}}<div class="empty">No users configured.</div>{{end}}` + paginationHTML + `
+</section>{{else if eq .Tab "access-groups"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Access Groups</div><div class="cardsub">Scalable people-to-Collector-Group access scopes; identity-provider synchronization can be added later</div></div></div>{{if .AccessGroups}}<div style="overflow:auto"><table><thead><tr><th>Access group</th><th>Members</th><th>Collector scope</th><th>Status</th><th>Action</th></tr></thead><tbody>{{range .AccessGroups}}<tr><td><strong>{{.Group.Name}}</strong><div class="tiny code">{{.Group.ID}}</div></td><td>{{len .Members}}<div class="chips">{{range .Members}}<span class="chip">{{.Username}}</span>{{else}}<span class="tiny">No users assigned</span>{{end}}</div></td><td>{{range $k,$v := .Group.Selector}}<span class="code">{{$k}}={{$v}}</span> {{end}}</td><td>{{if .Group.Enabled}}<span class="badge ok">Active</span>{{else}}<span class="badge off">Disabled</span>{{end}}</td><td><a class="btn" href="/groups/{{.Group.ID}}">Manage scope</a></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No access scopes exist. Create a Collector Group first.</div>{{end}}</section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Built-in roles</div><div class="cardsub">Stable permission sets today; fine-grained custom permissions are planned as an additive migration</div></div></div><div class="cardbody groupgrid">{{range .Roles}}<div class="owner-card"><div><strong>{{.Name}}</strong><div class="tiny code">{{.ID}} · {{.Scope}}</div><p class="tiny">{{.Description}}</p><div class="chips">{{range .Permissions}}<span class="chip">{{.}}</span>{{end}}</div></div></div>{{end}}</div></section>{{end}}</div></main></div></body></html>`
 
 var usersPage = template.Must(template.New("users").Parse(usersPageHTML))
 
@@ -515,10 +530,22 @@ func (a *authManager) renderUsers(w http.ResponseWriter, r *http.Request) {
 		internalServerError(w, err)
 		return
 	}
+	tab := r.URL.Query().Get("tab")
+	switch tab {
+	case "users", "access-groups", "roles":
+	default:
+		tab = "users"
+	}
 	view := usersPageData{
-		Page: "settings-users", CurrentUser: current,
+		Page: "settings-users", Tab: tab, CurrentUser: current,
 		Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error"),
 		Users: make([]userSummary, 0, len(users)), Groups: allGroups,
+		Roles: []roleSummary{
+			{Name: "Administrator", ID: "admin", Scope: "Global", Description: "Full FleetAMP administration and every Collector Group.", Permissions: []string{"Users and roles", "Policies", "All deployments", "Audit"}},
+			{Name: "Group Owner", ID: "group_owner", Scope: "Assigned groups", Description: "Manage configuration and request deployments for assigned groups.", Permissions: []string{"Group configuration", "Deployment requests", "Scoped agents"}},
+			{Name: "Operator", ID: "operator", Scope: "Assigned groups", Description: "Operate and review fleet state inside assigned scope.", Permissions: []string{"Fleet operations", "Deployments", "Drift visibility"}},
+			{Name: "Viewer", ID: "viewer", Scope: "Assigned groups", Description: "Read-only access to permitted fleet resources.", Permissions: []string{"View agents", "View groups", "View deployments"}},
+		},
 	}
 	for _, user := range users {
 		summary := userSummary{
@@ -541,6 +568,20 @@ func (a *authManager) renderUsers(w http.ResponseWriter, r *http.Request) {
 			view.Owners = append(view.Owners, summary)
 		}
 	}
+	for _, group := range allGroups {
+		accessGroup := accessGroupSummary{Group: group}
+		for _, user := range view.Users {
+			for _, id := range user.GroupIDs {
+				if id == group.ID {
+					accessGroup.Members = append(accessGroup.Members, user)
+					break
+				}
+			}
+		}
+		view.AccessGroups = append(view.AccessGroups, accessGroup)
+	}
+	view.Pagination = paginationFromRequest(r, len(view.Users))
+	view.Users = paginateSlice(view.Users, view.Pagination)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := usersPage.Execute(w, view); err != nil {
 		slog.Error("render users page", "component", "http", "error", err)
