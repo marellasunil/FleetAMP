@@ -27,7 +27,7 @@ func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
 			t.Fatalf("side navigation is missing %q", path)
 		}
 	}
-	for _, expected := range []string{"Groups & Labels", "/account", "/assets/fleetamp-logo.svg"} {
+	for _, expected := range []string{"Groups & Labels", "/account", "/assets/fleetamp-logo.png"} {
 		if !strings.Contains(sideNav, expected) {
 			t.Fatalf("side navigation is missing %q", expected)
 		}
@@ -38,12 +38,12 @@ func TestFleetAMPLogoAsset(t *testing.T) {
 	mux := http.NewServeMux()
 	registerUIRoutes(mux)
 	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/assets/fleetamp-logo.svg", nil))
-	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "image/svg+xml") {
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/assets/fleetamp-logo.png", nil))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/png" {
 		t.Fatalf("logo asset status=%d content-type=%q", response.Code, response.Header().Get("Content-Type"))
 	}
-	if !strings.Contains(response.Body.String(), "FleetAMP") {
-		t.Fatal("logo asset is missing its accessible title")
+	if body := response.Body.Bytes(); len(body) < 8 || string(body[:8]) != "\x89PNG\r\n\x1a\n" {
+		t.Fatal("logo asset is not a valid PNG")
 	}
 }
 

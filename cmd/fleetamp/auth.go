@@ -464,11 +464,12 @@ const authPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <title>{{.Title}} · FleetAMP</title><style>` + controlPlaneCSS + `
 .authshell{min-height:100vh;display:grid;place-items:center;padding:24px}
 .authcard{width:min(460px,100%);padding:26px}.authbrand{text-align:center;margin-bottom:22px}
+.authlogo{display:block;width:min(233px,100%);height:auto;margin:0 auto 18px}
 .authform{display:grid;gap:14px}.authform label{display:grid;gap:7px;color:var(--muted)}
 .authform .input{width:100%}.autherror{border:1px solid #70404a;background:#351923;color:#ffabb5;padding:11px;border-radius:8px}
 .authhelp{font-size:11px;color:var(--muted);line-height:1.6}</style></head>
 <body><main class="authshell"><section class="card authcard"><div class="authbrand">
-<img class="brandmark" src="/assets/fleetamp-logo.svg" alt="FleetAMP" style="margin:auto"><h1>FleetAMP</h1>
+<img class="authlogo" src="/assets/fleetamp-logo.png" alt="FleetAMP — Telemetry Control Plane">
 <div class="subtitle">{{if .Setup}}Secure administrator setup{{else}}Control-plane login{{end}}</div></div>
 {{if .Message}}<div class="autherror">{{.Message}}</div>{{end}}
 <form class="authform" method="post" action="{{if .Setup}}/setup{{else}}/login{{end}}">

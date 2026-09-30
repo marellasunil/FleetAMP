@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/fleetamp-logo.svg" width="88" alt="FleetAMP logo"></p>
+<p align="center"><img src="docs/assets/fleetamp-logo.png" width="233" alt="FleetAMP — Telemetry Control Plane"></p>
 
 # FleetAMP
 
