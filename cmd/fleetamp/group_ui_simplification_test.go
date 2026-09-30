@@ -9,13 +9,11 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/agents"
 )
 
-func TestGroupDetailUsesOverflowManagementAndSummarySelector(t *testing.T) {
+func TestGroupDetailUsesOverflowManagementWithoutOverviewCards(t *testing.T) {
 	for _, expected := range []string{
 		`class="action-menu"`,
 		`?edit=1#edit-group`,
 		`id="edit-group"`,
-		`href="/settings/users#group-owners"`,
-		`href="/agents?group={{.Group.ID}}"`,
 		`Deletion blocked: {{len .Members}} Collector(s) still belong to this group`,
 		`including {{.ActiveMembers}} active`,
 	} {
@@ -24,6 +22,8 @@ func TestGroupDetailUsesOverflowManagementAndSummarySelector(t *testing.T) {
 		}
 	}
 	for _, removed := range []string{
+		`<div class="cardtitle">Group selector</div>`,
+		`Group-level desired state, approvals and drift`,
 		`<div class="cardtitle">Assigned agents</div>`,
 		`<div class="cardtitle">Group drift</div>`,
 	} {
@@ -41,10 +41,30 @@ func TestGroupsPageProvidesSafeCardActions(t *testing.T) {
 		`Deletion blocked: {{.MemberCount}} Collector(s) still belong to this group`,
 		`including {{.ActiveMemberCount}} active`,
 		`Delete this empty ownership group?`,
+		`Configuration state`,
+		`{{.SavedVersions}}`,
+		`{{.ApprovalRequests}}`,
 	} {
 		if !strings.Contains(groupsHTML, expected) {
 			t.Fatalf("groups page is missing %q", expected)
 		}
+	}
+}
+
+func TestUserAdministrationSeparatesRoleAndMultiGroupMembership(t *testing.T) {
+	for _, expected := range []string{
+		`<th>Role</th><th>Groups</th>`,
+		`type="checkbox" name="group_ids"`,
+		`Save selected`,
+		`Remove all`,
+		`Check or uncheck several groups, then save once.`,
+	} {
+		if !strings.Contains(usersPageHTML, expected) {
+			t.Fatalf("user administration is missing %q", expected)
+		}
+	}
+	if strings.Contains(usersPageHTML, `Role and group access`) {
+		t.Fatal("user administration still combines role and groups in one column")
 	}
 }
 
