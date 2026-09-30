@@ -16,6 +16,7 @@ Blueprints provide a guided path from an observability intent to a governed Open
 ## Authorization and safety
 
 - Only administrators manage Destination Profiles.
+- Destination Profile exporter configuration is encrypted at rest with authenticated encryption derived from the server secret pepper.
 - Group Owners see and target only groups they own or are assigned to.
 - Destination internals are not editable in the guided builder.
 - A generated artifact must pass current validation again before it enters approval.

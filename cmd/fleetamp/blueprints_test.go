@@ -61,3 +61,25 @@ func TestGenerateBlueprintRequiresSignal(t *testing.T) {
 		t.Fatal("expected an empty signal selection to fail")
 	}
 }
+
+func TestDestinationConfigEncryption(t *testing.T) {
+	pepper := []byte("0123456789abcdef0123456789abcdef")
+	plaintext := "endpoint: https://example.invalid/otlp\nheaders:\n  Authorization: ${env:OTLP_TOKEN}"
+	encrypted, err := encryptDestinationConfig(pepper, plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encrypted == plaintext || strings.Contains(encrypted, "Authorization") {
+		t.Fatal("destination configuration was stored in clear text")
+	}
+	decrypted, err := decryptDestinationConfig(pepper, encrypted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decrypted != plaintext {
+		t.Fatalf("decrypted destination configuration differs: %q", decrypted)
+	}
+	if _, err := decryptDestinationConfig([]byte("different-pepper-material-00000000"), encrypted); err == nil {
+		t.Fatal("destination configuration decrypted with a different server pepper")
+	}
+}

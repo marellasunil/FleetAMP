@@ -1,8 +1,14 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -81,6 +87,12 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 					http.Error(w, "exporter configuration must be a non-empty YAML mapping", http.StatusUnprocessableEntity)
 					return
 				}
+				encryptedConfig, err := encryptDestinationConfig(auth.pepper, p.ExporterConfig)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				p.ExporterConfig = encryptedConfig
 				if err := destinations.Create(r.Context(), p); err != nil {
 					http.Error(w, err.Error(), http.StatusConflict)
 					return
@@ -107,6 +119,11 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 			destination, err := destinations.Get(r.Context(), strings.TrimSpace(r.FormValue("destination_id")))
 			if err != nil || !destination.Enabled {
 				http.Error(w, "enabled destination profile not found", http.StatusNotFound)
+				return
+			}
+			destination.ExporterConfig, err = decryptDestinationConfig(auth.pepper, destination.ExporterConfig)
+			if err != nil {
+				internalServerError(w, fmt.Errorf("decrypt destination profile: %w", err))
 				return
 			}
 			content, err := generateBlueprintYAML(r.FormValue("pattern"), r.Form["signal"], destination)
@@ -208,6 +225,61 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 			internalServerError(w, err)
 		}
 	})
+}
+
+const destinationConfigPrefix = "enc:v1:"
+
+func destinationEncryptionKey(pepper []byte) []byte {
+	digest := sha256.Sum256(append([]byte("fleetamp-destination-profile-v1:"), pepper...))
+	return digest[:]
+}
+
+func encryptDestinationConfig(pepper []byte, plaintext string) (string, error) {
+	if len(pepper) < 32 {
+		return "", fmt.Errorf("server pepper is required to encrypt destination profiles")
+	}
+	block, err := aes.NewCipher(destinationEncryptionKey(pepper))
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("generate destination encryption nonce: %w", err)
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), []byte(destinationConfigPrefix))
+	return destinationConfigPrefix + base64.RawStdEncoding.EncodeToString(sealed), nil
+}
+
+func decryptDestinationConfig(pepper []byte, stored string) (string, error) {
+	if !strings.HasPrefix(stored, destinationConfigPrefix) {
+		return "", fmt.Errorf("destination profile is not encrypted")
+	}
+	encoded := strings.TrimPrefix(stored, destinationConfigPrefix)
+	sealed, err := base64.RawStdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", fmt.Errorf("decode encrypted destination profile: %w", err)
+	}
+	block, err := aes.NewCipher(destinationEncryptionKey(pepper))
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(sealed) < gcm.NonceSize() {
+		return "", fmt.Errorf("encrypted destination profile is truncated")
+	}
+	nonce, ciphertext := sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, []byte(destinationConfigPrefix))
+	if err != nil {
+		return "", fmt.Errorf("authenticate encrypted destination profile: %w", err)
+	}
+	return string(plaintext), nil
 }
 
 func generateBlueprintYAML(pattern string, selected []string, destination *blueprints.DestinationProfile) (string, error) {
