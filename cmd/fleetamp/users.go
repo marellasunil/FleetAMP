@@ -70,6 +70,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 .userforms{display:grid;gap:8px}.useractions{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
 .useractions label{display:grid;gap:5px}.compact{min-width:125px}
 .owner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}.owner-card{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:13px;border:1px solid #253a55;border-radius:9px;background:#0b1727}.owner-card .chips{justify-content:flex-end}
+.membership-grid{display:grid;gap:7px;max-height:180px;min-width:220px;overflow:auto;padding:9px;border:1px solid #2a3d57;border-radius:8px;background:#0a1524}.membership-option{display:flex;gap:8px;align-items:center;color:var(--text)}.membership-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 </style></head><body><div class="shell">` + sideNav + `<main class="main">
 <header class="top"><div><div class="crumb">FleetAMP / Settings / Users</div>
 <div class="pagetitle">Users, groups and roles</div>
@@ -89,7 +90,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <label>Role<select class="select" name="role" required>
 <option value="viewer">Viewer</option><option value="group_owner">Group owner</option><option value="operator">Operator</option>
 <option value="admin">Admin</option></select></label>
-<label>Groups<select class="select" name="group_ids" multiple size="4">{{range .Groups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select><span class="tiny">Select one or more groups for scoped users.</span></label>
+<div><div style="margin-bottom:7px">Groups</div><div class="membership-grid">{{range .Groups}}<label class="membership-option"><input type="checkbox" name="group_ids" value="{{.ID}}"> <span>{{.Name}}</span></label>{{else}}<span class="tiny">Create a group before adding a scoped user.</span>{{end}}</div><span class="tiny">Select any number of groups for scoped access.</span></div>
 <label>Password<input class="input" type="password" name="password" required minlength="16" autocomplete="new-password"></label>
 <label>Confirm password<input class="input" type="password" name="confirm_password" required minlength="16" autocomplete="new-password"></label>
 <button class="btn primary" type="submit">Create user</button>
@@ -98,7 +99,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Managed users</div>
 <div class="cardsub">{{len .Users}} local FleetAMP user(s)</div></div></div>
 {{if .Users}}<div style="overflow:auto"><table><thead><tr>
-<th>User and email</th><th>Role and group access</th><th>Last login</th><th>Status</th><th>Password</th>
+<th>User and email</th><th>Role</th><th>Groups</th><th>Last login</th><th>Status</th><th>Password</th>
 </tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Username}}</strong>
 {{if eq .Username $.CurrentUser}}<div class="tiny">Current session</div>{{end}}
 <form class="useractions" method="post" action="/settings/users" style="margin-top:8px"><input type="hidden" name="action" value="email"><input type="hidden" name="username" value="{{.Username}}"><input class="input compact" type="email" name="email" value="{{.Email}}" placeholder="No notification email"><button class="btn" type="submit">Save email</button></form></td><td>
@@ -110,7 +111,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 <option value="group_owner" {{if eq .Role "group_owner"}}selected{{end}}>Group owner</option>
 <option value="operator" {{if eq .Role "operator"}}selected{{end}}>Operator</option>
 <option value="admin" {{if eq .Role "admin"}}selected{{end}}>Admin</option>
-</select></label><button class="btn" type="submit">Save role</button></form><form class="userforms" method="post" action="/settings/users" style="margin-top:10px"><input type="hidden" name="action" value="groups"><input type="hidden" name="username" value="{{.Username}}"><select class="select" name="group_ids" multiple size="4">{{range .GroupOptions}}<option value="{{.ID}}" {{if .Selected}}selected{{end}}>{{.Name}}</option>{{end}}</select><button class="btn" type="submit">Save groups</button></form><div class="chips" style="margin-top:8px">{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a>{{else}}<span class="tiny">No group access assigned</span>{{end}}</div></td>
+</select></label><button class="btn" type="submit">Save role</button></form></td><td><form class="userforms" method="post" action="/settings/users"><input type="hidden" name="action" value="groups"><input type="hidden" name="username" value="{{.Username}}"><div class="membership-grid">{{range .GroupOptions}}<label class="membership-option"><input type="checkbox" name="group_ids" value="{{.ID}}" {{if .Selected}}checked{{end}}> <span>{{.Name}}</span></label>{{else}}<span class="tiny">No groups available</span>{{end}}</div><div class="membership-actions"><button class="btn" type="submit">Save selected</button><button class="btn" type="submit" onclick="this.form.querySelectorAll('input[name=group_ids]').forEach((item) => item.checked = false)">Remove all</button></div><span class="tiny">Check or uncheck several groups, then save once.</span></form><div class="chips" style="margin-top:8px">{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a>{{else}}<span class="tiny">No group access assigned</span>{{end}}</div></td>
 <td>{{if .LastLoginAt}}{{.LastLoginAt}}{{else}}<span class="tiny">Never</span>{{end}}<div class="tiny">Timezone: {{.Timezone}}</div></td><td><span class="badge {{if .Enabled}}ok{{else}}off{{end}}">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</span>
 <form method="post" action="/settings/users" style="margin-top:8px">
 <input type="hidden" name="action" value="status">

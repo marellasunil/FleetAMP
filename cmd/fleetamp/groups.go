@@ -48,6 +48,8 @@ type groupListItem struct {
 	Group             *groups.Group
 	MemberCount       int
 	ActiveMemberCount int
+	SavedVersions     int
+	ApprovalRequests  int
 	Drifted           int
 	CanManage         bool
 }
@@ -1003,6 +1005,11 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		groupsList = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), groupsList)
 		view := groupsView{Page: "groups", Items: make([]groupListItem, 0, len(groupsList))}
+		allConfigurations, configurationErr := configStore.List(r.Context())
+		if configurationErr != nil {
+			internalServerError(w, configurationErr)
+			return
+		}
 		for _, group := range groupsList {
 			members, memberErr := membersForGroupIdentity(r.Context(), group, agentStore)
 			if memberErr != nil {
@@ -1014,8 +1021,14 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				internalServerError(w, driftErr)
 				return
 			}
+			requests, requestErr := requestStore.ListByGroup(r.Context(), group.ID, 1000)
+			if requestErr != nil {
+				internalServerError(w, requestErr)
+				return
+			}
 			view.Items = append(view.Items, groupListItem{
 				Group: group, MemberCount: len(members), ActiveMemberCount: activeGroupMemberCount(members),
+				SavedVersions: len(configurationsForGroup(allConfigurations, group.ID)), ApprovalRequests: len(requests),
 				Drifted: drift.Drifted, CanManage: canManageGroup(auth, r, group),
 			})
 		}
