@@ -107,6 +107,7 @@ func main() {
 	groupStore := database.Groups()
 	auth.groupStore = groupStore
 	groupRequestStore := database.GroupDeploymentRequests()
+	destinationProfileStore := database.DestinationProfiles()
 	sectionPolicyStore := database.SectionPolicies()
 	driftPolicyStore := database.DriftPolicy()
 	auditStore := database.Audit()
@@ -208,6 +209,7 @@ func main() {
 	registerAuditRoutes(mux, auditStore)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
+	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
 	registerUIRoutes(mux)
 
 	httpServer := &http.Server{
