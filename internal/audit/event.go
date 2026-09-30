@@ -33,7 +33,7 @@ func (f Filter) Normalized() Filter {
 	f.Actor = strings.TrimSpace(f.Actor)
 	f.Action = strings.TrimSpace(f.Action)
 	f.Outcome = strings.TrimSpace(f.Outcome)
-	if f.Limit <= 0 || f.Limit > 500 {
+	if f.Limit <= 0 || f.Limit > 10000 {
 		f.Limit = 200
 	}
 	return f

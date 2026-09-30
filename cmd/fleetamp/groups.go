@@ -54,9 +54,18 @@ type groupListItem struct {
 	CanManage         bool
 }
 
+type labelCatalogItem struct {
+	Key        string
+	Values     []string
+	GroupCount int
+}
+
 type groupsView struct {
-	Page  string
-	Items []groupListItem
+	Page       string
+	Tab        string
+	Items      []groupListItem
+	Labels     []labelCatalogItem
+	Pagination paginationView
 }
 type groupPreviewAgent struct {
 	Agent      *agents.ManagedAgent
@@ -964,6 +973,31 @@ func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.Ag
 	return result, nil
 }
 
+func groupLabelCatalog(items []*groups.Group) []labelCatalogItem {
+	values := map[string]map[string]struct{}{}
+	counts := map[string]int{}
+	for _, group := range items {
+		for key, value := range group.Selector {
+			if values[key] == nil {
+				values[key] = map[string]struct{}{}
+			}
+			values[key][value] = struct{}{}
+			counts[key]++
+		}
+	}
+	catalog := make([]labelCatalogItem, 0, len(values))
+	for key, set := range values {
+		item := labelCatalogItem{Key: key, GroupCount: counts[key]}
+		for value := range set {
+			item.Values = append(item.Values, value)
+		}
+		sort.Strings(item.Values)
+		catalog = append(catalog, item)
+	}
+	sort.Slice(catalog, func(i, j int) bool { return catalog[i].Key < catalog[j].Key })
+	return catalog
+}
+
 // registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
 func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier) {
 	// /groups displays all groups and accepts creation form submissions.
@@ -1004,7 +1038,13 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			return
 		}
 		groupsList = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), groupsList)
-		view := groupsView{Page: "groups", Items: make([]groupListItem, 0, len(groupsList))}
+		tab := r.URL.Query().Get("tab")
+		switch tab {
+		case "groups", "labels", "selectors":
+		default:
+			tab = "groups"
+		}
+		view := groupsView{Page: "groups", Tab: tab, Items: make([]groupListItem, 0, len(groupsList)), Labels: groupLabelCatalog(groupsList)}
 		allConfigurations, configurationErr := configStore.List(r.Context())
 		if configurationErr != nil {
 			internalServerError(w, configurationErr)
@@ -1032,6 +1072,8 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				Drifted: drift.Drifted, CanManage: canManageGroup(auth, r, group),
 			})
 		}
+		view.Pagination = paginationFromRequest(r, len(view.Items))
+		view.Items = paginateSlice(view.Items, view.Pagination)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = groupsPage.Execute(w, view)
 	})

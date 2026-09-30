@@ -47,7 +47,9 @@ type agentListItem struct {
 
 type agentListView struct {
 	Page               string
+	Tab                string
 	Items              []agentListItem
+	Pagination         paginationView
 	Range              string
 	StatusFilter       string
 	Groups             []*groups.Group

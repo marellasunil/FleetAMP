@@ -148,6 +148,11 @@ TLS configuration; Group Owners remain scoped to their groups; deployments
 still require an eligible reviewer and retain existing rollback, drift and
 audit behavior. See the [v0.3.0 release plan](docs/releases/v0.3.0.md).
 
+The console now uses scalable, task-focused tabs and shared pagination for
+Fleet, Groups & Labels, administration, and Audit Log. See the
+[scalable console guide](docs/scalable-console.md) for the navigation model and
+current compatibility boundaries.
+
 ## Project structure
 
 ```text

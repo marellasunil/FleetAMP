@@ -342,7 +342,13 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 				}
 			}
 		}
-		view := agentListView{Page: "fleet", StatusFilter: statusFilter, Groups: allGroups, SelectedGroup: selectedGroup, Items: make([]agentListItem, 0, len(agentsList))}
+		tab := r.URL.Query().Get("tab")
+		switch tab {
+		case "agents", "pipelines", "ai-insights", "slos":
+		default:
+			tab = "agents"
+		}
+		view := agentListView{Page: "fleet", Tab: tab, StatusFilter: statusFilter, Groups: allGroups, SelectedGroup: selectedGroup, Items: make([]agentListItem, 0, len(agentsList))}
 		for _, agent := range agentsList {
 			if currentRole(auth, r) != roleAdmin {
 				visible := false
@@ -382,6 +388,8 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		if view.Total > 0 {
 			view.HealthyPercent = view.Healthy * 100 / view.Total
 		}
+		view.Pagination = paginationFromRequest(r, len(view.Items))
+		view.Items = paginateSlice(view.Items, view.Pagination)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := agentsPage.Execute(w, view); err != nil {
 			slog.Error("failed to render agents page", "component", "http", "event", "render_failed", "page", "agents", "error", err)

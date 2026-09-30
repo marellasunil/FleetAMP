@@ -16,6 +16,7 @@ import (
 type auditPageData struct {
 	Page, Actor, Action, Outcome, Category, From, To string
 	Events                                           []*audit.Event
+	Pagination                                       paginationView
 }
 
 var auditPage = template.Must(template.New("audit").Funcs(template.FuncMap{
@@ -23,8 +24,8 @@ var auditPage = template.Must(template.New("audit").Funcs(template.FuncMap{
 }).Parse(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FleetAMP Audit log</title><style>` +
 	controlPlaneCSS + detailCSS + `</style></head><body><div class="shell">` + sideNav +
 	`<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Audit</div><div class="pagetitle">Audit log</div><div class="subtitle">Inspect configuration, approval, deployment, drift and security activity.</div></div></header><div class="content">` +
-	`<section class="card"><div class="cardbody"><div class="detailactions" style="margin-bottom:14px"><a class="btn" href="/audit-log">All activity</a><a class="btn" href="/audit-log?category=configuration">Configuration</a><a class="btn" href="/audit-log?category=deployment">Deployments</a><a class="btn" href="/audit-log?category=drift">Drift</a><a class="btn" href="/audit-log?category=security">Security & users</a></div><form class="detailform" method="get" action="/audit-log">{{if .Category}}<input type="hidden" name="category" value="{{.Category}}">{{end}}<label>Actor<input class="input" name="actor" value="{{.Actor}}" placeholder="username"></label><label>Action<input class="input" name="action" value="{{.Action}}" placeholder="deployment.approve"></label><label>Outcome<select class="select" name="outcome"><option value="">All</option><option value="success" {{if eq .Outcome "success"}}selected{{end}}>Success</option><option value="failed" {{if eq .Outcome "failed"}}selected{{end}}>Failed</option><option value="denied" {{if eq .Outcome "denied"}}selected{{end}}>Denied</option></select></label><label>From<input class="input" type="date" name="from" value="{{.From}}"></label><label>To<input class="input" type="date" name="to" value="{{.To}}"></label><button class="btn primary" type="submit">Filter</button><a class="btn" href="/audit-log">Clear</a></form></div></section>` +
-	`<section class="card" style="margin-top:14px"><div class="cardhead"><div><div class="cardtitle">Recorded events</div><div class="cardsub">{{len .Events}} most recent matching event(s)</div></div><span class="badge ok">Append-only</span></div>{{if .Events}}<div style="overflow:auto"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Reason / details</th><th>Request</th></tr></thead><tbody>{{range .Events}}<tr><td>{{auditTime .Timestamp}}</td><td>{{.Actor}}</td><td><span class="code">{{.Action}}</span></td><td>{{.ResourceType}}{{if .ResourceID}}<div class="tiny code">{{.ResourceID}}</div>{{end}}</td><td>{{if eq .Outcome "success"}}<span class="badge ok">Success</span>{{else if eq .Outcome "denied"}}<span class="badge warn">Denied</span>{{else}}<span class="badge off">Failed</span>{{end}}</td><td>{{if .Details}}{{.Details}}{{else}}—{{end}}</td><td><span class="code">{{.HTTPMethod}} {{.Path}}</span><div class="tiny">HTTP {{.StatusCode}}</div></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No audit events match these filters.</div>{{end}}</section></div></main></div></body></html>`))
+	`<nav class="tabs" aria-label="Audit categories"><a class="tab {{if not .Category}}active{{end}}" href="/audit-log">All Activity</a><a class="tab {{if eq .Category "configuration"}}active{{end}}" href="/audit-log?category=configuration">Configuration</a><a class="tab {{if eq .Category "deployment"}}active{{end}}" href="/audit-log?category=deployment">Deployment</a><a class="tab {{if eq .Category "drift"}}active{{end}}" href="/audit-log?category=drift">Drift</a><a class="tab {{if eq .Category "security"}}active{{end}}" href="/audit-log?category=security">Security &amp; Users</a></nav><section class="card"><div class="cardbody"><form class="detailform" method="get" action="/audit-log">{{if .Category}}<input type="hidden" name="category" value="{{.Category}}">{{end}}<label>Actor<input class="input" name="actor" value="{{.Actor}}" placeholder="username"></label><label>Action<input class="input" name="action" value="{{.Action}}" placeholder="deployment.approve"></label><label>Outcome<select class="select" name="outcome"><option value="">All</option><option value="success" {{if eq .Outcome "success"}}selected{{end}}>Success</option><option value="failed" {{if eq .Outcome "failed"}}selected{{end}}>Failed</option><option value="denied" {{if eq .Outcome "denied"}}selected{{end}}>Denied</option></select></label><label>From<input class="input" type="date" name="from" value="{{.From}}"></label><label>To<input class="input" type="date" name="to" value="{{.To}}"></label><button class="btn primary" type="submit">Filter</button><a class="btn" href="/audit-log">Clear</a></form></div></section>` +
+	`<section class="card" style="margin-top:14px"><div class="cardhead"><div><div class="cardtitle">Recorded events</div><div class="cardsub">{{len .Events}} most recent matching event(s)</div></div><span class="badge ok">Append-only</span></div>{{if .Events}}<div style="overflow:auto"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Reason / details</th><th>Request</th></tr></thead><tbody>{{range .Events}}<tr><td>{{auditTime .Timestamp}}</td><td>{{.Actor}}</td><td><span class="code">{{.Action}}</span></td><td>{{.ResourceType}}{{if .ResourceID}}<div class="tiny code">{{.ResourceID}}</div>{{end}}</td><td>{{if eq .Outcome "success"}}<span class="badge ok">Success</span>{{else if eq .Outcome "denied"}}<span class="badge warn">Denied</span>{{else}}<span class="badge off">Failed</span>{{end}}</td><td>{{if .Details}}{{.Details}}{{else}}—{{end}}</td><td><span class="code">{{.HTTPMethod}} {{.Path}}</span><div class="tiny">HTTP {{.StatusCode}}</div></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No audit events match these filters.</div>{{end}}` + paginationHTML + `</section></div></main></div></body></html>`))
 
 func registerAuditRoutes(mux *http.ServeMux, store storage.AuditStore) {
 	mux.HandleFunc("/audit-log", func(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +39,7 @@ func registerAuditRoutes(mux *http.ServeMux, store storage.AuditStore) {
 		}
 		filter := audit.Filter{
 			Actor: r.URL.Query().Get("actor"), Action: r.URL.Query().Get("action"),
-			Outcome: r.URL.Query().Get("outcome"), Limit: 200,
+			Outcome: r.URL.Query().Get("outcome"), Limit: 10000,
 		}
 		var err error
 		filter.Since, err = parseAuditDate(r.URL.Query().Get("from"), false)
@@ -66,10 +67,12 @@ func registerAuditRoutes(mux *http.ServeMux, store storage.AuditStore) {
 			}
 			events = filtered
 		}
+		pagination := paginationFromRequest(r, len(events))
+		events = paginateSlice(events, pagination)
 		view := auditPageData{
 			Page: "audit", Actor: filter.Actor, Action: filter.Action, Category: category,
 			Outcome: filter.Outcome, From: r.URL.Query().Get("from"),
-			To: r.URL.Query().Get("to"), Events: events,
+			To: r.URL.Query().Get("to"), Events: events, Pagination: pagination,
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := auditPage.Execute(w, view); err != nil {
