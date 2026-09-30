@@ -87,6 +87,7 @@ func TestUserAdministrationUsesWorkingDropdownsAndAlignedActions(t *testing.T) {
 	for _, blocked := range []string{
 		`id="add-{{$group.ID}}"`,
 		`id="member-{{$group.ID}}-{{.Username}}"`,
+		`<span class="badge {{if .Enabled}}ok{{else}}off{{end}}">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</span>`,
 	} {
 		if strings.Contains(usersPageHTML, blocked) {
 			t.Fatalf("group membership still relies on dialog trigger %q", blocked)
