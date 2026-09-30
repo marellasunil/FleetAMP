@@ -66,6 +66,31 @@ func TestUserAdministrationSeparatesRolesAndGroupMembership(t *testing.T) {
 	}
 }
 
+func TestUserAdministrationUsesWorkingDropdownsAndAlignedActions(t *testing.T) {
+	for _, expected := range []string{
+		`<details class="filter-dropdown" data-multiselect>`,
+		`<summary class="select">Select groups</summary>`,
+		`<summary class="select">Select roles</summary>`,
+		`<details class="member-editor"><summary class="btn primary">Add member</summary>`,
+		`<details class="member-editor"><summary class="btn">Edit</summary>`,
+		`<input type="hidden" name="enabled" value="true">`,
+		`<input type="hidden" name="enabled" value="false">`,
+		`.action-row .btn,.action-row summary.btn{min-height:38px;height:38px`,
+	} {
+		if !strings.Contains(usersPageHTML, expected) {
+			t.Fatalf("user administration is missing %q", expected)
+		}
+	}
+	for _, blocked := range []string{
+		`id="add-{{$group.ID}}"`,
+		`id="member-{{$group.ID}}-{{.Username}}"`,
+	} {
+		if strings.Contains(usersPageHTML, blocked) {
+			t.Fatalf("group membership still relies on dialog trigger %q", blocked)
+		}
+	}
+}
+
 func TestGroupMoveAuditDetailsPreserveDeploymentContext(t *testing.T) {
 	request := httptest.NewRequest("POST", "/agents/collector-1/group", strings.NewReader(url.Values{
 		"audit_previous_group": {"Payments NL Dev"},
