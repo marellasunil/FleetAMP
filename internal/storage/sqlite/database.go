@@ -126,6 +126,20 @@ func (d *Database) initialize(ctx context.Context) error {
 			enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
 			UNIQUE(name,environment)
 		)`,
+		`CREATE TABLE IF NOT EXISTS blueprint_patterns (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '',
+			platform TEXT NOT NULL, receiver_id TEXT NOT NULL, receiver_config TEXT NOT NULL,
+			signals TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS blueprint_blocks (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL, component_id TEXT NOT NULL, config_yaml TEXT NOT NULL,
+			signals TEXT NOT NULL DEFAULT '[]', platforms TEXT NOT NULL DEFAULT '[]',
+			required INTEGER NOT NULL DEFAULT 0, locked INTEGER NOT NULL DEFAULT 0,
+			enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			UNIQUE(kind,component_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS group_deployment_requests (
             id TEXT PRIMARY KEY, group_id TEXT NOT NULL, group_name TEXT NOT NULL,
             group_selector TEXT NOT NULL, label_selector TEXT NOT NULL DEFAULT '{}', configuration_id TEXT NOT NULL,
