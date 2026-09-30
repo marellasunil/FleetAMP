@@ -73,8 +73,11 @@ func TestUserAdministrationUsesWorkingDropdownsAndAlignedActions(t *testing.T) {
 		`<summary class="select">Select roles</summary>`,
 		`<details class="member-editor"><summary class="btn primary">Add member</summary>`,
 		`<details class="member-editor"><summary class="btn">Edit</summary>`,
-		`<input type="hidden" name="enabled" value="true">`,
-		`<input type="hidden" name="enabled" value="false">`,
+		`<input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}">`,
+		`{{if .Enabled}}Enabled{{else}}Disabled{{end}}`,
+		`.filter-menu .membership-option{display:grid!important;grid-template-columns:18px minmax(0,1fr)`,
+		`.member-panel{position:fixed`,
+		`document.addEventListener('click', (event) => {`,
 		`.action-row .btn,.action-row summary.btn{min-height:38px;height:38px`,
 	} {
 		if !strings.Contains(usersPageHTML, expected) {
