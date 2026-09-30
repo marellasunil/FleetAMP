@@ -255,7 +255,7 @@ func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler
 		}
 		publicHealth := r.URL.Path == "/health" || r.URL.Path == "/ready"
 		publicAuthentication := r.URL.Path == "/setup" || r.URL.Path == "/login" ||
-			r.URL.Path == "/assets/theme.js" || r.URL.Path == "/assets/fleetamp-logo.svg"
+			r.URL.Path == "/assets/theme.js" || r.URL.Path == "/assets/fleetamp-logo.png"
 		protected := !publicHealth && !publicAuthentication
 		if protected {
 			if auth != nil && !auth.authorize(w, r, cfg) {

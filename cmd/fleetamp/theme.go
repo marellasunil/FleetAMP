@@ -56,7 +56,7 @@ body{background:radial-gradient(circle at 55% 0,var(--theme-bg-top) 0,var(--them
 pre{background:var(--theme-code);border-color:var(--theme-border);color:var(--theme-text)}
 .code{color:var(--blue)}
 .theme-toggle{width:100%;border:0;font:inherit;text-align:left;cursor:pointer}
-:root[data-theme="light"] .brandmark{box-shadow:0 6px 20px #536ed02e}
+:root[data-theme="light"] .brandmark{box-shadow:none}
 `
 
 const themeJS = `(() => {
