@@ -66,3 +66,29 @@ func TestThemeAssetAndControlsAreRendered(t *testing.T) {
 		t.Fatal("authentication page does not expose the theme control")
 	}
 }
+
+func TestSupportingTextUsesReadableStandardSizes(t *testing.T) {
+	for _, expected := range []string{
+		`body{margin:0`,
+		`font-size:15px;line-height:1.45`,
+		`.subtitle{color:var(--muted);font-size:13px`,
+		`.cardsub{font-size:12px`,
+		`.tiny{font-size:12px`,
+		`th{font-size:11px`,
+		`.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#8aa8e8;font-size:12px`,
+	} {
+		if !strings.Contains(baseControlPlaneCSS, expected) {
+			t.Fatalf("control-plane typography is missing %q", expected)
+		}
+	}
+	for _, tooSmall := range []string{
+		`.tiny{font-size:10px`,
+		`.cardsub{font-size:10px`,
+		`th{font-size:9px`,
+		`.navlabel{font-size:9px`,
+	} {
+		if strings.Contains(baseControlPlaneCSS, tooSmall) {
+			t.Fatalf("control-plane typography still contains undersized rule %q", tooSmall)
+		}
+	}
+}
