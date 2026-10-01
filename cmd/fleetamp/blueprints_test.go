@@ -108,17 +108,17 @@ func TestGenerateBlueprintIncludesAdminBlock(t *testing.T) {
 
 func TestBlueprintPageProvidesGuidedVisualJourney(t *testing.T) {
 	for _, expected := range []string{
-		"Observability goal",
-		"Platform",
-		"Technology",
-		"Deployment / instrumentation approach",
-		"Recommended design",
-		"Telemetry flow preview",
+		"What do you want to observe?",
+		"Where does it run?",
+		"What technology is used?",
+		"How should FleetAMP instrument or deploy it?",
+		"Recommended governed design",
+		"Current Blueprint path",
 		"Validate and save version",
 		"Validate, save & request approval",
-		"data-pattern-platform",
-		"data-implementation-steps",
-		"data-flow-destination",
+		"data-decision-builder",
+		"data-stage=\"platform\" hidden",
+		"data-flow-path",
 	} {
 		if !strings.Contains(blueprintsHTML, expected) {
 			t.Fatalf("guided Blueprint page is missing %q", expected)
@@ -161,10 +161,27 @@ func TestBlueprintPageExplainsApproachTradeoffs(t *testing.T) {
 		"Advantages",
 		"Requirements",
 		"Considerations",
-		"data-approach-guidance",
+		"data-approach-details",
 	} {
 		if !strings.Contains(blueprintsHTML, expected) {
 			t.Fatalf("Blueprint approach guidance is missing %q", expected)
+		}
+	}
+}
+
+func TestBlueprintStartsWithCapabilityAndRevealsConnectedStages(t *testing.T) {
+	for _, expected := range []string{
+		`type="radio" name="goal" value="apm"`,
+		`data-stage="platform" hidden`,
+		`data-stage="technology" hidden`,
+		`data-stage="approach" hidden`,
+		`data-stage="signals" hidden`,
+		`show('platform',!!goal)`,
+		`show('technology',!!platform)`,
+		`show('approach',!!technology)`,
+	} {
+		if !strings.Contains(blueprintsHTML, expected) {
+			t.Fatalf("progressive Blueprint flow is missing %q", expected)
 		}
 	}
 }
