@@ -106,26 +106,30 @@ func TestGenerateBlueprintIncludesAdminBlock(t *testing.T) {
 	}
 }
 
-func TestBlueprintPageIsClearedForRedesign(t *testing.T) {
+func TestBlueprintPageOffersCommonStarters(t *testing.T) {
 	for _, expected := range []string{
-		"Blueprint workspace",
-		"Redesign planned",
-		"Instrumentation Guides",
+		"Starter catalog",
+		"Choose what you want to observe",
+		"Use Blueprint",
+		"Validate & save version",
 		`href="/instrumentation"`,
 	} {
 		if !strings.Contains(blueprintsHTML, expected) {
-			t.Fatalf("Blueprint placeholder is missing %q", expected)
+			t.Fatalf("Blueprint page is missing %q", expected)
 		}
 	}
-	for _, removed := range []string{
-		"data-decision-builder",
-		"create_pattern",
-		"create_block",
-		"Validate and save version",
-		"Validate, save & request approval",
-	} {
-		if strings.Contains(blueprintsHTML, removed) {
-			t.Fatalf("Blueprint page still contains removed workflow %q", removed)
+}
+
+func TestCommonBlueprintCatalog(t *testing.T) {
+	starters := blueprints.CommonStarters()
+	if len(starters) != 6 { t.Fatalf("got %d common Blueprints, want 6", len(starters)) }
+	seen := map[string]bool{}
+	for _, starter := range starters {
+		if starter.ID == "" || starter.Name == "" || starter.Pattern == nil { t.Fatalf("incomplete starter: %#v", starter) }
+		if seen[starter.ID] { t.Fatalf("duplicate starter ID %q", starter.ID) }
+		seen[starter.ID] = true
+		if !blueprintApproachAllowed(starter.Goal, starter.Platform, starter.Method) {
+			t.Fatalf("starter %q has incompatible approach %s/%s/%s", starter.ID, starter.Goal, starter.Platform, starter.Method)
 		}
 	}
 }
@@ -136,6 +140,7 @@ func TestBlueprintApproachCompatibility(t *testing.T) {
 		{"apm", "linux", "ebpf", true},
 		{"apm", "kubernetes", "operator", true},
 		{"kubernetes", "kubernetes", "daemonset", true},
+		{"kubernetes", "kubernetes", "deployment", true},
 		{"apm", "kubernetes", "sidecar", true},
 		{"apm", "linux", "operator", false},
 		{"infrastructure", "linux", "sidecar", false},
