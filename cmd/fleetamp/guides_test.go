@@ -42,6 +42,7 @@ func TestInstrumentationGuideRevealsOneConnectedStageAtATime(t *testing.T) {
 	for _, expected := range []string{
 		`stages=['capability','platform','technology','method','topology']`,
 		`col.hidden=!parent`,
+		`link.hidden=!parent`,
 		`parent_ids`,
 		`result.hidden=!(last&&last.steps&&last.steps.length)`,
 	} {
