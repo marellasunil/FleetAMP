@@ -5,8 +5,8 @@ Blueprints provide a guided path from an observability intent to a governed Open
 ## Workflow
 
 1. An administrator creates a Destination Profile containing the approved exporter component, endpoint, authentication references, TLS, and environment.
-2. A user or Group Owner chooses a Blueprint, one accessible group, the required signals, and an enabled Destination Profile.
-3. FleetAMP generates explicit Collector YAML. v0.3.0 includes **OTLP application service** and **Host observability** patterns. Memory limiting and batching are included as governed defaults.
+2. A user or Group Owner chooses a Blueprint, reviews its topology and prerequisites, then selects one accessible group and an enabled Destination Profile.
+3. FleetAMP generates explicit Collector YAML. Memory limiting and batching are included as governed, locked defaults.
 4. FleetAMP validates YAML syntax, Collector structure, and—when `FLEETAMP_OTELCOL_BINARY` is configured—the real Collector distribution.
 5. FleetAMP stores the result as an immutable, group-scoped configuration version.
 6. The requester may save the version for review or immediately submit it to an eligible reviewer with a change reason and a 7–90 day validity period.
@@ -23,11 +23,17 @@ Blueprints provide a guided path from an observability intent to a governed Open
 - Creating a Blueprint version does not deploy it. A separate eligible reviewer must approve the request.
 - Deleting a Destination Profile does not alter existing immutable configuration versions.
 
-## Initial patterns
+## Common Blueprint catalog
 
-| Pattern | Signals | Receiver | Governed processors |
+| Blueprint | Typical use | Signals | Receiver/topology |
 | --- | --- | --- | --- |
-| OTLP application service | Metrics, traces, logs (selectable) | OTLP gRPC and HTTP | Memory limiter, batch |
-| Host observability | Metrics | Host metrics | Memory limiter, batch |
+| Application APM | Instrumented services | Metrics, traces, logs | OTLP through a Collector gateway |
+| Linux Host Baseline | VMs and physical Linux servers | Metrics | Host Collector with host metrics |
+| Kubernetes Cluster Baseline | Cluster inventory and health | Metrics | Single cluster-level Collector deployment |
+| Central OTLP Gateway | Shared ingestion tier | Metrics, traces, logs | OTLP gRPC and HTTP gateway |
+| Application Logs | File-based Linux application logs | Logs | File log receiver on a host Collector |
+| Prometheus Metrics | Existing Prometheus-format endpoints | Metrics | Prometheus scrape through a Collector |
+
+Blueprints intentionally exclude exporter credentials, backend endpoints, and TLS policy. Administrators own those values through Destination Profiles. Paths, scrape targets, permissions, resource sizing, and Kubernetes RBAC must be reviewed for the organization before approval.
 
 Additional patterns, reusable modules, profile versioning, and richer policy controls can be added without changing the approval and deployment contract.

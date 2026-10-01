@@ -33,11 +33,18 @@ type blueprintView struct {
 	Destinations   []*blueprints.DestinationProfile
 	Patterns       []*blueprints.Pattern
 	Blocks         []*blueprints.Block
+	Starters       []*blueprints.Starter
+	Selected       *blueprints.Starter
 	IsAdmin        bool
 	Message, Error string
 }
 
-const blueprintsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FleetAMP Blueprints</title><style>` + controlPlaneCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Instrumentation / Blueprints</div><div class="pagetitle">Blueprints</div><div class="subtitle">A governed configuration design workspace planned for a future FleetAMP release.</div></div><div class="topactions"><span class="soon">Redesign planned</span></div></header><div class="content"><section class="card"><div class="cardhead"><div><div class="cardtitle">Blueprint workspace</div><div class="cardsub">This area has been intentionally cleared while the Blueprint experience is redesigned.</div></div></div><div class="cardbody"><div class="empty"><p>Use <a href="/instrumentation">Instrumentation Guides</a> to explore the recommended OpenTelemetry approach.</p><p class="tiny">Patterns, reusable configuration composition, preview, versioning and approval integration will return here after the redesign.</p></div></div></section></div></main></div></body></html>`
+const blueprintsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FleetAMP Blueprints</title><style>` + controlPlaneCSS + `
+.blueprint-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.blueprint-card{display:flex;flex-direction:column;padding:18px;min-height:250px}.blueprint-card h3{font-size:17px;margin:8px 0}.blueprint-card p{color:var(--muted);margin:0 0 16px}.blueprint-card .btn{margin-top:auto;text-align:center}.chips{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 16px}.chip{border:1px solid #304866;background:#101e31;border-radius:999px;color:#9db1d0;font-size:11px;padding:4px 8px}.blueprint-detail{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,.72fr);gap:18px}.summary-box{border:1px solid #263a55;background:#0a1626;border-radius:10px;padding:16px;margin-top:14px}.summary-box h4{margin:0 0 9px}.summary-box ul{margin:0;padding-left:20px;color:var(--muted)}.flowline{padding:12px 14px;border:1px solid #34517a;border-radius:9px;background:#10213b;color:#c9d8f2;font-weight:650;margin:14px 0}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}.field{display:flex;flex-direction:column;gap:6px;color:#9fb0c8;font-size:12px}.field.full{grid-column:1/-1}.field .input,.field .select{width:100%;min-width:0}.form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.notice{border:1px solid #2f735e;background:#10372d;color:#77dfba;border-radius:8px;padding:10px 12px;margin-bottom:16px}.notice.error{border-color:#7a3a42;background:#3b1b22;color:#ff9aa5}@media(max-width:1100px){.blueprint-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.blueprint-detail{grid-template-columns:1fr}}@media(max-width:720px){.blueprint-grid,.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}}
+</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Instrumentation / Blueprints</div><div class="pagetitle">Blueprints</div><div class="subtitle">Start with a proven observability design, then validate, version and submit it through governance.</div></div><div class="topactions"><a class="btn" href="/instrumentation">Open Guides</a></div></header><div class="content">{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+{{if .Selected}}<div class="sectionhead"><div><div class="eyebrow">{{.Selected.Category}} Blueprint</div><div class="sectiontitle">{{.Selected.Name}}</div><div class="subtitle">{{.Selected.Description}}</div></div><a class="btn" href="/blueprints">← All Blueprints</a></div><div class="blueprint-detail"><section class="card"><div class="cardhead"><div><div class="cardtitle">Design summary</div><div class="cardsub">Review the recommended flow before creating a configuration version.</div></div></div><div class="cardbody"><div class="flowline">{{.Selected.Topology}}</div><div class="chips">{{range .Selected.Signals}}<span class="chip">{{.}}</span>{{end}}<span class="chip">{{.Selected.Platform}}</span><span class="chip">{{.Selected.Method}}</span></div><div class="summary-box"><h4>What this provides</h4><ul>{{range .Selected.Outcomes}}<li>{{.}}</li>{{end}}</ul></div><div class="summary-box"><h4>Before you deploy</h4><ul>{{range .Selected.Requirements}}<li>{{.}}</li>{{end}}</ul></div><p class="tiny">FleetAMP adds the governed memory limiter and batch processor. The selected Destination Profile supplies the approved exporter and protected endpoint settings.</p></div></section>
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">Generation is validated before anything is saved or sent for approval.</div></div></div><div class="cardbody">{{if not .Destinations}}<div class="notice error">An administrator must create an enabled Destination Profile before this Blueprint can be used.</div>{{end}}<form method="post" action="/blueprints"><input type="hidden" name="action" value="generate"><input type="hidden" name="goal" value="{{.Selected.Goal}}"><input type="hidden" name="platform" value="{{.Selected.Platform}}"><input type="hidden" name="technology" value="{{.Selected.Technology}}"><input type="hidden" name="instrumentation_method" value="{{.Selected.Method}}"><input type="hidden" name="pattern" value="{{.Selected.Pattern.ID}}">{{range .Selected.Signals}}<input type="hidden" name="signal" value="{{.}}">{{end}}<div class="form-grid"><label class="field full">Target group<select class="select" name="group_id" id="blueprint-group" required><option value="">Select a group</option>{{range .Groups}}<option value="{{.Group.ID}}">{{.Group.Name}}</option>{{end}}</select></label><label class="field full">Destination Profile<select class="select" name="destination_id" required><option value="">Select a destination</option>{{range .Destinations}}{{if .Enabled}}<option value="{{.ID}}">{{.Name}} · {{.Environment}}</option>{{end}}{{end}}</select></label><label class="field">Configuration name<input class="input" name="name" value="{{.Selected.Name}}" required></label><label class="field">Version<input class="input" name="version" placeholder="for example 1.0.0" required></label><label class="field full">Assigned reviewer<select class="select" name="assigned_reviewer" id="blueprint-reviewer"><option value="">Select when requesting approval</option>{{range .Groups}}{{$group := .Group.ID}}{{range .Reviewers}}<option value="{{.Username}}" data-group="{{$group}}">{{.DisplayName}}</option>{{end}}{{end}}</select></label><label class="field full">Change reason<textarea class="input" name="change_reason" rows="3" placeholder="Why is this observability change needed?"></textarea></label><label class="field">Approval expiry<select class="select" name="expiry_days"><option value="30">30 days</option><option value="60">60 days</option><option value="90">90 days</option></select></label></div><div class="form-actions"><button class="btn" type="submit" name="submit_for_approval" value="false" {{if not .Destinations}}disabled{{end}}>Validate & save version</button><button class="btn primary" type="submit" name="submit_for_approval" value="true" {{if not .Destinations}}disabled{{end}}>Validate, save & request approval</button></div></form></div></section></div>
+{{else}}<div class="sectionhead"><div><div class="eyebrow">Starter catalog</div><div class="sectiontitle">Choose what you want to observe</div><div class="subtitle">Common Blueprints are starting points, not fixed deployment templates. Review organization-specific values before approval.</div></div></div><div class="blueprint-grid">{{range .Starters}}<article class="card blueprint-card"><div class="eyebrow">{{.Category}}</div><h3>{{.Name}}</h3><p>{{.Description}}</p><div class="chips">{{range .Signals}}<span class="chip">{{.}}</span>{{end}}<span class="chip">{{.Platform}}</span></div><a class="btn primary" href="/blueprints?starter={{.ID}}">Use Blueprint</a></article>{{end}}</div>{{end}}</div></main></div><script>(function(){var group=document.getElementById('blueprint-group'),reviewer=document.getElementById('blueprint-reviewer');if(!group||!reviewer)return;function sync(){var selected=group.value;Array.from(reviewer.options).forEach(function(option){if(!option.dataset.group)return;option.hidden=option.dataset.group!==selected;option.disabled=option.dataset.group!==selected});reviewer.value=''}group.addEventListener('change',sync);sync()})();</script></body></html>`
 
 var blueprintsPage = template.Must(template.New("blueprints").Parse(blueprintsHTML))
 
@@ -279,7 +286,14 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 			}
 			items = append(items, blueprintGroup{Group: g, Reviewers: reviewers})
 		}
-		if err := blueprintsPage.Execute(w, blueprintView{Page: "blueprints", Groups: items, Destinations: profiles, Patterns: patterns, Blocks: blocks, IsAdmin: roleNow == roleAdmin, Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error")}); err != nil {
+		starters := blueprints.CommonStarters()
+		var selected *blueprints.Starter
+		selectedID := strings.TrimSpace(r.URL.Query().Get("starter"))
+		for _, starter := range starters {
+			if starter.ID == selectedID { selected = starter; break }
+		}
+		if selectedID != "" && selected == nil { http.NotFound(w, r); return }
+		if err := blueprintsPage.Execute(w, blueprintView{Page: "blueprints", Groups: items, Destinations: profiles, Patterns: patterns, Blocks: blocks, Starters: starters, Selected: selected, IsAdmin: roleNow == roleAdmin, Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error")}); err != nil {
 			internalServerError(w, err)
 		}
 	})
@@ -343,21 +357,17 @@ func decryptDestinationConfig(pepper []byte, stored string) (string, error) {
 func ensureDefaultBlueprintCatalog(ctx context.Context, store storage.DestinationProfileStore) error {
 	patterns, err := store.ListPatterns(ctx)
 	if err != nil { return err }
-	if len(patterns) == 0 {
-		defaults := []*blueprints.Pattern{
-			blueprints.NewPattern("OTLP application service", "Receive application metrics, traces and logs over OTLP.", "application", "otlp", "protocols:\n  grpc: {}\n  http: {}", []string{"metrics","traces","logs"}),
-			blueprints.NewPattern("Host observability", "Collect host CPU, memory, disk, filesystem and network metrics.", "linux", "hostmetrics", "collection_interval: 30s\nscrapers:\n  cpu: {}\n  memory: {}\n  disk: {}\n  filesystem: {}\n  network: {}", []string{"metrics"}),
-		}
-		for _, p := range defaults { if err := store.CreatePattern(ctx, p); err != nil { return err } }
+	existingPatterns := make(map[string]bool, len(patterns))
+	for _, pattern := range patterns { existingPatterns[pattern.ID] = true }
+	for _, starter := range blueprints.CommonStarters() {
+		if !existingPatterns[starter.Pattern.ID] { if err := store.CreatePattern(ctx, starter.Pattern); err != nil { return err } }
 	}
 	blocks, err := store.ListBlocks(ctx)
 	if err != nil { return err }
-	if len(blocks) == 0 {
-		defaults := []*blueprints.Block{
-			blueprints.NewBlock("Memory limiter", "Protect the Collector from memory exhaustion.", "processors", "memory_limiter", "check_interval: 1s\nlimit_mib: 512\nspike_limit_mib: 128", []string{"metrics","traces","logs"}, []string{"any"}, true, true),
-			blueprints.NewBlock("Batch processor", "Batch telemetry before export.", "processors", "batch", "timeout: 5s", []string{"metrics","traces","logs"}, []string{"any"}, true, true),
-		}
-		for _, b := range defaults { if err := store.CreateBlock(ctx, b); err != nil { return err } }
+	existingBlocks := make(map[string]bool, len(blocks))
+	for _, block := range blocks { existingBlocks[block.ID] = true }
+	for _, block := range blueprints.CommonSafetyBlocks() {
+		if !existingBlocks[block.ID] { if err := store.CreateBlock(ctx, block); err != nil { return err } }
 	}
 	return nil
 }
@@ -369,6 +379,7 @@ func blueprintApproachAllowed(goal, platform, method string) bool {
 		"collector-agent": {"infrastructure": {"linux"}, "logs": {"linux"}, "custom": {"linux"}},
 		"operator": {"apm": {"kubernetes"}, "kubernetes": {"kubernetes"}},
 		"daemonset": {"kubernetes": {"kubernetes"}, "infrastructure": {"kubernetes"}, "logs": {"kubernetes"}},
+		"deployment": {"kubernetes": {"kubernetes"}, "infrastructure": {"kubernetes"}, "custom": {"kubernetes"}},
 		"sidecar": {"apm": {"kubernetes"}, "logs": {"kubernetes"}, "custom": {"kubernetes"}},
 		"gateway": {"apm": {"application", "kubernetes", "any"}, "kubernetes": {"kubernetes"}, "infrastructure": {"kubernetes", "any"}, "logs": {"kubernetes", "application", "any"}, "custom": {"kubernetes", "application", "any"}},
 		"ebpf": {"apm": {"linux"}, "kubernetes": {"kubernetes"}},
@@ -440,4 +451,3 @@ func generateBlueprintYAML(pattern *blueprints.Pattern, selected []string, block
 	if err != nil { return "", err }
 	return string(b), nil
 }
-
