@@ -13,6 +13,14 @@ Blueprints provide a guided path from an observability intent to a governed Open
 7. Approval uses the existing target snapshot and diff. Approval starts the existing OpAMP deployment; failed delivery invokes automatic rollback to the last successful version.
 8. Deployment status, effective configuration, drift, rollback, and audit history remain available in their existing FleetAMP pages.
 
+## Using a Blueprint from a group
+
+Open **Groups & Labels**, select the group, and choose **Use Blueprint** from **Create configuration version**. FleetAMP carries the group into the Blueprint catalog and preselects it after a Blueprint is chosen. The generated version returns to the same group workflow for preview, approval, deployment, rollback and history.
+
+The manual configuration editor starts from the latest successfully applied deployment. Its section tabs, configuration name and version therefore describe the current working baseline. FleetAMP rejects an unchanged copy, a changed configuration that reuses the baseline version, or an existing name/version pair.
+
+Group deployment history shows governed deploy and rollback attempts in every delivery status. Automatic drift reconciliation remains visible in the Audit log instead of being mixed into this user-facing deployment timeline.
+
 ## Authorization and safety
 
 - Only administrators manage Destination Profiles.

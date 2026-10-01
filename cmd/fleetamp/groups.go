@@ -105,6 +105,8 @@ type groupDetailView struct {
 	EditorSections       []configurationSectionView
 	EditorBaseline       string
 	EditorBaseID         string
+	EditorName           string
+	EditorVersion        string
 	EditorVersions       []*configs.Configuration
 	EditorError          string
 	CanEditConfiguration bool
@@ -522,6 +524,20 @@ func configurationsForGroup(items []*configs.Configuration, groupID string) []*c
 		}
 	}
 	return filtered
+}
+
+func preferredGroupConfiguration(available []*configs.Configuration, history []*configs.Deployment, requestedID string) *configs.Configuration {
+	if len(available) == 0 { return nil }
+	if requestedID != "" {
+		for _, candidate := range available { if candidate.ID == requestedID { return candidate } }
+	}
+	for _, deployment := range history {
+		if deployment.Status != configs.DeliveryApplied { continue }
+		for _, candidate := range available {
+			if candidate.ID == deployment.ConfigurationID { return candidate }
+		}
+	}
+	return available[0]
 }
 
 func groupNamesForAgent(ctx context.Context, store storage.GroupStore, agent *agents.ManagedAgent) []string {
@@ -1190,6 +1206,37 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Name, version and configuration YAML are required."), http.StatusSeeOther)
 					return
 				}
+				if baseID := strings.TrimSpace(r.FormValue("base_configuration_id")); baseID != "" {
+					base, baseErr := configStore.Get(r.Context(), baseID)
+					if baseErr != nil || base.GroupID != group.ID {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Group configuration baseline not found."), http.StatusSeeOther)
+						return
+					}
+					changed, changedErr := configs.ChangedConfigurationSections(base.Content, content)
+					if changedErr != nil {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(changedErr.Error()), http.StatusSeeOther)
+						return
+					}
+					if len(changed) == 0 {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("No configuration changes were detected. The existing version remains current."), http.StatusSeeOther)
+						return
+					}
+					if version == base.Version {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Configuration changed; enter a new version instead of reusing "+base.Version+"."), http.StatusSeeOther)
+						return
+					}
+				}
+				existingConfigurations, listErr := configStore.List(r.Context())
+				if listErr != nil {
+					internalServerError(w, listErr)
+					return
+				}
+				for _, existing := range configurationsForGroup(existingConfigurations, group.ID) {
+					if existing.Name == name && existing.Version == version {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Configuration name and version already exist. Enter a new version."), http.StatusSeeOther)
+						return
+					}
+				}
 				policies, policyErr := sectionPolicyStore.List(r.Context())
 				if policyErr != nil {
 					internalServerError(w, policyErr)
@@ -1622,18 +1669,14 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		editorBaseline := defaultGroupConfiguration
 		editorBaseID := ""
+		editorName := group.Name + ".yaml"
+		editorVersion := ""
 		if len(available) > 0 {
-			selectedBase := available[0]
-			if requestedBaseID := strings.TrimSpace(r.URL.Query().Get("editor_base")); requestedBaseID != "" {
-				for _, candidate := range available {
-					if candidate.ID == requestedBaseID {
-						selectedBase = candidate
-						break
-					}
-				}
-			}
+			selectedBase := preferredGroupConfiguration(available, deploymentHistory, strings.TrimSpace(r.URL.Query().Get("editor_base")))
 			editorBaseline = selectedBase.Content
 			editorBaseID = selectedBase.ID
+			editorName = selectedBase.Name
+			editorVersion = selectedBase.Version
 		}
 		view := groupDetailView{
 			Page: "groups", Group: group, Members: members, ActiveMembers: activeGroupMemberCount(members), Configurations: available,
@@ -1647,6 +1690,8 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			RequestUpdated:     r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),
 			EditorBaseline:       editorBaseline,
 			EditorBaseID:         editorBaseID,
+			EditorName:           editorName,
+			EditorVersion:        editorVersion,
 			EditorVersions:       available,
 			CanEditConfiguration: true,
 			CanDeleteAgents:      currentRole(auth, r) == roleAdmin || currentRole(auth, r) == roleGroupOwner,
