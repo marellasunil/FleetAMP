@@ -105,3 +105,66 @@ func TestGenerateBlueprintIncludesAdminBlock(t *testing.T) {
 		t.Fatalf("admin block missing from generated Blueprint:\n%s", content)
 	}
 }
+
+func TestBlueprintPageProvidesGuidedVisualJourney(t *testing.T) {
+	for _, expected := range []string{
+		"Observability goal",
+		"Platform",
+		"Technology",
+		"Deployment / instrumentation approach",
+		"Recommended design",
+		"Telemetry flow preview",
+		"Validate and save version",
+		"Validate, save & request approval",
+		"data-pattern-platform",
+		"data-implementation-steps",
+		"data-flow-destination",
+	} {
+		if !strings.Contains(blueprintsHTML, expected) {
+			t.Fatalf("guided Blueprint page is missing %q", expected)
+		}
+	}
+}
+
+func TestBlueprintJourneyRequiresCompatibleContext(t *testing.T) {
+	if !strings.Contains(blueprintsHTML, `name="goal" required`) ||
+		!strings.Contains(blueprintsHTML, `name="platform" required`) ||
+		!strings.Contains(blueprintsHTML, `name="technology" required`) {
+		t.Fatal("Blueprint context fields are not required")
+	}
+}
+
+func TestBlueprintApproachCompatibility(t *testing.T) {
+	for _, test := range []struct{ goal, platform, method string; allowed bool }{
+		{"apm", "linux", "auto-linux", true},
+		{"apm", "linux", "ebpf", true},
+		{"apm", "kubernetes", "operator", true},
+		{"kubernetes", "kubernetes", "daemonset", true},
+		{"apm", "kubernetes", "sidecar", true},
+		{"apm", "linux", "operator", false},
+		{"infrastructure", "linux", "sidecar", false},
+	} {
+		if got := blueprintApproachAllowed(test.goal, test.platform, test.method); got != test.allowed {
+			t.Fatalf("blueprintApproachAllowed(%q,%q,%q)=%v, want %v", test.goal, test.platform, test.method, got, test.allowed)
+		}
+	}
+}
+
+func TestBlueprintPageExplainsApproachTradeoffs(t *testing.T) {
+	for _, expected := range []string{
+		"Language auto-instrumentation",
+		"OpenTelemetry Operator injection",
+		"Kubernetes DaemonSet",
+		"Kubernetes sidecar",
+		"Central Collector gateway",
+		"eBPF / OBI",
+		"Advantages",
+		"Requirements",
+		"Considerations",
+		"data-approach-guidance",
+	} {
+		if !strings.Contains(blueprintsHTML, expected) {
+			t.Fatalf("Blueprint approach guidance is missing %q", expected)
+		}
+	}
+}
