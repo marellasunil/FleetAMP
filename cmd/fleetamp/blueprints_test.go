@@ -106,31 +106,27 @@ func TestGenerateBlueprintIncludesAdminBlock(t *testing.T) {
 	}
 }
 
-func TestBlueprintPageProvidesGuidedVisualJourney(t *testing.T) {
+func TestBlueprintPageIsClearedForRedesign(t *testing.T) {
 	for _, expected := range []string{
-		"What do you want to observe?",
-		"Where does it run?",
-		"What technology is used?",
-		"How should FleetAMP instrument or deploy it?",
-		"Recommended governed design",
-		"Current Blueprint path",
-		"Validate and save version",
-		"Validate, save & request approval",
-		"data-decision-builder",
-		"data-stage=\"platform\" hidden",
-		"data-flow-path",
+		"Blueprint workspace",
+		"Redesign planned",
+		"Instrumentation Guides",
+		`href="/instrumentation"`,
 	} {
 		if !strings.Contains(blueprintsHTML, expected) {
-			t.Fatalf("guided Blueprint page is missing %q", expected)
+			t.Fatalf("Blueprint placeholder is missing %q", expected)
 		}
 	}
-}
-
-func TestBlueprintJourneyRequiresCompatibleContext(t *testing.T) {
-	if !strings.Contains(blueprintsHTML, `type="radio" name="goal" value="apm" required`) ||
-		!strings.Contains(blueprintsHTML, `type="radio" name="platform" value="linux" required`) ||
-		!strings.Contains(blueprintsHTML, `type="radio" name="technology" value="java" required`) {
-		t.Fatal("Blueprint context fields are not required")
+	for _, removed := range []string{
+		"data-decision-builder",
+		"create_pattern",
+		"create_block",
+		"Validate and save version",
+		"Validate, save & request approval",
+	} {
+		if strings.Contains(blueprintsHTML, removed) {
+			t.Fatalf("Blueprint page still contains removed workflow %q", removed)
+		}
 	}
 }
 
@@ -146,42 +142,6 @@ func TestBlueprintApproachCompatibility(t *testing.T) {
 	} {
 		if got := blueprintApproachAllowed(test.goal, test.platform, test.method); got != test.allowed {
 			t.Fatalf("blueprintApproachAllowed(%q,%q,%q)=%v, want %v", test.goal, test.platform, test.method, got, test.allowed)
-		}
-	}
-}
-
-func TestBlueprintPageExplainsApproachTradeoffs(t *testing.T) {
-	for _, expected := range []string{
-		"Auto-instrumentation",
-		"OTel Operator",
-		"DaemonSet",
-		"Sidecar",
-		"Gateway",
-		"eBPF / OBI",
-		"Advantages",
-		"Requirements",
-		"Considerations",
-		"data-approach-details",
-	} {
-		if !strings.Contains(blueprintsHTML, expected) {
-			t.Fatalf("Blueprint approach guidance is missing %q", expected)
-		}
-	}
-}
-
-func TestBlueprintStartsWithCapabilityAndRevealsConnectedStages(t *testing.T) {
-	for _, expected := range []string{
-		`type="radio" name="goal" value="apm"`,
-		`data-stage="platform" hidden`,
-		`data-stage="technology" hidden`,
-		`data-stage="approach" hidden`,
-		`data-stage="signals" hidden`,
-		`show('platform',!!goal)`,
-		`show('technology',!!platform)`,
-		`show('approach',!!technology)`,
-	} {
-		if !strings.Contains(blueprintsHTML, expected) {
-			t.Fatalf("progressive Blueprint flow is missing %q", expected)
 		}
 	}
 }
