@@ -56,7 +56,9 @@ const guideHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="
 <div class="guide-detail"><h2 data-title>Select a capability</h2><p data-summary>Only the first decision is shown. Your selection reveals the next connected branch.</p><div class="guide-path" data-path></div><div class="guide-detail-grid"><div class="guide-detail-item"><strong>Advantages</strong><span data-advantages>—</span></div><div class="guide-detail-item"><strong>Requirements</strong><span data-requirements>—</span></div><div class="guide-detail-item"><strong>Considerations</strong><span data-considerations>—</span></div></div></div>
 </div></div></section>
 <section class="card guide-result" data-result hidden><div class="cardhead"><div><div class="cardtitle">Recommended implementation direction</div><div class="cardsub">Guidance only—this page does not create or deploy configuration.</div></div></div><div class="cardbody"><ol data-steps></ol><div class="notice" style="margin-top:14px">Patterns and Blueprints will be designed separately in a future iteration.</div></div></section>
-</div></main></div><script>
+</div></main></div><script src="/assets/guides.js" defer></script></body></html>`
+
+const guideJS = `
 (function(){
  var root=document.querySelector("[data-guide]");if(!root)return;
  function get(n){var x=root.querySelector("[name='"+n+"']:checked");return x?x.value:""}
@@ -69,11 +71,16 @@ const guideHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="
  function update(){var goal=get("goal"),platform=get("platform"),technology=get("technology"),method=get("method"),topology=get("topology");filter("[data-goals]","goals",goal);show("platform",!!goal);filter("[data-tech-goals]","techGoals",goal);show("technology",!!platform);filter("[data-method-goals]","methodGoals",goal);show("method",!!technology);filter("[data-platforms]","platforms",platform);show("topology",!!method);path();var title=root.querySelector("[data-title]"),summary=root.querySelector("[data-summary]");if(method){var g=guidance[method];title.textContent=topology?text("topology"):g[0];summary.textContent=topology?g[1]+" Recommended topology: "+text("topology")+".":g[1];root.querySelector("[data-advantages]").textContent=g[1];root.querySelector("[data-requirements]").textContent=g[2];root.querySelector("[data-considerations]").textContent=g[3]}else if(technology){title.textContent=text("technology");summary.textContent="Choose an instrumentation or collection method."}else if(platform){title.textContent=text("platform");summary.textContent="Choose the technology or telemetry source."}else if(goal){title.textContent=text("goal");summary.textContent="Choose where this capability runs."}else{title.textContent="Select a capability";summary.textContent="Only the first decision is shown. Your selection reveals the next connected branch.";root.querySelector("[data-advantages]").textContent="—";root.querySelector("[data-requirements]").textContent="—";root.querySelector("[data-considerations]").textContent="—"}var result=document.querySelector("[data-result]");result.hidden=!topology;if(topology){var list=result.querySelector("[data-steps]");list.replaceChildren();steps[topology].forEach(function(v){var li=document.createElement("li");li.textContent=v;list.append(li)})}}
  root.addEventListener("change",update);document.querySelector("[data-guide-reset]").addEventListener("click",function(){root.querySelectorAll("input").forEach(function(x){x.checked=false});update()});update();
 })();
-</script></body></html>`
+`
 
 var guidePage = template.Must(template.New("guide").Parse(guideHTML))
 
 func registerGuideRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /assets/guides.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(guideJS))
+	})
 	mux.HandleFunc("GET /instrumentation", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = guidePage.Execute(w, upcomingView{Page: "instrumentation"})
