@@ -48,6 +48,23 @@ func TestInstrumentationGuideRevealsOneConnectedStageAtATime(t *testing.T) {
 }
 
 
+func TestInstrumentationGuideDrawsAnimatedMultiBranchConnectors(t *testing.T) {
+	for _, expected := range []string{
+		`data-connectors`,
+		`guide-arrow-muted`,
+		`guide-arrow-selected`,
+		`function drawConnectors()`,
+		`stages=[["goal","platform"],["platform","technology"],["technology","method"],["method","topology"]]`,
+		`marker-end`,
+		`prefers-reduced-motion:reduce`,
+		`window.addEventListener("resize",scheduleConnectors)`,
+	} {
+		if !strings.Contains(guideHTML+guideJS+guideCSS, expected) {
+			t.Fatalf("animated Guide connectors are missing %q", expected)
+		}
+	}
+}
+
 func TestInstrumentationGuideScriptAsset(t *testing.T) {
 	mux := http.NewServeMux()
 	registerGuideRoutes(mux)
