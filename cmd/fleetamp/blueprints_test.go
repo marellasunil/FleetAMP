@@ -111,7 +111,7 @@ func TestBlueprintPageProvidesGuidedVisualJourney(t *testing.T) {
 		"Observability goal",
 		"Platform",
 		"Technology",
-		"Instrumentation method",
+		"Deployment / instrumentation approach",
 		"Recommended design",
 		"Telemetry flow preview",
 		"Validate and save version",
