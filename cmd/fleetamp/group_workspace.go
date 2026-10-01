@@ -65,7 +65,14 @@ func groupDeploymentHistory(ctx context.Context, members []*agents.ManagedAgent,
 		if err != nil {
 			return nil, err
 		}
-		history = append(history, items...)
+		for _, item := range items {
+			// Reconciliation is an internal drift-recovery operation. The group
+			// deployment timeline is reserved for user-governed deployments and
+			// rollbacks, while reconcile events remain available in Audit logs.
+			if item.Action != configs.DeploymentActionReconcile {
+				history = append(history, item)
+			}
+		}
 	}
 	sort.Slice(history, func(i, j int) bool {
 		return history[i].CreatedAt.After(history[j].CreatedAt)
