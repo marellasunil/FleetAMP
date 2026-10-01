@@ -86,7 +86,7 @@ func TestIntelligenceUpcomingPagesDescribeGovernedRoadmap(t *testing.T) {
 	}
 }
 
-func TestInstrumentationGuideUpcomingPage(t *testing.T) {
+func TestInstrumentationGuideNavigationPage(t *testing.T) {
 	mux := http.NewServeMux()
 	registerUIRoutes(mux)
 
@@ -98,7 +98,7 @@ func TestInstrumentationGuideUpcomingPage(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	for _, expected := range []string{"Instrumentation Guides", "Follow technology-specific OpenTelemetry onboarding", "Upcoming"} {
+	for _, expected := range []string{"Instrumentation Guides", "Application performance", "Select a radio node", "Recommended implementation direction"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("instrumentation page is missing %q", expected)
 		}
