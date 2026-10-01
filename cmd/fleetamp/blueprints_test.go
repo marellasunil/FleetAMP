@@ -127,9 +127,9 @@ func TestBlueprintPageProvidesGuidedVisualJourney(t *testing.T) {
 }
 
 func TestBlueprintJourneyRequiresCompatibleContext(t *testing.T) {
-	if !strings.Contains(blueprintsHTML, `name="goal" required`) ||
-		!strings.Contains(blueprintsHTML, `name="platform" required`) ||
-		!strings.Contains(blueprintsHTML, `name="technology" required`) {
+	if !strings.Contains(blueprintsHTML, `type="radio" name="goal" value="apm" required`) ||
+		!strings.Contains(blueprintsHTML, `type="radio" name="platform" value="linux" required`) ||
+		!strings.Contains(blueprintsHTML, `type="radio" name="technology" value="java" required`) {
 		t.Fatal("Blueprint context fields are not required")
 	}
 }
@@ -152,11 +152,11 @@ func TestBlueprintApproachCompatibility(t *testing.T) {
 
 func TestBlueprintPageExplainsApproachTradeoffs(t *testing.T) {
 	for _, expected := range []string{
-		"Language auto-instrumentation",
-		"OpenTelemetry Operator injection",
-		"Kubernetes DaemonSet",
-		"Kubernetes sidecar",
-		"Central Collector gateway",
+		"Auto-instrumentation",
+		"OTel Operator",
+		"DaemonSet",
+		"Sidecar",
+		"Gateway",
 		"eBPF / OBI",
 		"Advantages",
 		"Requirements",
