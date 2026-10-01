@@ -27,7 +27,7 @@ func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
 			t.Fatalf("side navigation is missing %q", path)
 		}
 	}
-	for _, expected := range []string{"Groups & Labels", "/account", "/assets/fleetamp-logo-transparent.png"} {
+	for _, expected := range []string{"Groups & Labels", "AI Insights", "/agents?tab=ai-insights", "SLOs & Alerts", "/agents?tab=slos", "Pipelines", "/agents?tab=pipelines", "/account", "/assets/fleetamp-logo-transparent.png"} {
 		if !strings.Contains(sideNav, expected) {
 			t.Fatalf("side navigation is missing %q", expected)
 		}

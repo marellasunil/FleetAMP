@@ -41,9 +41,26 @@ func TestInstrumentationGuideRevealsOneConnectedStageAtATime(t *testing.T) {
 		`show("topology",!!method)`,
 		`result.hidden=!topology`,
 	} {
-		if !strings.Contains(guideHTML, expected) {
+		if !strings.Contains(guideHTML+guideJS, expected) {
 			t.Fatalf("progressive Guide behavior is missing %q", expected)
 		}
+	}
+}
+
+
+func TestInstrumentationGuideScriptAsset(t *testing.T) {
+	mux := http.NewServeMux()
+	registerGuideRoutes(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/assets/guides.js", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /assets/guides.js returned %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "text/javascript; charset=utf-8" {
+		t.Fatalf("unexpected guides.js content type %q", got)
+	}
+	if !strings.Contains(response.Body.String(), "root.addEventListener") {
+		t.Fatal("guides.js does not contain the interaction handler")
 	}
 }
 
