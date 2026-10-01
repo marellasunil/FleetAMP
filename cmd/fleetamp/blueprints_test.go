@@ -105,3 +105,31 @@ func TestGenerateBlueprintIncludesAdminBlock(t *testing.T) {
 		t.Fatalf("admin block missing from generated Blueprint:\n%s", content)
 	}
 }
+
+func TestBlueprintPageProvidesGuidedVisualJourney(t *testing.T) {
+	for _, expected := range []string{
+		"Observability goal",
+		"Platform",
+		"Technology",
+		"Instrumentation method",
+		"Recommended design",
+		"Telemetry flow preview",
+		"Validate and save version",
+		"Validate, save & request approval",
+		"data-pattern-platform",
+		"data-implementation-steps",
+		"data-flow-destination",
+	} {
+		if !strings.Contains(blueprintsHTML, expected) {
+			t.Fatalf("guided Blueprint page is missing %q", expected)
+		}
+	}
+}
+
+func TestBlueprintJourneyRequiresCompatibleContext(t *testing.T) {
+	if !strings.Contains(blueprintsHTML, `name="goal" required`) ||
+		!strings.Contains(blueprintsHTML, `name="platform" required`) ||
+		!strings.Contains(blueprintsHTML, `name="technology" required`) {
+		t.Fatal("Blueprint context fields are not required")
+	}
+}
