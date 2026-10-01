@@ -133,3 +133,38 @@ func TestBlueprintJourneyRequiresCompatibleContext(t *testing.T) {
 		t.Fatal("Blueprint context fields are not required")
 	}
 }
+
+func TestBlueprintApproachCompatibility(t *testing.T) {
+	for _, test := range []struct{ goal, platform, method string; allowed bool }{
+		{"apm", "linux", "auto-linux", true},
+		{"apm", "linux", "ebpf", true},
+		{"apm", "kubernetes", "operator", true},
+		{"kubernetes", "kubernetes", "daemonset", true},
+		{"apm", "kubernetes", "sidecar", true},
+		{"apm", "linux", "operator", false},
+		{"infrastructure", "linux", "sidecar", false},
+	} {
+		if got := blueprintApproachAllowed(test.goal, test.platform, test.method); got != test.allowed {
+			t.Fatalf("blueprintApproachAllowed(%q,%q,%q)=%v, want %v", test.goal, test.platform, test.method, got, test.allowed)
+		}
+	}
+}
+
+func TestBlueprintPageExplainsApproachTradeoffs(t *testing.T) {
+	for _, expected := range []string{
+		"Language auto-instrumentation",
+		"OpenTelemetry Operator injection",
+		"Kubernetes DaemonSet",
+		"Kubernetes sidecar",
+		"Central Collector gateway",
+		"eBPF / OBI",
+		"Advantages",
+		"Requirements",
+		"Considerations",
+		"data-approach-guidance",
+	} {
+		if !strings.Contains(blueprintsHTML, expected) {
+			t.Fatalf("Blueprint approach guidance is missing %q", expected)
+		}
+	}
+}
