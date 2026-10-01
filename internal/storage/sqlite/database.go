@@ -81,6 +81,8 @@ func (d *Database) DriftPolicy() *DriftPolicyStore { return &DriftPolicyStore{db
 // Audit returns the SQLite-backed append-only audit repository.
 func (d *Database) Audit() *AuditStore { return &AuditStore{db: d.db} }
 
+func (d *Database) GuideCatalog() *GuideCatalogStore { return &GuideCatalogStore{db: d.db} }
+
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -196,6 +198,9 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_occurred ON audit_events(occurred_at DESC,id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor,occurred_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_action ON audit_events(action,occurred_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS guide_catalog_versions (version INTEGER PRIMARY KEY, content TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, published_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS guide_catalog_state (singleton INTEGER PRIMARY KEY CHECK(singleton=1), active_version INTEGER NOT NULL, FOREIGN KEY(active_version) REFERENCES guide_catalog_versions(version))`,
+		`CREATE TABLE IF NOT EXISTS guide_catalog_draft (singleton INTEGER PRIMARY KEY CHECK(singleton=1), content TEXT NOT NULL, base_version INTEGER NOT NULL, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 	}
 	for _, statement := range statements {
 		if _, err := d.db.ExecContext(ctx, statement); err != nil {

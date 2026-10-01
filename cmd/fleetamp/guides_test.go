@@ -8,6 +8,11 @@ import (
 )
 
 func TestInstrumentationGuideProvidesProgressiveDecisionMap(t *testing.T) {
+	mux := http.NewServeMux()
+	registerGuideRoutes(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/instrumentation", nil))
+	page := response.Body.String()
 	for _, expected := range []string{
 		"Instrumentation Guides",
 		"Application performance",
@@ -27,7 +32,7 @@ func TestInstrumentationGuideProvidesProgressiveDecisionMap(t *testing.T) {
 		"Requirements",
 		"Considerations",
 	} {
-		if !strings.Contains(guideHTML, expected) {
+		if !strings.Contains(page, expected) {
 			t.Fatalf("Instrumentation Guide is missing %q", expected)
 		}
 	}
@@ -35,11 +40,10 @@ func TestInstrumentationGuideProvidesProgressiveDecisionMap(t *testing.T) {
 
 func TestInstrumentationGuideRevealsOneConnectedStageAtATime(t *testing.T) {
 	for _, expected := range []string{
-		`show("platform",!!goal)`,
-		`show("technology",!!platform)`,
-		`show("method",!!technology)`,
-		`show("topology",!!method)`,
-		`result.hidden=!topology`,
+		`stages=['capability','platform','technology','method','topology']`,
+		`col.hidden=!parent`,
+		`parent_ids`,
+		`result.hidden=!(last&&last.steps&&last.steps.length)`,
 	} {
 		if !strings.Contains(guideHTML+guideJS, expected) {
 			t.Fatalf("progressive Guide behavior is missing %q", expected)
@@ -53,11 +57,11 @@ func TestInstrumentationGuideDrawsAnimatedMultiBranchConnectors(t *testing.T) {
 		`data-connectors`,
 		`guide-arrow-muted`,
 		`guide-arrow-selected`,
-		`function drawConnectors()`,
-		`stages=[["goal","platform"],["platform","technology"],["technology","method"],["method","topology"]]`,
+		`function draw()`,
+		`stages=['capability','platform','technology','method','topology']`,
 		`marker-end`,
 		`prefers-reduced-motion:reduce`,
-		`window.addEventListener("resize",scheduleConnectors)`,
+		`window.addEventListener('resize',draw)`,
 	} {
 		if !strings.Contains(guideHTML+guideJS+guideCSS, expected) {
 			t.Fatalf("animated Guide connectors are missing %q", expected)

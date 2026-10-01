@@ -111,6 +111,7 @@ func main() {
 	sectionPolicyStore := database.SectionPolicies()
 	driftPolicyStore := database.DriftPolicy()
 	auditStore := database.Audit()
+	guideCatalogStore := database.GuideCatalog()
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
 	go runApprovalExpiryLoop(ctx, groupRequestStore, groupStore, notifier)
@@ -210,7 +211,7 @@ func main() {
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
-	registerUIRoutes(mux)
+	registerUIRoutes(mux, guideCatalogStore, auth)
 
 	httpServer := &http.Server{
 		Addr:              httpAddr,
