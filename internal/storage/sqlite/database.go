@@ -83,6 +83,8 @@ func (d *Database) Audit() *AuditStore { return &AuditStore{db: d.db} }
 
 func (d *Database) GuideCatalog() *GuideCatalogStore { return &GuideCatalogStore{db: d.db} }
 
+func (d *Database) GroupSecrets() *GroupSecretStore { return &GroupSecretStore{db: d.db} }
+
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -122,6 +124,11 @@ func (d *Database) initialize(ctx context.Context) error {
             selector TEXT NOT NULL, owners TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)`,
+		`CREATE TABLE IF NOT EXISTS group_secrets (
+			group_id TEXT NOT NULL, secret_key TEXT NOT NULL, ciphertext TEXT NOT NULL,
+			updated_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			PRIMARY KEY(group_id,secret_key), FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE
+		)`,
 		`CREATE TABLE IF NOT EXISTS destination_profiles (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL, environment TEXT NOT NULL,
 			exporter_id TEXT NOT NULL, exporter_config TEXT NOT NULL,

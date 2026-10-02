@@ -146,7 +146,10 @@ The first patterns are OTLP application services and host observability.
 Blueprints remain governed: administrators own destination endpoint, auth and
 TLS configuration; Group Owners remain scoped to their groups; deployments
 still require an eligible reviewer and retain existing rollback, drift and
-audit behavior. See the [v0.3.0 release plan](docs/releases/v0.3.0.md).
+audit behavior. Group-scoped passwords and tokens can be kept as encrypted,
+write-only [group secrets](docs/group-secrets.md) and referenced as
+`${secret:key}` without storing their values in immutable configuration
+versions. See the [v0.3.0 release plan](docs/releases/v0.3.0.md).
 
 The console now uses scalable, task-focused tabs and shared pagination for
 Fleet, Groups & Labels, administration, and Audit Log. See the

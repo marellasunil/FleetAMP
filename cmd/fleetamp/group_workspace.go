@@ -55,7 +55,16 @@ func driftForGroupAgent(ctx context.Context, agentUID string, configStore storag
 	if err != nil {
 		return configs.DriftResult{}, err
 	}
-	return configs.CompareDesiredEffective(desired.Content, adapter.EffectiveConfig(agentUID)), nil
+	desiredContent, effectiveContent := desired.Content, adapter.EffectiveConfig(agentUID)
+	if runtimeGroupSecrets != nil && desired.GroupID != "" {
+		resolved, resolveErr := runtimeGroupSecrets.materialize(ctx, desired.GroupID, desiredContent)
+		if resolveErr != nil { return configs.DriftResult{}, resolveErr }
+		desiredContent, err = runtimeGroupSecrets.normalize(ctx, desired.GroupID, resolved)
+		if err != nil { return configs.DriftResult{}, err }
+		effectiveContent, err = runtimeGroupSecrets.normalize(ctx, desired.GroupID, effectiveContent)
+		if err != nil { return configs.DriftResult{}, err }
+	}
+	return configs.CompareDesiredEffective(desiredContent, effectiveContent), nil
 }
 
 func groupDeploymentHistory(ctx context.Context, members []*agents.ManagedAgent, store storage.DeploymentStore, limit int) ([]*configs.Deployment, error) {
