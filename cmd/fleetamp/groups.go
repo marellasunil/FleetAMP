@@ -306,7 +306,9 @@ func validateConfigurationForApproval(ctx context.Context, validator *configs.Va
 	if configuration == nil {
 		return errors.New("configuration is required")
 	}
-	validation := validator.Validate(ctx, configuration.Content)
+	content, err := configurationContentForValidation(ctx, configuration.GroupID, configuration.Content)
+	if err != nil { return err }
+	validation := validator.Validate(ctx, content)
 	if validation.Valid {
 		return nil
 	}
@@ -387,6 +389,10 @@ func labelSelectorText(selector map[string]string) string {
 }
 
 func previewGroupConfiguration(ctx context.Context, members []*agents.ManagedAgent, enabled bool, configuration *configs.Configuration, assignmentStore storage.AssignmentStore) ([]groupPreviewAgent, int, error) {
+	comparisonConfiguration, err := configurationForDelivery(ctx, configuration)
+	if err != nil {
+		return nil, 0, err
+	}
 	preview, _ := previewGroupMembers(members, enabled)
 	eligible := 0
 	for index := range preview {
@@ -395,9 +401,9 @@ func previewGroupConfiguration(ctx context.Context, members []*agents.ManagedAge
 		}
 		latest, err := latestAssignmentForAgent(ctx, assignmentStore, preview[index].Agent.InstanceUID)
 		switch {
-		case err == nil && latest.ConfigurationHash == configuration.Hash && latest.Status == configs.DeliveryApplied:
+		case err == nil && latest.ConfigurationHash == comparisonConfiguration.Hash && latest.Status == configs.DeliveryApplied:
 			preview[index].Reason = "Already deployed · Latest"
-		case err == nil && latest.ConfigurationHash == configuration.Hash &&
+		case err == nil && latest.ConfigurationHash == comparisonConfiguration.Hash &&
 			(latest.Status == configs.DeliveryPending || latest.Status == configs.DeliverySent || latest.Status == configs.DeliveryApplying):
 			preview[index].Reason = "Deployment already in progress"
 		case err != nil && !errors.Is(err, storage.ErrAssignmentNotFound):
@@ -1246,7 +1252,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(policyErr.Error()), http.StatusSeeOther)
 					return
 				}
-				validation := validator.Validate(r.Context(), content)
+				validationContent, resolveErr := configurationContentForValidation(r.Context(), group.ID, content)
+				if resolveErr != nil {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(resolveErr.Error()), http.StatusSeeOther)
+					return
+				}
+				validation := validator.Validate(r.Context(), validationContent)
 				if !validation.Valid {
 					message := strings.TrimSpace(validation.Error)
 					if message == "" {

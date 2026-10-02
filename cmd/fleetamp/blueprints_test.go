@@ -111,7 +111,8 @@ func TestBlueprintPageOffersCommonStarters(t *testing.T) {
 		"Starter catalog",
 		"Choose what you want to observe",
 		"Use Blueprint",
-		"Validate & save version",
+		"Generated Collector configuration",
+		"Validate &amp; save version",
 		`href="/instrumentation"`,
 	} {
 		if !strings.Contains(blueprintsHTML, expected) {

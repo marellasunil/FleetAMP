@@ -108,7 +108,23 @@ func runDriftReconciler(
 				slog.Error("read desired configuration for drift", "component", "config", "error", err)
 				continue
 			}
-			if configs.CompareDesiredEffective(configuration.Content, report.Content).InSync {
+			comparisonConfiguration, err := configurationForDelivery(ctx, configuration)
+			if err != nil {
+				slog.Error("resolve desired configuration for drift", "component", "config", "error", err)
+				continue
+			}
+			desiredContent, effectiveContent := comparisonConfiguration.Content, report.Content
+			if runtimeGroupSecrets != nil && configuration.GroupID != "" && secretReferencePattern.MatchString(configuration.Content) {
+				desiredContent, err = runtimeGroupSecrets.normalize(ctx, configuration.GroupID, desiredContent)
+				if err == nil {
+					effectiveContent, err = runtimeGroupSecrets.normalize(ctx, configuration.GroupID, effectiveContent)
+				}
+				if err != nil {
+					slog.Error("normalize group secrets for drift", "component", "config", "error", err)
+					continue
+				}
+			}
+			if configs.CompareDesiredEffective(desiredContent, effectiveContent).InSync {
 				continue
 			}
 			_, deployment, err := deliverConfiguration(ctx, report.AgentInstanceUID, configuration,

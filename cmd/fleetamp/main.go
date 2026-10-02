@@ -112,6 +112,8 @@ func main() {
 	driftPolicyStore := database.DriftPolicy()
 	auditStore := database.Audit()
 	guideCatalogStore := database.GuideCatalog()
+	groupSecretStore := database.GroupSecrets()
+	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
 	go runApprovalExpiryLoop(ctx, groupRequestStore, groupStore, notifier)
@@ -210,6 +212,7 @@ func main() {
 	registerAuditRoutes(mux, auditStore)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
+	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
 	registerUIRoutes(mux, guideCatalogStore, auth)
 
@@ -496,7 +499,16 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			view.DesiredConfig, _ = configStore.Get(r.Context(), view.Assignment.ConfigurationID)
 		}
 		if view.DesiredConfig != nil {
-			view.Drift = configs.CompareDesiredEffective(view.DesiredConfig.Content, view.EffectiveConfig)
+			desiredForComparison := view.DesiredConfig.Content
+			if runtimeGroupSecrets != nil && view.DesiredConfig.GroupID != "" && secretReferencePattern.MatchString(desiredForComparison) {
+				if resolved, resolveErr := runtimeGroupSecrets.materialize(r.Context(), view.DesiredConfig.GroupID, desiredForComparison); resolveErr == nil {
+					desiredForComparison, _ = runtimeGroupSecrets.normalize(r.Context(), view.DesiredConfig.GroupID, resolved)
+					view.EffectiveConfig, _ = runtimeGroupSecrets.normalize(r.Context(), view.DesiredConfig.GroupID, view.EffectiveConfig)
+				} else {
+					view.EffectiveConfig = "Protected effective configuration unavailable until all referenced group secrets are restored."
+				}
+			}
+			view.Drift = configs.CompareDesiredEffective(desiredForComparison, view.EffectiveConfig)
 			allConfigs, _ := configStore.List(r.Context())
 			for _, candidate := range allConfigs {
 				if candidate.Name == view.DesiredConfig.Name {
@@ -658,6 +670,9 @@ func deliverConfiguration(ctx context.Context, agentUID string, configuration *c
 }
 
 func deliverConfigurationWithRollback(ctx context.Context, agentUID string, configuration *configs.Configuration, action configs.DeploymentAction, previousConfigurationID, approvalRequestID string, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) (*configs.Assignment, *configs.Deployment, error) {
+	resolvedConfiguration, err := configurationForDelivery(ctx, configuration)
+	if err != nil { return nil, nil, fmt.Errorf("resolve group secrets: %w", err) }
+	configuration = resolvedConfiguration
 	latest, err := latestAssignmentForAgent(ctx, assignmentStore, agentUID)
 	if err != nil && !errors.Is(err, storage.ErrAssignmentNotFound) {
 		return nil, nil, err
