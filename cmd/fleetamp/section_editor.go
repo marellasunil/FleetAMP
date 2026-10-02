@@ -41,6 +41,7 @@ type sectionPolicyView struct {
 type composeSectionsRequest struct {
 	Baseline string            `json:"baseline"`
 	Sections map[string]string `json:"sections"`
+	GroupID  string            `json:"group_id,omitempty"`
 }
 
 type composeSectionsResponse struct {
@@ -193,7 +194,12 @@ func registerSectionEditorRoutes(mux *http.ServeMux, policyStore storage.Section
 			})
 			return
 		}
-		validation := validator.Validate(r.Context(), content)
+		validationContent, resolveErr := configurationContentForValidation(r.Context(), request.GroupID, content)
+		if resolveErr != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, composeSectionsResponse{Validation: configs.ValidationResult{Error: resolveErr.Error()}})
+			return
+		}
+		validation := validator.Validate(r.Context(), validationContent)
 		status := http.StatusOK
 		if !validation.Valid {
 			status = http.StatusUnprocessableEntity

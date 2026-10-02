@@ -90,7 +90,7 @@ func auditCategoryMatches(category, action string) bool {
 	case "drift":
 		return strings.HasPrefix(action, "drift.") || action == "configuration.reconcile"
 	case "security":
-		return strings.HasPrefix(action, "authentication.") || strings.HasPrefix(action, "user.") || strings.HasPrefix(action, "policy.")
+		return strings.HasPrefix(action, "authentication.") || strings.HasPrefix(action, "user.") || strings.HasPrefix(action, "policy.") || strings.HasPrefix(action, "secret.")
 	default:
 		return true
 	}
@@ -238,6 +238,9 @@ func describeAuditAction(r *http.Request) (string, string, string) {
 		return "guide."+firstNonEmpty(strings.TrimSpace(r.FormValue("action")), "update"), "guide_catalog", firstNonEmpty(r.FormValue("id"), r.FormValue("version"))
 	}
 	action := strings.TrimSpace(r.FormValue("action"))
+	if strings.HasSuffix(r.URL.Path, "/secrets") {
+		return "secret." + firstNonEmpty(action, "update"), "group_secret", resourceID
+	}
 	if r.URL.Path == "/blueprints" {
 		switch action {
 		case "create_destination":
