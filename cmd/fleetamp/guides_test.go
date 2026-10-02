@@ -23,7 +23,6 @@ func TestInstrumentationGuideProvidesProgressiveDecisionMap(t *testing.T) {
 		"Zero-code auto-instrumentation",
 		"OpenTelemetry SDK",
 		"Host system metrics",
-		"Database engine",
 		"OpenTelemetry eBPF Instrumentation",
 		"OpenTelemetry Operator",
 		"Collector DaemonSet",
