@@ -534,7 +534,7 @@ func (a *Adapter) SendRemoteConfig(ctx context.Context, instanceUID string, conf
 		InstanceUid:  uid,
 		Capabilities: uint64(protobufs.ServerCapabilities_ServerCapabilities_OffersRemoteConfig),
 		RemoteConfig: &protobufs.AgentRemoteConfig{
-			Config: &protobufs.AgentConfigMap{ConfigMap: map[string]*protobufs.AgentConfigFile{
+			Config: &protobufs.AgentConfigMap{ConfigMap: map[string]*protobufs.AgentConfigObject{
 				name: {Body: []byte(config.Content), ContentType: config.ContentType},
 			}},
 			ConfigHash: hash,
