@@ -55,7 +55,16 @@ func driftForGroupAgent(ctx context.Context, agentUID string, configStore storag
 	if err != nil {
 		return configs.DriftResult{}, err
 	}
-	return configs.CompareDesiredEffective(desired.Content, adapter.EffectiveConfig(agentUID)), nil
+	desiredContent, effectiveContent := desired.Content, adapter.EffectiveConfig(agentUID)
+	if runtimeGroupSecrets != nil && desired.GroupID != "" {
+		resolved, resolveErr := runtimeGroupSecrets.materialize(ctx, desired.GroupID, desiredContent)
+		if resolveErr != nil { return configs.DriftResult{}, resolveErr }
+		desiredContent, err = runtimeGroupSecrets.normalize(ctx, desired.GroupID, resolved)
+		if err != nil { return configs.DriftResult{}, err }
+		effectiveContent, err = runtimeGroupSecrets.normalize(ctx, desired.GroupID, effectiveContent)
+		if err != nil { return configs.DriftResult{}, err }
+	}
+	return configs.CompareDesiredEffective(desiredContent, effectiveContent), nil
 }
 
 func groupDeploymentHistory(ctx context.Context, members []*agents.ManagedAgent, store storage.DeploymentStore, limit int) ([]*configs.Deployment, error) {
@@ -65,7 +74,14 @@ func groupDeploymentHistory(ctx context.Context, members []*agents.ManagedAgent,
 		if err != nil {
 			return nil, err
 		}
-		history = append(history, items...)
+		for _, item := range items {
+			// Reconciliation is an internal drift-recovery operation. The group
+			// deployment timeline is reserved for user-governed deployments and
+			// rollbacks, while reconcile events remain available in Audit logs.
+			if item.Action != configs.DeploymentActionReconcile {
+				history = append(history, item)
+			}
+		}
 	}
 	sort.Slice(history, func(i, j int) bool {
 		return history[i].CreatedAt.After(history[j].CreatedAt)

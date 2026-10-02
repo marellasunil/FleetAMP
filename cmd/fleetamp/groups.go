@@ -105,6 +105,8 @@ type groupDetailView struct {
 	EditorSections       []configurationSectionView
 	EditorBaseline       string
 	EditorBaseID         string
+	EditorName           string
+	EditorVersion        string
 	EditorVersions       []*configs.Configuration
 	EditorError          string
 	CanEditConfiguration bool
@@ -304,7 +306,9 @@ func validateConfigurationForApproval(ctx context.Context, validator *configs.Va
 	if configuration == nil {
 		return errors.New("configuration is required")
 	}
-	validation := validator.Validate(ctx, configuration.Content)
+	content, err := configurationContentForValidation(ctx, configuration.GroupID, configuration.Content)
+	if err != nil { return err }
+	validation := validator.Validate(ctx, content)
 	if validation.Valid {
 		return nil
 	}
@@ -385,6 +389,10 @@ func labelSelectorText(selector map[string]string) string {
 }
 
 func previewGroupConfiguration(ctx context.Context, members []*agents.ManagedAgent, enabled bool, configuration *configs.Configuration, assignmentStore storage.AssignmentStore) ([]groupPreviewAgent, int, error) {
+	comparisonConfiguration, err := configurationForDelivery(ctx, configuration)
+	if err != nil {
+		return nil, 0, err
+	}
 	preview, _ := previewGroupMembers(members, enabled)
 	eligible := 0
 	for index := range preview {
@@ -393,9 +401,9 @@ func previewGroupConfiguration(ctx context.Context, members []*agents.ManagedAge
 		}
 		latest, err := latestAssignmentForAgent(ctx, assignmentStore, preview[index].Agent.InstanceUID)
 		switch {
-		case err == nil && latest.ConfigurationHash == configuration.Hash && latest.Status == configs.DeliveryApplied:
+		case err == nil && latest.ConfigurationHash == comparisonConfiguration.Hash && latest.Status == configs.DeliveryApplied:
 			preview[index].Reason = "Already deployed · Latest"
-		case err == nil && latest.ConfigurationHash == configuration.Hash &&
+		case err == nil && latest.ConfigurationHash == comparisonConfiguration.Hash &&
 			(latest.Status == configs.DeliveryPending || latest.Status == configs.DeliverySent || latest.Status == configs.DeliveryApplying):
 			preview[index].Reason = "Deployment already in progress"
 		case err != nil && !errors.Is(err, storage.ErrAssignmentNotFound):
@@ -522,6 +530,20 @@ func configurationsForGroup(items []*configs.Configuration, groupID string) []*c
 		}
 	}
 	return filtered
+}
+
+func preferredGroupConfiguration(available []*configs.Configuration, history []*configs.Deployment, requestedID string) *configs.Configuration {
+	if len(available) == 0 { return nil }
+	if requestedID != "" {
+		for _, candidate := range available { if candidate.ID == requestedID { return candidate } }
+	}
+	for _, deployment := range history {
+		if deployment.Status != configs.DeliveryApplied { continue }
+		for _, candidate := range available {
+			if candidate.ID == deployment.ConfigurationID { return candidate }
+		}
+	}
+	return available[0]
 }
 
 func groupNamesForAgent(ctx context.Context, store storage.GroupStore, agent *agents.ManagedAgent) []string {
@@ -1190,6 +1212,37 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Name, version and configuration YAML are required."), http.StatusSeeOther)
 					return
 				}
+				if baseID := strings.TrimSpace(r.FormValue("base_configuration_id")); baseID != "" {
+					base, baseErr := configStore.Get(r.Context(), baseID)
+					if baseErr != nil || base.GroupID != group.ID {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Group configuration baseline not found."), http.StatusSeeOther)
+						return
+					}
+					changed, changedErr := configs.ChangedConfigurationSections(base.Content, content)
+					if changedErr != nil {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(changedErr.Error()), http.StatusSeeOther)
+						return
+					}
+					if len(changed) == 0 {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("No configuration changes were detected. The existing version remains current."), http.StatusSeeOther)
+						return
+					}
+					if version == base.Version {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Configuration changed; enter a new version instead of reusing "+base.Version+"."), http.StatusSeeOther)
+						return
+					}
+				}
+				existingConfigurations, listErr := configStore.List(r.Context())
+				if listErr != nil {
+					internalServerError(w, listErr)
+					return
+				}
+				for _, existing := range configurationsForGroup(existingConfigurations, group.ID) {
+					if existing.Name == name && existing.Version == version {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Configuration name and version already exist. Enter a new version."), http.StatusSeeOther)
+						return
+					}
+				}
 				policies, policyErr := sectionPolicyStore.List(r.Context())
 				if policyErr != nil {
 					internalServerError(w, policyErr)
@@ -1199,7 +1252,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(policyErr.Error()), http.StatusSeeOther)
 					return
 				}
-				validation := validator.Validate(r.Context(), content)
+				validationContent, resolveErr := configurationContentForValidation(r.Context(), group.ID, content)
+				if resolveErr != nil {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(resolveErr.Error()), http.StatusSeeOther)
+					return
+				}
+				validation := validator.Validate(r.Context(), validationContent)
 				if !validation.Valid {
 					message := strings.TrimSpace(validation.Error)
 					if message == "" {
@@ -1622,18 +1680,14 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		}
 		editorBaseline := defaultGroupConfiguration
 		editorBaseID := ""
+		editorName := group.Name + ".yaml"
+		editorVersion := ""
 		if len(available) > 0 {
-			selectedBase := available[0]
-			if requestedBaseID := strings.TrimSpace(r.URL.Query().Get("editor_base")); requestedBaseID != "" {
-				for _, candidate := range available {
-					if candidate.ID == requestedBaseID {
-						selectedBase = candidate
-						break
-					}
-				}
-			}
+			selectedBase := preferredGroupConfiguration(available, deploymentHistory, strings.TrimSpace(r.URL.Query().Get("editor_base")))
 			editorBaseline = selectedBase.Content
 			editorBaseID = selectedBase.ID
+			editorName = selectedBase.Name
+			editorVersion = selectedBase.Version
 		}
 		view := groupDetailView{
 			Page: "groups", Group: group, Members: members, ActiveMembers: activeGroupMemberCount(members), Configurations: available,
@@ -1647,6 +1701,8 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			RequestUpdated:     r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),
 			EditorBaseline:       editorBaseline,
 			EditorBaseID:         editorBaseID,
+			EditorName:           editorName,
+			EditorVersion:        editorVersion,
 			EditorVersions:       available,
 			CanEditConfiguration: true,
 			CanDeleteAgents:      currentRole(auth, r) == roleAdmin || currentRole(auth, r) == roleGroupOwner,
