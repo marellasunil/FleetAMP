@@ -48,3 +48,14 @@ Group deployment history shows governed deploy and rollback attempts in every de
 Blueprints intentionally obtain exporter endpoints and TLS policy from administrator-owned Destination Profiles. Credentials should be represented by group-secret references rather than literal values. See [Group secrets](group-secrets.md). Paths, scrape targets, permissions, resource sizing, and Kubernetes RBAC must be reviewed for the organization before approval.
 
 Additional patterns, reusable modules, profile versioning, and richer policy controls can be added without changing the approval and deployment contract.
+
+## Guide reference sources
+
+FleetAMP's built-in instrumentation decision catalog follows upstream OpenTelemetry guidance:
+
+- [Zero-code instrumentation](https://opentelemetry.io/docs/zero-code/) for current supported application runtimes and Kubernetes injection.
+- [Collector receiver registry](https://opentelemetry.io/docs/collector/components/receiver/) for host, Kubernetes, database, log and protocol receivers and their maturity.
+- [OpenTelemetry Collector on Kubernetes](https://opentelemetry.io/docs/platforms/kubernetes/collector/) for DaemonSet, cluster-level and gateway deployment guidance.
+- [Go compile-time instrumentation](https://opentelemetry.io/docs/zero-code/go/compile-time/) for the stable build-time Go option; eBPF-based Go instrumentation remains a separate choice.
+
+Administrators can customize the catalog for the Collector distribution and organizational standards they operate. FleetAMP preserves those custom publications and automatically upgrades only an untouched built-in catalog.
