@@ -17,11 +17,14 @@ func TestDestinationProfileStoreLifecycle(t *testing.T) {
 	defer database.Close()
 	store := database.DestinationProfiles()
 	profile := blueprints.NewDestinationProfile("Grafana", "Production", "otlphttp/grafana", "endpoint: https://example.invalid/otlp")
+	profile.Owner = "Observability Platform"
+	profile.Visibility = "restricted"
+	profile.GroupIDs = []string{"payments-prod", "payments-test"}
 	if err := store.Create(context.Background(), profile); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.Get(context.Background(), profile.ID)
-	if err != nil || got.Name != profile.Name || got.ExporterID != profile.ExporterID {
+	if err != nil || got.Name != profile.Name || got.ExporterID != profile.ExporterID || got.Owner != profile.Owner || got.Visibility != "restricted" || len(got.GroupIDs) != 2 {
 		t.Fatalf("unexpected stored profile: %#v, %v", got, err)
 	}
 	profiles, err := store.List(context.Background())

@@ -18,6 +18,9 @@ type DestinationProfile struct {
 	Environment    string    `json:"environment"`
 	ExporterID     string    `json:"exporter_id"`
 	ExporterConfig string    `json:"exporter_config"`
+	Owner          string    `json:"owner"`
+	Visibility     string    `json:"visibility"`
+	GroupIDs       []string  `json:"group_ids"`
 	Enabled        bool      `json:"enabled"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -29,5 +32,22 @@ func NewDestinationProfile(name, environment, exporterID, exporterConfig string)
 	sum := sha256.Sum256([]byte(strings.ToLower(name + "\x00" + environment)))
 	return &DestinationProfile{ID: hex.EncodeToString(sum[:12]), Name: name, Environment: environment,
 		ExporterID: strings.TrimSpace(exporterID), ExporterConfig: strings.TrimSpace(exporterConfig),
+		Owner: "Platform Team", Visibility: "organization", GroupIDs: []string{},
 		Enabled: true, CreatedAt: now, UpdatedAt: now}
+}
+
+// AllowsGroup enforces the catalog visibility boundary independently of the UI.
+func (p *DestinationProfile) AllowsGroup(groupID string) bool {
+	if p == nil || !p.Enabled {
+		return false
+	}
+	if p.Visibility == "organization" {
+		return true
+	}
+	for _, allowed := range p.GroupIDs {
+		if allowed == groupID {
+			return true
+		}
+	}
+	return false
 }
