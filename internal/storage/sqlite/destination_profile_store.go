@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -17,8 +18,12 @@ func (s *DestinationProfileStore) Create(ctx context.Context, p *blueprints.Dest
 	if p == nil {
 		return fmt.Errorf("destination profile is required")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO destination_profiles(id,name,environment,exporter_id,exporter_config,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`,
-		p.ID, p.Name, p.Environment, p.ExporterID, p.ExporterConfig, boolToInt(p.Enabled), p.CreatedAt.Format(time.RFC3339Nano), p.UpdatedAt.Format(time.RFC3339Nano))
+	groupIDs, err := json.Marshal(p.GroupIDs)
+	if err != nil {
+		return fmt.Errorf("encode destination groups: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO destination_profiles(id,name,environment,exporter_id,exporter_config,owner,visibility,group_ids,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		p.ID, p.Name, p.Environment, p.ExporterID, p.ExporterConfig, p.Owner, p.Visibility, string(groupIDs), boolToInt(p.Enabled), p.CreatedAt.Format(time.RFC3339Nano), p.UpdatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("create destination profile: %w", err)
 	}
@@ -55,19 +60,22 @@ func (s *DestinationProfileStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-const destinationSelect = `SELECT id,name,environment,exporter_id,exporter_config,enabled,created_at,updated_at FROM destination_profiles`
+const destinationSelect = `SELECT id,name,environment,exporter_id,exporter_config,owner,visibility,group_ids,enabled,created_at,updated_at FROM destination_profiles`
 
 func scanDestination(s scanner) (*blueprints.DestinationProfile, error) {
 	var p blueprints.DestinationProfile
 	var enabled int
-	var created, updated string
-	if e := s.Scan(&p.ID, &p.Name, &p.Environment, &p.ExporterID, &p.ExporterConfig, &enabled, &created, &updated); e != nil {
+	var created, updated, groupIDs string
+	if e := s.Scan(&p.ID, &p.Name, &p.Environment, &p.ExporterID, &p.ExporterConfig, &p.Owner, &p.Visibility, &groupIDs, &enabled, &created, &updated); e != nil {
 		if errors.Is(e, sql.ErrNoRows) {
 			return nil, storage.ErrDestinationProfileNotFound
 		}
 		return nil, e
 	}
 	p.Enabled = enabled != 0
+	if e := json.Unmarshal([]byte(groupIDs), &p.GroupIDs); e != nil {
+		return nil, fmt.Errorf("decode destination groups: %w", e)
+	}
 	var e error
 	p.CreatedAt, e = time.Parse(time.RFC3339Nano, created)
 	if e != nil {

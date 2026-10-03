@@ -132,6 +132,9 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS destination_profiles (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL, environment TEXT NOT NULL,
 			exporter_id TEXT NOT NULL, exporter_config TEXT NOT NULL,
+			owner TEXT NOT NULL DEFAULT 'Platform Team',
+			visibility TEXT NOT NULL DEFAULT 'organization',
+			group_ids TEXT NOT NULL DEFAULT '[]',
 			enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
 			UNIQUE(name,environment)
 		)`,
@@ -220,6 +223,9 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureConfigurationGroupColumn(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureDestinationGovernanceColumns(ctx); err != nil {
+		return err
+	}
 	if err := d.ensureGroupOwnersColumn(ctx); err != nil {
 		return err
 	}
@@ -254,6 +260,27 @@ func (d *Database) initialize(ctx context.Context) error {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureDestinationGovernanceColumns(ctx context.Context) error {
+	columns := []struct{ name, definition string }{
+		{"owner", "TEXT NOT NULL DEFAULT 'Platform Team'"},
+		{"visibility", "TEXT NOT NULL DEFAULT 'organization'"},
+		{"group_ids", "TEXT NOT NULL DEFAULT '[]'"},
+	}
+	for _, column := range columns {
+		present, err := sqliteColumnExists(ctx, d.db, "destination_profiles", column.name)
+		if err != nil {
+			return err
+		}
+		if present {
+			continue
+		}
+		if _, err := d.db.ExecContext(ctx, `ALTER TABLE destination_profiles ADD COLUMN `+column.name+` `+column.definition); err != nil {
+			return fmt.Errorf("add destination_profiles.%s column: %w", column.name, err)
+		}
+	}
+	return nil
 }
 
 func (d *Database) ensureUserProfileColumns(ctx context.Context) error {
