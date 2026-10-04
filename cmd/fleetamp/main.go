@@ -214,6 +214,7 @@ func main() {
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
 	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
+	registerMigrationRoutes(mux, groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
 
 	httpServer := &http.Server{

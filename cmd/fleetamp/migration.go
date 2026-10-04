@@ -1,0 +1,260 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"html/template"
+	"io"
+	"net/http"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/marellasunil/FleetAMP/internal/groups"
+	"github.com/marellasunil/FleetAMP/internal/storage"
+	"gopkg.in/yaml.v3"
+)
+
+const migrationUploadLimit = 2 << 20
+
+type migrationComponentSummary struct {
+	Section string
+	Names   []string
+}
+
+type migrationView struct {
+	Page          string
+	Tab           string
+	Groups        []*groups.Group
+	SelectedGroup string
+	Source        string
+	Name          string
+	Version       string
+	Content       string
+	FileName      string
+	Parsed        bool
+	Components    []migrationComponentSummary
+	Warnings      []string
+	Error         string
+}
+
+const migrationHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Configuration Migration · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `
+.migration-grid{display:grid;grid-template-columns:minmax(340px,.8fr) minmax(0,1.2fr);gap:16px}.import-choice{display:grid;grid-template-columns:1fr 1fr;gap:12px}.dropzone{border:1px dashed #45648e;border-radius:10px;padding:15px;background:#0a1626}.yaml-input{width:100%;min-height:330px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.component-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.component-item{border:1px solid var(--line);border-radius:9px;padding:12px;background:#0a1626}.migration-preview{white-space:pre;overflow:auto;max-height:620px}.stage-note{padding:18px;border:1px dashed #304664;border-radius:10px;color:var(--muted)}@media(max-width:1000px){.migration-grid,.import-choice,.component-list{grid-template-columns:1fr}}
+</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Instrumentation / Migration</div><div class="pagetitle">Configuration Migration</div><div class="subtitle">Bring an existing OpenTelemetry Collector configuration into FleetAMP's governed lifecycle.</div></div><div class="topactions"><span class="badge ok">PR 1 · Import</span></div></header><div class="content"><nav class="tabs" aria-label="Migration stages"><a class="tab {{if eq .Tab "import"}}active{{end}}" href="/migration?tab=import{{if .SelectedGroup}}&amp;group_id={{.SelectedGroup}}{{end}}">Import</a><a class="tab {{if eq .Tab "normalize"}}active{{end}}" href="/migration?tab=normalize">Normalize <span class="soon">Next</span></a><a class="tab {{if eq .Tab "validate"}}active{{end}}" href="/migration?tab=validate">Validate <span class="soon">Planned</span></a><a class="tab {{if eq .Tab "preview"}}active{{end}}" href="/migration?tab=preview">Preview <span class="soon">Planned</span></a><a class="tab {{if eq .Tab "history"}}active{{end}}" href="/migration?tab=history">History <span class="soon">Planned</span></a></nav>{{if .Error}}<div class="configerror" role="alert">{{.Error}}</div>{{end}}{{if eq .Tab "import"}}<div class="migration-grid"><section class="card"><div class="cardhead"><div><div class="cardtitle">Import existing configuration</div><div class="cardsub">Paste YAML or upload one .yaml/.yml file. Nothing is saved or deployed in this step.</div></div></div><div class="cardbody"><form method="post" action="/migration" enctype="multipart/form-data"><input type="hidden" name="tab" value="import"><div class="detailform"><label>Target group<select class="select" name="group_id" required><option value="">Select an accessible group</option>{{range .Groups}}<option value="{{.ID}}" {{if eq .ID $.SelectedGroup}}selected{{end}}>{{.Name}}</option>{{end}}</select></label><label>Configuration source<select class="select" name="source"><option value="existing-collector" {{if eq .Source "existing-collector"}}selected{{end}}>Existing Collector</option><option value="git-repository" {{if eq .Source "git-repository"}}selected{{end}}>Git repository</option><option value="kubernetes-configmap" {{if eq .Source "kubernetes-configmap"}}selected{{end}}>Kubernetes ConfigMap</option><option value="other" {{if eq .Source "other"}}selected{{end}}>Other</option></select></label><label>Configuration name<input class="input" name="name" value="{{.Name}}" required maxlength="160" placeholder="Existing production Collector"></label><label>Proposed version<input class="input" name="version" value="{{.Version}}" required maxlength="80" placeholder="import-1"></label></div><div class="import-choice" style="margin-top:14px"><label>Paste Collector YAML<textarea class="input yaml-input" name="yaml" spellcheck="false" placeholder="receivers:&#10;  otlp:&#10;    protocols:&#10;      grpc: {}">{{.Content}}</textarea></label><label class="dropzone">Upload YAML<input class="input" type="file" name="yaml_file" accept=".yaml,.yml,application/yaml,text/yaml,text/plain"><span class="tiny">Maximum request size: 2 MiB. Upload either a file or pasted YAML, not both.</span></label></div><div class="detailactions" style="margin-top:14px"><button class="btn primary" type="submit">Parse imported configuration</button></div></form></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Import result</div><div class="cardsub">Structural parsing only. Normalization, policy validation and saving follow in later stages.</div></div>{{if .Parsed}}<span class="badge ok">Parsed</span>{{else}}<span class="badge off">Waiting</span>{{end}}</div><div class="cardbody">{{if .Parsed}}<div class="component-list">{{range .Components}}<div class="component-item"><strong>{{.Section}}</strong><div class="chips">{{range .Names}}<span class="chip">{{.}}</span>{{else}}<span class="tiny">None</span>{{end}}</div></div>{{end}}</div>{{range .Warnings}}<div class="notice" style="margin-top:12px">{{.}}</div>{{end}}<div class="section-heading" style="margin-top:16px"><div><strong>Imported YAML</strong><div class="tiny">{{if .FileName}}{{.FileName}} · {{end}}Read-only parse preview</div></div></div><pre class="migration-preview">{{.Content}}</pre><div class="detailactions"><span class="btn primary" aria-disabled="true">Continue to Normalize · Next PR</span></div>{{else}}<div class="stage-note">Choose an accessible ownership group and provide an existing Collector YAML configuration. FleetAMP will parse the document and inventory its components without changing it.</div>{{end}}</div></section></div>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div><div class="cardsub">This stage will be implemented after the import boundary is merged.</div></div><span class="badge warn">Upcoming PR</span></div><div class="cardbody"><div class="stage-note">The Migration workspace is intentionally staged: Import → Normalize → Validate → Preview → Save version. No stage bypasses group ownership, locked sections, approval or atomic deployment.</div></div></section>{{end}}</div></main></div></body></html>`
+
+var migrationPage = template.Must(template.New("migration").Parse(migrationHTML))
+
+func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, auth *authManager) {
+	mux.HandleFunc("/migration", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/migration" {
+			http.NotFound(w, r)
+			return
+		}
+		tab := strings.TrimSpace(r.URL.Query().Get("tab"))
+		if tab == "" {
+			tab = "import"
+		}
+		switch tab {
+		case "import", "normalize", "validate", "preview", "history":
+		default:
+			http.Error(w, "unknown migration tab", http.StatusBadRequest)
+			return
+		}
+		allGroups, err := groupStore.List(r.Context())
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		username, principalRole := currentUsername(auth, r), currentRole(auth, r)
+		visibleGroups := groupsVisibleToUser(r.Context(), auth, username, principalRole, allGroups)
+		view := migrationView{Page: "migration", Tab: tab, Groups: visibleGroups, SelectedGroup: strings.TrimSpace(r.URL.Query().Get("group_id")), Source: "existing-collector"}
+		if r.Method == http.MethodGet {
+			if err := migrationPage.Execute(w, view); err != nil {
+				internalServerError(w, err)
+			}
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, migrationUploadLimit)
+		if err := r.ParseMultipartForm(migrationUploadLimit); err != nil {
+			view.Error = "Import exceeds 2 MiB or the form is invalid."
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = migrationPage.Execute(w, view)
+			return
+		}
+		view.SelectedGroup = strings.TrimSpace(r.FormValue("group_id"))
+		view.Source = strings.TrimSpace(r.FormValue("source"))
+		view.Name = strings.TrimSpace(r.FormValue("name"))
+		view.Version = strings.TrimSpace(r.FormValue("version"))
+		group, err := groupStore.Get(r.Context(), view.SelectedGroup)
+		if err != nil || !groupVisibleIn(group, visibleGroups) {
+			view.Error = "Select an accessible target group."
+			w.WriteHeader(http.StatusForbidden)
+			_ = migrationPage.Execute(w, view)
+			return
+		}
+		if !group.Enabled {
+			view.Error = "The target group must be enabled."
+			w.WriteHeader(http.StatusConflict)
+			_ = migrationPage.Execute(w, view)
+			return
+		}
+		if view.Name == "" || view.Version == "" {
+			view.Error = "Configuration name and proposed version are required."
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = migrationPage.Execute(w, view)
+			return
+		}
+		pasted := strings.TrimSpace(r.FormValue("yaml"))
+		uploaded, fileName, uploadErr := readMigrationUpload(r)
+		if uploadErr != nil {
+			view.Error = uploadErr.Error()
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = migrationPage.Execute(w, view)
+			return
+		}
+		if pasted != "" && uploaded != "" {
+			view.Content = pasted
+			view.Error = "Provide pasted YAML or an uploaded file, not both."
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = migrationPage.Execute(w, view)
+			return
+		}
+		view.Content, view.FileName = pasted, fileName
+		if view.Content == "" {
+			view.Content = uploaded
+		}
+		if strings.TrimSpace(view.Content) == "" {
+			view.Error = "Paste or upload an OpenTelemetry Collector YAML configuration."
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = migrationPage.Execute(w, view)
+			return
+		}
+		components, warnings, parseErr := inspectImportedConfiguration(view.Content)
+		if parseErr != nil {
+			view.Error = parseErr.Error()
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = migrationPage.Execute(w, view)
+			return
+		}
+		view.Parsed, view.Components, view.Warnings = true, components, warnings
+		if err := migrationPage.Execute(w, view); err != nil {
+			internalServerError(w, err)
+		}
+	})
+}
+
+func groupVisibleIn(wanted *groups.Group, visible []*groups.Group) bool {
+	if wanted == nil {
+		return false
+	}
+	for _, group := range visible {
+		if group.ID == wanted.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func readMigrationUpload(r *http.Request) (string, string, error) {
+	file, header, err := r.FormFile("yaml_file")
+	if errors.Is(err, http.ErrMissingFile) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("read uploaded YAML: %w", err)
+	}
+	defer file.Close()
+	extension := strings.ToLower(filepath.Ext(header.Filename))
+	if extension != ".yaml" && extension != ".yml" {
+		return "", "", fmt.Errorf("uploaded file must use a .yaml or .yml extension")
+	}
+	content, err := io.ReadAll(io.LimitReader(file, migrationUploadLimit+1))
+	if err != nil {
+		return "", "", fmt.Errorf("read uploaded YAML: %w", err)
+	}
+	if len(content) > migrationUploadLimit {
+		return "", "", fmt.Errorf("uploaded YAML exceeds 2 MiB")
+	}
+	return string(content), filepath.Base(header.Filename), nil
+}
+
+func inspectImportedConfiguration(content string) ([]migrationComponentSummary, []string, error) {
+	var document map[string]any
+	if err := yaml.Unmarshal([]byte(content), &document); err != nil {
+		return nil, nil, fmt.Errorf("parse Collector YAML: %w", err)
+	}
+	if len(document) == 0 {
+		return nil, nil, fmt.Errorf("Collector YAML must be a non-empty mapping")
+	}
+	sections := []string{"receivers", "processors", "exporters", "extensions", "connectors"}
+	sectionLabels := map[string]string{
+		"receivers":  "Receivers",
+		"processors": "Processors",
+		"exporters":  "Exporters",
+		"extensions": "Extensions",
+		"connectors": "Connectors",
+	}
+	components := make([]migrationComponentSummary, 0, len(sections)+1)
+	for _, section := range sections {
+		names, err := importedMappingKeys(document, section)
+		if err != nil {
+			return nil, nil, err
+		}
+		components = append(components, migrationComponentSummary{Section: sectionLabels[section], Names: names})
+	}
+	pipelines := []string{}
+	if service, ok := document["service"]; ok {
+		serviceMap, ok := service.(map[string]any)
+		if !ok {
+			return nil, nil, fmt.Errorf("service must be a YAML mapping")
+		}
+		if rawPipelines, ok := serviceMap["pipelines"]; ok {
+			pipelineMap, ok := rawPipelines.(map[string]any)
+			if !ok {
+				return nil, nil, fmt.Errorf("service.pipelines must be a YAML mapping")
+			}
+			for name := range pipelineMap {
+				pipelines = append(pipelines, name)
+			}
+			sort.Strings(pipelines)
+		}
+	}
+	components = append(components, migrationComponentSummary{Section: "Service pipelines", Names: pipelines})
+	warnings := []string{}
+	if len(pipelines) == 0 {
+		warnings = append(warnings, "No service pipelines were found. Normalization cannot produce a deployable bundle until at least one pipeline is defined.")
+	}
+	known := map[string]bool{"receivers": true, "processors": true, "exporters": true, "extensions": true, "connectors": true, "service": true}
+	unknown := []string{}
+	for key := range document {
+		if !known[key] {
+			unknown = append(unknown, key)
+		}
+	}
+	sort.Strings(unknown)
+	if len(unknown) > 0 {
+		warnings = append(warnings, "Unknown top-level sections will require review during normalization: "+strings.Join(unknown, ", "))
+	}
+	return components, warnings, nil
+}
+
+func importedMappingKeys(document map[string]any, section string) ([]string, error) {
+	raw, ok := document[section]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	mapping, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be a YAML mapping", section)
+	}
+	names := make([]string, 0, len(mapping))
+	for name := range mapping {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}

@@ -22,7 +22,7 @@ func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
 		last = index
 	}
 
-	for _, path := range []string{"/agents", "/groups", "/deployments", "/approvals", "/instrumentation", "/blueprints", "/mcp", "/audit-log"} {
+	for _, path := range []string{"/agents", "/groups", "/deployments", "/approvals", "/instrumentation", "/blueprints", "/migration", "/mcp", "/audit-log"} {
 		if !strings.Contains(sideNav, `href="`+path+`"`) {
 			t.Fatalf("side navigation is missing %q", path)
 		}
