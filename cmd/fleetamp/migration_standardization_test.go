@@ -60,9 +60,7 @@ service:
 		"memory_limiter:",
 		"limit_mib: 512",
 		"batch: {}",
-		"- memory_limiter",
-		"- attributes/team",
-		"- batch",
+		"processors: [memory_limiter, attributes/team, batch]",
 	} {
 		if !strings.Contains(standardized, expected) {
 			t.Fatalf("standardized YAML is missing %q:\n%s", expected, standardized)
