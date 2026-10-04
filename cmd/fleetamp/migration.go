@@ -10,8 +10,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/groups"
+	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
 	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/FleetAMP/internal/storage/memory"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,7 +36,9 @@ type migrationView struct {
 	Page            string
 	Tab             string
 	Groups          []*groups.Group
+	Collectors      []*agents.ManagedAgent
 	SelectedGroup   string
+	SelectedAgent   string
 	Source          string
 	Name            string
 	Version         string
@@ -43,6 +48,8 @@ type migrationView struct {
 	Parsed          bool
 	Standardized    bool
 	ApplyBaseline   bool
+	AdoptionReady   bool
+	AdoptionChecks  []migrationAdoptionCheck
 	Components      []migrationComponentSummary
 	Changes         []migrationStandardizationChange
 	Warnings        []string
@@ -51,11 +58,11 @@ type migrationView struct {
 
 const migrationHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Configuration Migration · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `
 .migration-grid{display:grid;grid-template-columns:minmax(340px,.8fr) minmax(0,1.2fr);gap:16px}.import-choice,.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.dropzone{border:1px dashed #45648e;border-radius:10px;padding:15px;background:#0a1626}.yaml-input{width:100%;min-height:330px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.component-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.component-item,.change-item{border:1px solid var(--line);border-radius:9px;padding:12px;background:#0a1626}.migration-preview{white-space:pre;overflow:auto;max-height:620px}.compare-grid .migration-preview{min-height:420px;max-height:620px}.stage-note{padding:18px;border:1px dashed #304664;border-radius:10px;color:var(--muted)}.baseline-option{display:flex;align-items:flex-start;gap:10px;padding:14px;border:1px solid var(--line);border-radius:10px}.change-list{display:grid;gap:10px;margin-bottom:14px}@media(max-width:1000px){.migration-grid,.import-choice,.component-list,.compare-grid{grid-template-columns:1fr}}
-</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Instrumentation / Migration</div><div class="pagetitle">Configuration Migration</div><div class="subtitle">Bring an existing OpenTelemetry Collector configuration into FleetAMP's governed lifecycle.</div></div><div class="topactions"><span class="badge ok">PR 2 · Standardization</span></div></header><div class="content"><nav class="tabs" aria-label="Migration stages"><a class="tab {{if eq .Tab "import"}}active{{end}}" href="/migration?tab=import{{if .SelectedGroup}}&amp;group_id={{.SelectedGroup}}{{end}}">Import</a><a class="tab {{if eq .Tab "standardize"}}active{{end}}" href="/migration?tab=standardize">Standardization</a><a class="tab {{if eq .Tab "validate"}}active{{end}}" href="/migration?tab=validate">Validate <span class="soon">Planned</span></a><a class="tab {{if eq .Tab "preview"}}active{{end}}" href="/migration?tab=preview">Preview <span class="soon">Planned</span></a><a class="tab {{if eq .Tab "history"}}active{{end}}" href="/migration?tab=history">History <span class="soon">Planned</span></a></nav>{{if .Error}}<div class="configerror" role="alert">{{.Error}}</div>{{end}}{{if eq .Tab "import"}}<div class="migration-grid"><section class="card"><div class="cardhead"><div><div class="cardtitle">Import existing configuration</div><div class="cardsub">Paste YAML or upload one .yaml/.yml file. Nothing is saved or deployed in this step.</div></div></div><div class="cardbody"><form method="post" action="/migration" enctype="multipart/form-data"><input type="hidden" name="tab" value="import"><div class="detailform"><label>Target group<select class="select" name="group_id" required><option value="">Select an accessible group</option>{{range .Groups}}<option value="{{.ID}}" {{if eq .ID $.SelectedGroup}}selected{{end}}>{{.Name}}</option>{{end}}</select></label><label>Configuration source<select class="select" name="source"><option value="existing-collector" {{if eq .Source "existing-collector"}}selected{{end}}>Existing Collector</option><option value="git-repository" {{if eq .Source "git-repository"}}selected{{end}}>Git repository</option><option value="kubernetes-configmap" {{if eq .Source "kubernetes-configmap"}}selected{{end}}>Kubernetes ConfigMap</option><option value="other" {{if eq .Source "other"}}selected{{end}}>Other</option></select></label><label>Configuration name<input class="input" name="name" value="{{.Name}}" required maxlength="160" placeholder="Existing production Collector"></label><label>Proposed version<input class="input" name="version" value="{{.Version}}" required maxlength="80" placeholder="import-1"></label></div><div class="import-choice" style="margin-top:14px"><label>Paste Collector YAML<textarea class="input yaml-input" name="yaml" spellcheck="false" placeholder="receivers:&#10;  otlp:&#10;    protocols:&#10;      grpc: {}">{{.Content}}</textarea></label><label class="dropzone">Upload YAML<input class="input" type="file" name="yaml_file" accept=".yaml,.yml,application/yaml,text/yaml,text/plain"><span class="tiny">Maximum request size: 2 MiB. Upload either a file or pasted YAML, not both.</span></label></div><div class="detailactions" style="margin-top:14px"><button class="btn primary" type="submit">Parse imported configuration</button></div></form></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Import result</div><div class="cardsub">Structural parsing only. Standardization, policy validation and saving follow in later stages.</div></div>{{if .Parsed}}<span class="badge ok">Parsed</span>{{else}}<span class="badge off">Waiting</span>{{end}}</div><div class="cardbody">{{if .Parsed}}<div class="component-list">{{range .Components}}<div class="component-item"><strong>{{.Section}}</strong><div class="chips">{{range .Names}}<span class="chip">{{.}}</span>{{else}}<span class="tiny">None</span>{{end}}</div></div>{{end}}</div>{{range .Warnings}}<div class="notice" style="margin-top:12px">{{.}}</div>{{end}}<div class="section-heading" style="margin-top:16px"><div><strong>Imported YAML</strong><div class="tiny">{{if .FileName}}{{.FileName}} · {{end}}Read-only parse preview</div></div></div><pre class="migration-preview">{{.Content}}</pre><form method="post" action="/migration?tab=standardize" enctype="multipart/form-data"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><textarea name="yaml" hidden>{{.Content}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Continue to Standardization</button></div></form>{{else}}<div class="stage-note">Choose an accessible ownership group and provide an existing Collector YAML configuration. FleetAMP will parse the document and inventory its components without changing it.</div>{{end}}</div></section></div>{{else if eq .Tab "standardize"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Standardize imported configuration</div><div class="cardsub">Create a deterministic FleetAMP layout and optionally add the safe Collector baseline.</div></div>{{if .Standardized}}<span class="badge ok">Standardized</span>{{else}}<span class="badge off">Waiting for import</span>{{end}}</div><div class="cardbody">{{if .Standardized}}<div class="change-list">{{range .Changes}}<div class="change-item"><span class="badge off">{{.Category}}</span> <strong>{{.Summary}}</strong><div class="tiny">{{.Detail}}</div></div>{{else}}<div class="notice">The imported configuration already follows the selected standard.</div>{{end}}</div><form method="post" action="/migration?tab=standardize" enctype="multipart/form-data"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><textarea name="yaml" hidden>{{.OriginalContent}}</textarea><label class="baseline-option"><input type="checkbox" name="apply_baseline" value="true" {{if .ApplyBaseline}}checked{{end}}><span><strong>Apply FleetAMP safe baseline</strong><span class="tiny" style="display:block">Add memory_limiter and batch only when missing, then reference them from each pipeline. Existing processors and their order are preserved.</span></span></label><div class="detailactions"><button class="btn" type="submit">Regenerate standardization</button><span class="btn primary" aria-disabled="true">Continue to Validate · Next PR</span></div></form><div class="compare-grid"><div><div class="section-heading"><strong>Imported YAML</strong></div><pre class="migration-preview">{{.OriginalContent}}</pre></div><div><div class="section-heading"><strong>Standardized YAML</strong></div><pre class="migration-preview">{{.Content}}</pre></div></div>{{else}}<div class="stage-note">Import and parse a Collector configuration first. FleetAMP will then show every standardization change before any later validation or save step.</div>{{end}}</div></section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div><div class="cardsub">This stage will be implemented after the import boundary is merged.</div></div><span class="badge warn">Upcoming PR</span></div><div class="cardbody"><div class="stage-note">The Migration workspace is intentionally staged: Import → Standardize → Validate → Preview → Save version. No stage bypasses group ownership, locked sections, approval or atomic deployment.</div></div></section>{{end}}</div></main></div></body></html>`
+</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Instrumentation / Migration</div><div class="pagetitle">Configuration Migration</div><div class="subtitle">Bring an existing OpenTelemetry Collector configuration into FleetAMP's governed lifecycle.</div></div><div class="topactions"><span class="badge ok">PR 3 · Collector Adoption</span></div></header><div class="content"><nav class="tabs" aria-label="Migration stages"><a class="tab {{if eq .Tab "import"}}active{{end}}" href="/migration?tab=import{{if .SelectedGroup}}&amp;group_id={{.SelectedGroup}}{{end}}">Import</a><a class="tab {{if eq .Tab "standardize"}}active{{end}}" href="/migration?tab=standardize">Standardization</a><a class="tab {{if eq .Tab "adoption"}}active{{end}}" href="/migration?tab=adoption">Collector Adoption</a><a class="tab {{if eq .Tab "validate"}}active{{end}}" href="/migration?tab=validate">Validate <span class="soon">Next</span></a><a class="tab {{if eq .Tab "preview"}}active{{end}}" href="/migration?tab=preview">Preview <span class="soon">Planned</span></a><a class="tab {{if eq .Tab "history"}}active{{end}}" href="/migration?tab=history">History <span class="soon">Planned</span></a></nav>{{if .Error}}<div class="configerror" role="alert">{{.Error}}</div>{{end}}{{if eq .Tab "import"}}<div class="migration-grid"><section class="card"><div class="cardhead"><div><div class="cardtitle">Import existing configuration</div><div class="cardsub">Select a managed Collector, paste YAML, or upload one .yaml/.yml file. Nothing is saved or deployed in this step.</div></div></div><div class="cardbody"><form method="post" action="/migration" enctype="multipart/form-data"><input type="hidden" name="tab" value="import"><div class="detailform"><label>Target group<select class="select" name="group_id" required><option value="">Select an accessible group</option>{{range .Groups}}<option value="{{.ID}}" {{if eq .ID $.SelectedGroup}}selected{{end}}>{{.Name}}</option>{{end}}</select></label><label>Configuration source<select class="select" name="source"><option value="existing-collector" {{if eq .Source "existing-collector"}}selected{{end}}>Existing Collector</option><option value="git-repository" {{if eq .Source "git-repository"}}selected{{end}}>Git repository</option><option value="kubernetes-configmap" {{if eq .Source "kubernetes-configmap"}}selected{{end}}>Kubernetes ConfigMap</option><option value="other" {{if eq .Source "other"}}selected{{end}}>Other</option></select></label><label>Managed Collector (optional)<select class="select" name="agent_uid"><option value="">Use pasted or uploaded YAML</option>{{range .Collectors}}<option value="{{.InstanceUID}}" {{if eq .InstanceUID $.SelectedAgent}}selected{{end}}>{{.Name}} · {{.Status}}</option>{{end}}</select></label><label>Configuration name<input class="input" name="name" value="{{.Name}}" required maxlength="160" placeholder="Existing production Collector"></label><label>Proposed version<input class="input" name="version" value="{{.Version}}" required maxlength="80" placeholder="import-1"></label></div><div class="import-choice" style="margin-top:14px"><label>Paste Collector YAML<textarea class="input yaml-input" name="yaml" spellcheck="false" placeholder="receivers:&#10;  otlp:&#10;    protocols:&#10;      grpc: {}">{{.Content}}</textarea></label><label class="dropzone">Upload YAML<input class="input" type="file" name="yaml_file" accept=".yaml,.yml,application/yaml,text/yaml,text/plain"><span class="tiny">Maximum request size: 2 MiB. Upload either a file or pasted YAML, not both.</span></label></div><div class="detailactions" style="margin-top:14px"><button class="btn primary" type="submit">Parse imported configuration</button></div></form></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Import result</div><div class="cardsub">Structural parsing only. Standardization, policy validation and saving follow in later stages.</div></div>{{if .Parsed}}<span class="badge ok">Parsed</span>{{else}}<span class="badge off">Waiting</span>{{end}}</div><div class="cardbody">{{if .Parsed}}<div class="component-list">{{range .Components}}<div class="component-item"><strong>{{.Section}}</strong><div class="chips">{{range .Names}}<span class="chip">{{.}}</span>{{else}}<span class="tiny">None</span>{{end}}</div></div>{{end}}</div>{{range .Warnings}}<div class="notice" style="margin-top:12px">{{.}}</div>{{end}}<div class="section-heading" style="margin-top:16px"><div><strong>Imported YAML</strong><div class="tiny">{{if .FileName}}{{.FileName}} · {{end}}Read-only parse preview</div></div></div><pre class="migration-preview">{{.Content}}</pre><form method="post" action="/migration?tab=standardize" enctype="multipart/form-data"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="agent_uid" value="{{.SelectedAgent}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><textarea name="yaml" hidden>{{.Content}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Continue to Standardization</button></div></form>{{else}}<div class="stage-note">Choose an accessible ownership group and import from a managed Collector, pasted YAML, or an uploaded file. FleetAMP will parse the document and inventory its components without changing it.</div>{{end}}</div></section></div>{{else if eq .Tab "standardize"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Standardize imported configuration</div><div class="cardsub">Create a deterministic FleetAMP layout and optionally add the safe Collector baseline.</div></div>{{if .Standardized}}<span class="badge ok">Standardized</span>{{else}}<span class="badge off">Waiting for import</span>{{end}}</div><div class="cardbody">{{if .Standardized}}<div class="change-list">{{range .Changes}}<div class="change-item"><span class="badge off">{{.Category}}</span> <strong>{{.Summary}}</strong><div class="tiny">{{.Detail}}</div></div>{{else}}<div class="notice">The imported configuration already follows the selected standard.</div>{{end}}</div><form method="post" action="/migration?tab=standardize" enctype="multipart/form-data"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="agent_uid" value="{{.SelectedAgent}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><textarea name="yaml" hidden>{{.OriginalContent}}</textarea><label class="baseline-option"><input type="checkbox" name="apply_baseline" value="true" {{if .ApplyBaseline}}checked{{end}}><span><strong>Apply FleetAMP safe baseline</strong><span class="tiny" style="display:block">Add memory_limiter and batch only when missing, then reference them from each pipeline. Existing processors and their order are preserved.</span></span></label><div class="detailactions"><button class="btn" type="submit">Regenerate standardization</button></div></form>{{if .SelectedAgent}}<form method="post" action="/migration?tab=adoption" enctype="multipart/form-data"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="agent_uid" value="{{.SelectedAgent}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><textarea name="original_yaml" hidden>{{.OriginalContent}}</textarea><textarea name="yaml" hidden>{{.Content}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Review Collector Adoption</button></div></form>{{else}}<div class="notice">This configuration was pasted or uploaded and is not linked to a managed Collector. Import from a connected Collector to use the adoption readiness check.</div>{{end}}<div class="compare-grid"><div><div class="section-heading"><strong>Imported YAML</strong></div><pre class="migration-preview">{{.OriginalContent}}</pre></div><div><div class="section-heading"><strong>Standardized YAML</strong></div><pre class="migration-preview">{{.Content}}</pre></div></div>{{else}}<div class="stage-note">Import and parse a Collector configuration first. FleetAMP will then show every standardization change before any later validation or save step.</div>{{end}}</div></section>{{else if eq .Tab "adoption"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Collector Adoption</div><div class="cardsub">Verify identity, ownership and OpAMP readiness before the configuration enters governance.</div></div>{{if .AdoptionReady}}<span class="badge ok">Ready for validation</span>{{else}}<span class="badge warn">Action required</span>{{end}}</div><div class="cardbody">{{if .Standardized}}<div class="change-list">{{range .AdoptionChecks}}<div class="change-item"><span class="badge {{if eq .Status "Ready"}}ok{{else}}warn{{end}}">{{.Status}}</span> <strong>{{.Name}}</strong><div class="tiny">{{.Detail}}</div></div>{{end}}</div><div class="detailactions"><a class="btn" href="/agents/{{.SelectedAgent}}">Open Collector</a><a class="btn" href="/groups/{{.SelectedGroup}}">Open target group</a>{{if .AdoptionReady}}<span class="btn primary" aria-disabled="true">Continue to Validate · Next PR</span>{{end}}</div><div class="section-heading"><div><strong>Candidate governed configuration</strong><div class="tiny">Read-only. No version, assignment or deployment is created in this step.</div></div></div><pre class="migration-preview">{{.Content}}</pre>{{else}}<div class="stage-note">Import from a connected Collector and complete Standardization first.</div>{{end}}</div></section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div><div class="cardsub">This stage will be implemented after the import boundary is merged.</div></div><span class="badge warn">Upcoming PR</span></div><div class="cardbody"><div class="stage-note">The Migration workspace is intentionally staged: Import → Standardize → Collector Adoption → Validate → Preview → Save version. No stage bypasses group ownership, locked sections, approval or atomic deployment.</div></div></section>{{end}}</div></main></div></body></html>`
 
 var migrationPage = template.Must(template.New("migration").Parse(migrationHTML))
 
-func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, auth *authManager) {
+func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, adapter *fleetopamp.Adapter, auth *authManager) {
 	mux.HandleFunc("/migration", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/migration" {
 			http.NotFound(w, r)
@@ -66,7 +73,7 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 			tab = "import"
 		}
 		switch tab {
-		case "import", "standardize", "validate", "preview", "history":
+		case "import", "standardize", "adoption", "validate", "preview", "history":
 		default:
 			http.Error(w, "unknown migration tab", http.StatusBadRequest)
 			return
@@ -78,7 +85,13 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 		}
 		username, principalRole := currentUsername(auth, r), currentRole(auth, r)
 		visibleGroups := groupsVisibleToUser(r.Context(), auth, username, principalRole, allGroups)
-		view := migrationView{Page: "migration", Tab: tab, Groups: visibleGroups, SelectedGroup: strings.TrimSpace(r.URL.Query().Get("group_id")), Source: "existing-collector"}
+		allCollectors, err := agentStore.List(r.Context())
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		visibleCollectors := migrationVisibleCollectors(allCollectors, visibleGroups, principalRole)
+		view := migrationView{Page: "migration", Tab: tab, Groups: visibleGroups, Collectors: visibleCollectors, SelectedGroup: strings.TrimSpace(r.URL.Query().Get("group_id")), SelectedAgent: strings.TrimSpace(r.URL.Query().Get("agent_uid")), Source: "existing-collector"}
 		if r.Method == http.MethodGet {
 			if err := migrationPage.Execute(w, view); err != nil {
 				internalServerError(w, err)
@@ -97,6 +110,7 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 			return
 		}
 		view.SelectedGroup = strings.TrimSpace(r.FormValue("group_id"))
+		view.SelectedAgent = strings.TrimSpace(r.FormValue("agent_uid"))
 		view.Source = strings.TrimSpace(r.FormValue("source"))
 		view.Name = strings.TrimSpace(r.FormValue("name"))
 		view.Version = strings.TrimSpace(r.FormValue("version"))
@@ -147,6 +161,35 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 			}
 			return
 		}
+		if tab == "adoption" {
+			view.OriginalContent = strings.TrimSpace(r.FormValue("original_yaml"))
+			view.Content = strings.TrimSpace(r.FormValue("yaml"))
+			if view.Content == "" || view.SelectedAgent == "" {
+				view.Error = "Select and import a connected Collector before reviewing adoption."
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_ = migrationPage.Execute(w, view)
+				return
+			}
+			if _, _, err := inspectImportedConfiguration(view.Content); err != nil {
+				view.Error = err.Error()
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_ = migrationPage.Execute(w, view)
+				return
+			}
+			agent := migrationCollectorByID(visibleCollectors, view.SelectedAgent)
+			if agent == nil {
+				view.Error = "The selected Collector is outside your accessible groups."
+				w.WriteHeader(http.StatusForbidden)
+				_ = migrationPage.Execute(w, view)
+				return
+			}
+			view.AdoptionChecks, view.AdoptionReady = assessCollectorAdoption(agent, group, adapter.EffectiveConfig(agent.InstanceUID))
+			view.Standardized = true
+			if err := migrationPage.Execute(w, view); err != nil {
+				internalServerError(w, err)
+			}
+			return
+		}
 		pasted := strings.TrimSpace(r.FormValue("yaml"))
 		uploaded, fileName, uploadErr := readMigrationUpload(r)
 		if uploadErr != nil {
@@ -155,9 +198,32 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 			_ = migrationPage.Execute(w, view)
 			return
 		}
-		if pasted != "" && uploaded != "" {
+		effective := ""
+		if view.SelectedAgent != "" {
+			agent := migrationCollectorByID(visibleCollectors, view.SelectedAgent)
+			if agent == nil {
+				view.Error = "The selected Collector is outside your accessible groups."
+				w.WriteHeader(http.StatusForbidden)
+				_ = migrationPage.Execute(w, view)
+				return
+			}
+			effective = strings.TrimSpace(adapter.EffectiveConfig(agent.InstanceUID))
+			if effective == "" {
+				view.Error = "The selected Collector has not reported an effective configuration."
+				w.WriteHeader(http.StatusConflict)
+				_ = migrationPage.Execute(w, view)
+				return
+			}
+		}
+		provided := 0
+		for _, candidate := range []string{pasted, uploaded, effective} {
+			if candidate != "" {
+				provided++
+			}
+		}
+		if provided > 1 {
 			view.Content = pasted
-			view.Error = "Provide pasted YAML or an uploaded file, not both."
+			view.Error = "Choose one source: a connected Collector, pasted YAML, or an uploaded file."
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			_ = migrationPage.Execute(w, view)
 			return
@@ -165,6 +231,9 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 		view.Content, view.FileName = pasted, fileName
 		if view.Content == "" {
 			view.Content = uploaded
+		}
+		if view.Content == "" {
+			view.Content = effective
 		}
 		if strings.TrimSpace(view.Content) == "" {
 			view.Error = "Paste or upload an OpenTelemetry Collector YAML configuration."
