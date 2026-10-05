@@ -279,3 +279,16 @@ func TestSessionsOnSameHostDoNotCollideAcrossInstallations(t *testing.T) {
 		t.Fatal("logging out of one installation changed the other installation's session")
 	}
 }
+
+func TestLoginPageProvidesPasswordActions(t *testing.T) {
+	store := &memoryAdministratorStore{user: &sqlitestore.User{Username: "admin", Role: "admin", Enabled: true}}
+	manager := testAuthManager(store, strings.Repeat("p", 32), "bootstrap")
+	response := httptest.NewRecorder()
+	manager.handleLogin(response, httptest.NewRequest(http.MethodGet, "/login?next=/account", nil))
+	body := response.Body.String()
+	for _, expected := range []string{`href="/recover"`, `Forgot password?`, `href="/login?next=%2Faccount"`, `Change password`, `name="next" value="/account"`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("login page missing %q", expected)
+		}
+	}
+}
