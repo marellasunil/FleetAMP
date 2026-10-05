@@ -325,3 +325,24 @@ func TestValidRequestOriginAllowsNullOnlyForSameSiteLoopback(t *testing.T) {
 		t.Fatal("non-loopback host with null origin accepted")
 	}
 }
+
+func TestValidDevelopmentNullOriginAllowsForwardedLoopbackHost(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "http://localhost:18081/login", nil)
+	request.Host = "localhost:18081"
+	request.RemoteAddr = "10.244.0.1:54321"
+	request.Header.Set("Origin", "null")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	if !validDevelopmentNullOrigin(request) {
+		t.Fatal("development localhost null origin rejected")
+	}
+
+	request.Host = "fleetamp.example.com"
+	if validDevelopmentNullOrigin(request) {
+		t.Fatal("development null origin accepted for non-loopback host")
+	}
+	request.Host = "localhost:18081"
+	request.Header.Set("Sec-Fetch-Site", "cross-site")
+	if validDevelopmentNullOrigin(request) {
+		t.Fatal("development null origin accepted for cross-site request")
+	}
+}
