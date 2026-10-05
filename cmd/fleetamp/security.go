@@ -118,6 +118,9 @@ const (
 // requiredPermission maps each request to the minimum server-side role.
 // The section-policy feature can extend this map without relying on UI state.
 func requiredPermission(r *http.Request) permission {
+	if r.URL.Path == "/account" || r.URL.Path == "/logout" || r.URL.Path == "/api/v1/session" || strings.HasPrefix(r.URL.Path, "/assets/") {
+		return permissionRead
+	}
 	if r.URL.Path == "/settings" || strings.HasPrefix(r.URL.Path, "/settings/") ||
 		r.URL.Path == "/audit-log" || strings.HasPrefix(r.URL.Path, "/api/v1/audit-events") {
 		return permissionAdmin
@@ -255,7 +258,7 @@ func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler
 			return
 		}
 		publicHealth := r.URL.Path == "/health" || r.URL.Path == "/ready"
-		publicAuthentication := r.URL.Path == "/setup" || r.URL.Path == "/login" ||
+		publicAuthentication := r.URL.Path == "/setup" || r.URL.Path == "/login" || r.URL.Path == "/recover" ||
 			r.URL.Path == "/assets/theme.js" || r.URL.Path == "/assets/fleetamp-logo-transparent.png"
 		protected := !publicHealth && !publicAuthentication
 		if protected {

@@ -46,7 +46,9 @@ type userStore interface {
 	Get(context.Context, string) (*sqlitestore.User, error)
 	List(context.Context) ([]*sqlitestore.User, error)
 	Create(context.Context, sqlitestore.User) error
-	ReplacePassword(context.Context, string, []byte, []byte) error
+	ReplacePassword(context.Context, string, []byte, []byte, bool) error
+	IssueRecoveryToken(context.Context, string, []byte, time.Time) error
+	ConsumeRecoveryToken(context.Context, string, []byte, time.Time) (bool, error)
 	UpdateRole(context.Context, string, string) error
 	SetEnabled(context.Context, string, bool) error
 	UpdateEmail(context.Context, string, string) error
@@ -58,9 +60,10 @@ type userStore interface {
 	RecordLogin(context.Context, string, time.Time) error
 }
 type authSession struct {
-	Username string
-	Role     role
-	Expires  time.Time
+	Username           string
+	Role               role
+	Expires            time.Time
+	MustChangePassword bool
 }
 
 type authManager struct {
@@ -303,6 +306,10 @@ func (a *authManager) createSession(username string) (string, error) {
 // createSessionForRole creates an opaque browser token while retaining the
 // authenticated principal and role in the bounded server-side session table.
 func (a *authManager) createSessionForRole(username string, principalRole role) (string, error) {
+	return a.createSessionWithPasswordState(username, principalRole, false)
+}
+
+func (a *authManager) createSessionWithPasswordState(username string, principalRole role, mustChange bool) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -326,9 +333,20 @@ func (a *authManager) createSessionForRole(username string, principalRole role) 
 		}
 		delete(a.sessions, oldestKey)
 	}
-	a.sessions[key] = authSession{Username: username, Role: principalRole, Expires: now.Add(sessionLifetime)}
+	a.sessions[key] = authSession{Username: username, Role: principalRole, Expires: now.Add(sessionLifetime), MustChangePassword: mustChange}
 	a.mu.Unlock()
 	return token, nil
+}
+
+func (a *authManager) sessionMustChangePassword(r *http.Request) bool {
+	cookie, err := r.Cookie(a.cookieName())
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	a.mu.RLock()
+	session, ok := a.sessions[sessionKey(cookie.Value)]
+	a.mu.RUnlock()
+	return ok && a.now().Before(session.Expires) && session.MustChangePassword
 }
 
 // sessionKey hashes a raw session token so plaintext tokens are never retained server-side.
@@ -423,6 +441,15 @@ func (a *authManager) clearSession(w http.ResponseWriter, r *http.Request) {
 // authorize permits a valid application session or legacy Basic Auth and otherwise returns an HTML redirect or API 401.
 func (a *authManager) authorize(w http.ResponseWriter, r *http.Request, legacy securityConfig) bool {
 	if a.validSession(r) {
+		if a.sessionMustChangePassword(r) && r.URL.Path != "/account" && r.URL.Path != "/logout" &&
+			r.URL.Path != "/api/v1/session" && !strings.HasPrefix(r.URL.Path, "/assets/") {
+			if acceptsHTML(r) {
+				http.Redirect(w, r, "/account?force=1", http.StatusSeeOther)
+			} else {
+				http.Error(w, "password change required", http.StatusForbidden)
+			}
+			return false
+		}
 		return true
 	}
 	if legacy.HTTPUsername != "" && validBasicAuth(r, legacy) {
@@ -459,7 +486,9 @@ func acceptsHTML(r *http.Request) bool {
 type authPageData struct {
 	Title   string
 	Message string
+	Success string
 	Setup   bool
+	Recover bool
 }
 
 const authPageHTML = `<!doctype html><html><head><meta charset="utf-8">
@@ -473,15 +502,18 @@ const authPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 .authhelp{font-size:12px;color:var(--muted);line-height:1.6}</style></head>
 <body><main class="authshell"><section class="card authcard"><div class="authbrand">
 <img class="authlogo" src="/assets/fleetamp-logo-transparent.png" alt="FleetAMP — Telemetry Control Plane">
-<div class="subtitle">{{if .Setup}}Secure administrator setup{{else}}Control-plane login{{end}}</div></div>
+<div class="subtitle">{{if .Setup}}Secure administrator setup{{else if .Recover}}Account recovery{{else}}Control-plane login{{end}}</div></div>
 {{if .Message}}<div class="autherror">{{.Message}}</div>{{end}}
-<form class="authform" method="post" action="{{if .Setup}}/setup{{else}}/login{{end}}">
+{{if .Success}}<div class="notice">✓ {{.Success}}</div>{{end}}
+<form class="authform" method="post" action="{{if .Setup}}/setup{{else if .Recover}}/recover{{else}}/login{{end}}">
 <label>Username<input class="input" name="username" autocomplete="username" required minlength="3" maxlength="64"></label>
-<label>Password<input class="input" type="password" name="password" autocomplete="{{if .Setup}}new-password{{else}}current-password{{end}}" required minlength="16"></label>
-{{if .Setup}}<label>Confirm password<input class="input" type="password" name="confirm_password" autocomplete="new-password" required minlength="16"></label>
+{{if .Recover}}<label>Recovery token<input class="input" type="password" name="recovery_token" autocomplete="off" required></label>{{end}}
+<label>{{if .Recover}}New password{{else}}Password{{end}}<input class="input" type="password" name="password" autocomplete="{{if or .Setup .Recover}}new-password{{else}}current-password{{end}}" required minlength="16"></label>
+{{if or .Setup .Recover}}<label>Confirm password<input class="input" type="password" name="confirm_password" autocomplete="new-password" required minlength="16"></label>{{end}}
+{{if .Setup}}
 <label>One-time setup token<input class="input" type="password" name="bootstrap_token" autocomplete="off" required></label>{{end}}
-<button class="btn primary" type="submit">{{if .Setup}}Create administrator{{else}}Sign in{{end}}</button>
-</form><p class="authhelp">{{if .Setup}}Retrieve the short-lived token from the FleetAMP systemd journal. It expires after 15 minutes and is consumed once.{{else}}Use the administrator credentials created during FleetAMP setup.{{end}}</p>
+<button class="btn primary" type="submit">{{if .Setup}}Create administrator{{else if .Recover}}Reset password{{else}}Sign in{{end}}</button>
+</form><p class="authhelp">{{if .Setup}}Retrieve the short-lived token from the FleetAMP systemd journal. It expires after 15 minutes and is consumed once.{{else if .Recover}}Use the short-lived, single-use token generated by a FleetAMP administrator.{{else}}Use your FleetAMP credentials. If you are locked out, ask an administrator to generate a recovery token.{{end}}</p>
 <button class="btn theme-toggle" id="theme-toggle" type="button" aria-label="Switch color theme" style="margin-top:16px">☀ Light theme</button></section></main><script src="/assets/theme.js" defer></script></body></html>`
 
 var authPage = template.Must(template.New("auth").Parse(authPageHTML))
@@ -490,6 +522,7 @@ var authPage = template.Must(template.New("auth").Parse(authPageHTML))
 func (a *authManager) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/setup", a.handleSetup)
 	mux.HandleFunc("/login", a.handleLogin)
+	mux.HandleFunc("/recover", a.handleRecovery)
 	mux.HandleFunc("/logout", a.handleLogout)
 	a.registerUserRoutes(mux)
 }
@@ -548,7 +581,14 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
-		a.renderAuthPage(w, authPageData{Title: "Sign in"})
+		message := ""
+		if r.URL.Query().Get("recovered") == "1" {
+			message = "Password recovered. Sign in with your new password."
+		}
+		if r.URL.Query().Get("password_changed") == "1" {
+			message = "Password changed. Sign in again."
+		}
+		a.renderAuthPage(w, authPageData{Title: "Sign in", Success: message})
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -572,18 +612,64 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.RecordLogin(r.Context(), username, a.now().UTC()); err != nil {
 		slog.Warn("record login time", "component", "auth", "username", username, "error", err)
 	}
-	token, err := a.createSessionForRole(username, principalRole)
+	user, err := a.store.Get(r.Context(), username)
+	if err != nil {
+		internalServerError(w, err)
+		return
+	}
+	token, err := a.createSessionWithPasswordState(username, principalRole, user.MustChangePassword)
 	if err != nil {
 		internalServerError(w, err)
 		return
 	}
 	a.setSessionCookie(w, token)
 	slog.Info("user signed in", "component", "auth", "event", "login_succeeded", "username", username)
+	if user.MustChangePassword {
+		http.Redirect(w, r, "/account?force=1", http.StatusSeeOther)
+		return
+	}
 	if principalRole == roleGroupOwner {
 		http.Redirect(w, r, "/groups", http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/agents", http.StatusSeeOther)
+}
+
+func (a *authManager) handleRecovery(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		a.renderAuthPage(w, authPageData{Title: "Recover account", Recover: true})
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		a.renderAuthPage(w, authPageData{Title: "Recover account", Recover: true, Message: "Invalid recovery request."})
+		return
+	}
+	username, password := strings.TrimSpace(r.FormValue("username")), r.FormValue("password")
+	if password != r.FormValue("confirm_password") || len(password) < minimumAdminPassword {
+		a.renderAuthPage(w, authPageData{Title: "Recover account", Recover: true, Message: "Recovery token or password is invalid."})
+		return
+	}
+	digest := sha256.Sum256([]byte(strings.TrimSpace(r.FormValue("recovery_token"))))
+	ok, err := a.store.ConsumeRecoveryToken(r.Context(), username, digest[:], a.now().UTC())
+	if err != nil {
+		internalServerError(w, err)
+		return
+	}
+	if !ok {
+		time.Sleep(300 * time.Millisecond)
+		a.renderAuthPage(w, authPageData{Title: "Recover account", Recover: true, Message: "Recovery token or password is invalid."})
+		return
+	}
+	if err := a.resetUserPassword(r.Context(), username, password, false); err != nil {
+		internalServerError(w, err)
+		return
+	}
+	slog.Warn("account password recovered", "component", "auth", "event", "password_recovered", "username", username)
+	http.Redirect(w, r, "/login?recovered=1", http.StatusSeeOther)
 }
 
 // handleLogout invalidates the current session and returns the browser to the login page.

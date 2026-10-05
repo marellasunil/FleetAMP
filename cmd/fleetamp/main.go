@@ -61,6 +61,13 @@ func main() {
 		writeVersion(os.Stdout)
 		return
 	}
+	if handled, err := handleAdminCommand(context.Background(), os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return
+	}
 
 	closeLog := configureLogging()
 	defer closeLog()
@@ -672,7 +679,9 @@ func deliverConfiguration(ctx context.Context, agentUID string, configuration *c
 
 func deliverConfigurationWithRollback(ctx context.Context, agentUID string, configuration *configs.Configuration, action configs.DeploymentAction, previousConfigurationID, approvalRequestID string, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) (*configs.Assignment, *configs.Deployment, error) {
 	resolvedConfiguration, err := configurationForDelivery(ctx, configuration)
-	if err != nil { return nil, nil, fmt.Errorf("resolve group secrets: %w", err) }
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve group secrets: %w", err)
+	}
 	configuration = resolvedConfiguration
 	latest, err := latestAssignmentForAgent(ctx, assignmentStore, agentUID)
 	if err != nil && !errors.Is(err, storage.ErrAssignmentNotFound) {

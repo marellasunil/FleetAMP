@@ -3,6 +3,7 @@ package sqlite
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -16,18 +17,19 @@ var (
 )
 
 type User struct {
-	Username          string
-	Email             string
-	Role              string
-	Enabled           bool
-	GroupIDs          []string
-	Timezone          string
-	LastLoginAt       *time.Time
-	PasswordSalt      []byte
-	PasswordHash      []byte
-	CreatedAt         time.Time
-	PasswordChangedAt time.Time
-	UpdatedAt         time.Time
+	Username           string
+	Email              string
+	Role               string
+	Enabled            bool
+	GroupIDs           []string
+	Timezone           string
+	LastLoginAt        *time.Time
+	MustChangePassword bool
+	PasswordSalt       []byte
+	PasswordHash       []byte
+	CreatedAt          time.Time
+	PasswordChangedAt  time.Time
+	UpdatedAt          time.Time
 }
 
 type AuthStore struct{ db *sql.DB }
@@ -90,10 +92,10 @@ func (s *AuthStore) Create(ctx context.Context, user User) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
         INSERT INTO users (
-			username, email, role, enabled, group_ids, timezone, last_login_at,
+			username, email, role, enabled, group_ids, timezone, last_login_at, must_change_password,
 			password_salt, password_hash, created_at, password_changed_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, user.Username, user.Email, user.Role, enabled, encodeStringList(user.GroupIDs), normalizedTimezone(user.Timezone), nullableTime(user.LastLoginAt), user.PasswordSalt, user.PasswordHash,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, user.Username, user.Email, user.Role, enabled, encodeStringList(user.GroupIDs), normalizedTimezone(user.Timezone), nullableTime(user.LastLoginAt), boolInt(user.MustChangePassword), user.PasswordSalt, user.PasswordHash,
 		user.CreatedAt.Format(time.RFC3339Nano),
 		user.PasswordChangedAt.Format(time.RFC3339Nano),
 		user.UpdatedAt.Format(time.RFC3339Nano))
@@ -140,17 +142,64 @@ func (s *AuthStore) UpdateEmail(ctx context.Context, username, email string) err
 }
 
 // ReplacePassword atomically replaces password verifier material.
-func (s *AuthStore) ReplacePassword(ctx context.Context, username string, salt, hash []byte) error {
+func (s *AuthStore) ReplacePassword(ctx context.Context, username string, salt, hash []byte, mustChange bool) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx, `
-        UPDATE users SET password_salt = ?, password_hash = ?,
+        UPDATE users SET password_salt = ?, password_hash = ?, must_change_password = ?,
             password_changed_at = ?, updated_at = ?
         WHERE username = ? COLLATE NOCASE
-    `, salt, hash, now, now, username)
+    `, salt, hash, boolInt(mustChange), now, now, username)
 	if err != nil {
 		return fmt.Errorf("replace user password: %w", err)
 	}
 	return affectedUser(result)
+}
+
+// IssueRecoveryToken replaces any outstanding token for a user.
+func (s *AuthStore) IssueRecoveryToken(ctx context.Context, username string, tokenHash []byte, expires time.Time) error {
+	if _, err := s.Get(ctx, username); err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO password_recovery_tokens(username,token_hash,expires_at,created_at)
+		VALUES(?,?,?,?) ON CONFLICT(username) DO UPDATE SET token_hash=excluded.token_hash,expires_at=excluded.expires_at,created_at=excluded.created_at`,
+		username, tokenHash, expires.UTC().Format(time.RFC3339Nano), now)
+	if err != nil {
+		return fmt.Errorf("issue password recovery token: %w", err)
+	}
+	return nil
+}
+
+// ConsumeRecoveryToken atomically consumes a matching, unexpired token.
+func (s *AuthStore) ConsumeRecoveryToken(ctx context.Context, username string, tokenHash []byte, now time.Time) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var stored []byte
+	var expiresText string
+	err = tx.QueryRowContext(ctx, `SELECT token_hash,expires_at FROM password_recovery_tokens WHERE username=? COLLATE NOCASE`, username).Scan(&stored, &expiresText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	expires, err := time.Parse(time.RFC3339Nano, expiresText)
+	if err != nil {
+		return false, err
+	}
+	if !now.Before(expires) || !hmacEqual(stored, tokenHash) {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM password_recovery_tokens WHERE username=? COLLATE NOCASE`, username); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateRole changes a user's role while preserving at least one enabled Admin.
@@ -254,24 +303,25 @@ func affectedUser(result sql.Result) error {
 	return nil
 }
 
-const userSelect = `SELECT username, email, role, enabled, group_ids, timezone, last_login_at,
+const userSelect = `SELECT username, email, role, enabled, group_ids, timezone, last_login_at, must_change_password,
     password_salt, password_hash, created_at, password_changed_at, updated_at FROM users`
 
 type userScanner interface{ Scan(...any) error }
 
 func scanUser(scanner userScanner) (*User, error) {
 	var user User
-	var enabled int
+	var enabled, mustChange int
 	var groupIDs, timezone string
 	var lastLoginAt sql.NullString
 	var createdAt, changedAt, updatedAt string
-	if err := scanner.Scan(&user.Username, &user.Email, &user.Role, &enabled, &groupIDs, &timezone, &lastLoginAt,
+	if err := scanner.Scan(&user.Username, &user.Email, &user.Role, &enabled, &groupIDs, &timezone, &lastLoginAt, &mustChange,
 		&user.PasswordSalt, &user.PasswordHash,
 		&createdAt, &changedAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	var err error
 	user.Enabled = enabled != 0
+	user.MustChangePassword = mustChange != 0
 	user.Timezone = normalizedTimezone(timezone)
 	if err := json.Unmarshal([]byte(groupIDs), &user.GroupIDs); err != nil {
 		return nil, fmt.Errorf("decode user groups: %w", err)
@@ -293,6 +343,17 @@ func scanUser(scanner userScanner) (*User, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func hmacEqual(left, right []byte) bool {
+	return len(left) == len(right) && subtle.ConstantTimeCompare(left, right) == 1
 }
 
 func encodeStringList(values []string) string {

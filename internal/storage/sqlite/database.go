@@ -181,11 +181,19 @@ func (d *Database) initialize(ctx context.Context) error {
 			group_ids TEXT NOT NULL DEFAULT '[]',
 			timezone TEXT NOT NULL DEFAULT 'UTC',
 			last_login_at TEXT,
+			must_change_password INTEGER NOT NULL DEFAULT 0,
             password_salt BLOB NOT NULL, password_hash BLOB NOT NULL,
             created_at TEXT NOT NULL, password_changed_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_users_role_enabled ON users(role, enabled)`,
+		`CREATE TABLE IF NOT EXISTS password_recovery_tokens (
+			username TEXT PRIMARY KEY COLLATE NOCASE,
+			token_hash BLOB NOT NULL,
+			expires_at TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE
+		)`,
 		`CREATE TABLE IF NOT EXISTS configuration_section_policies (
             section_key TEXT PRIMARY KEY,
             operator_editable INTEGER NOT NULL CHECK (operator_editable IN (0, 1)),
@@ -250,6 +258,9 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureUserProfileColumns(ctx); err != nil {
 		return err
 	}
+	if err := d.ensurePasswordRecoverySchema(ctx); err != nil {
+		return err
+	}
 	if err := d.ensureRBACSchema(ctx); err != nil {
 		return err
 	}
@@ -288,6 +299,7 @@ func (d *Database) ensureUserProfileColumns(ctx context.Context) error {
 		{"group_ids", "TEXT NOT NULL DEFAULT '[]'"},
 		{"timezone", "TEXT NOT NULL DEFAULT 'UTC'"},
 		{"last_login_at", "TEXT"},
+		{"must_change_password", "INTEGER NOT NULL DEFAULT 0"},
 	}
 	for _, column := range columns {
 		present, err := sqliteColumnExists(ctx, d.db, "users", column.name)
@@ -300,6 +312,20 @@ func (d *Database) ensureUserProfileColumns(ctx context.Context) error {
 		if _, err := d.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN `+column.name+` `+column.definition); err != nil {
 			return fmt.Errorf("add users.%s column: %w", column.name, err)
 		}
+	}
+	return nil
+}
+
+func (d *Database) ensurePasswordRecoverySchema(ctx context.Context) error {
+	_, err := d.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS password_recovery_tokens (
+		username TEXT PRIMARY KEY COLLATE NOCASE,
+		token_hash BLOB NOT NULL,
+		expires_at TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE
+	)`)
+	if err != nil {
+		return fmt.Errorf("create password recovery token table: %w", err)
 	}
 	return nil
 }

@@ -230,12 +230,14 @@ func describeAuditAction(r *http.Request) (string, string, string) {
 		return "authentication.logout", "session", ""
 	case "/setup":
 		return "authentication.setup", "administrator", ""
+	case "/recover":
+		return "authentication.password_recover", "user", r.FormValue("username")
 	case "/settings/configuration-drift":
 		return "policy.drift_update", "configuration_policy", "drift"
 	case "/settings/configuration-sections":
 		return "policy.section_update", "configuration_policy", r.FormValue("section")
 	case "/settings/guide-catalog":
-		return "guide."+firstNonEmpty(strings.TrimSpace(r.FormValue("action")), "update"), "guide_catalog", firstNonEmpty(r.FormValue("id"), r.FormValue("version"))
+		return "guide." + firstNonEmpty(strings.TrimSpace(r.FormValue("action")), "update"), "guide_catalog", firstNonEmpty(r.FormValue("id"), r.FormValue("version"))
 	}
 	action := strings.TrimSpace(r.FormValue("action"))
 	if strings.HasSuffix(r.URL.Path, "/secrets") {

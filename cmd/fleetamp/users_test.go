@@ -89,7 +89,7 @@ func TestRoleAndPasswordChangesRevokeSessions(t *testing.T) {
 	request = httptest.NewRequest(http.MethodGet, "/agents", nil)
 	request.AddCookie(&http.Cookie{Name: manager.cookieName(), Value: token})
 	if err := manager.resetUserPassword(context.Background(), "viewer-one",
-		"a-new-strong-viewer-password"); err != nil {
+		"a-new-strong-viewer-password", false); err != nil {
 		t.Fatal(err)
 	}
 	if manager.validSession(request) {
@@ -97,6 +97,62 @@ func TestRoleAndPasswordChangesRevokeSessions(t *testing.T) {
 	}
 	if !manager.authenticate(context.Background(), "viewer-one", "a-new-strong-viewer-password") {
 		t.Fatal("new password was rejected")
+	}
+}
+
+func TestAccountPasswordChangeRequiresCurrentPassword(t *testing.T) {
+	manager, db := newUserTestManager(t)
+	defer db.Close()
+	token, err := manager.createSessionForRole("admin", roleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/account", strings.NewReader(
+		"action=password&current_password=wrong-password&password=a-new-strong-admin-password&confirm_password=a-new-strong-admin-password"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(&http.Cookie{Name: manager.cookieName(), Value: token})
+	response := httptest.NewRecorder()
+	manager.handleAccount(response, request)
+	if !strings.Contains(response.Header().Get("Location"), "current+password+is+incorrect") {
+		t.Fatalf("unexpected redirect: %s", response.Header().Get("Location"))
+	}
+	if !manager.authenticate(context.Background(), "admin", "a-strong-admin-password") {
+		t.Fatal("wrong current password changed the stored verifier")
+	}
+}
+
+func TestAdminResetRequiresReauthenticationAndForcesChange(t *testing.T) {
+	manager, db := newUserTestManager(t)
+	defer db.Close()
+	if err := manager.createUser(context.Background(), "viewer-one", "", "a-strong-viewer-password", "member", []string{"test-group"}, []string{"viewer"}); err != nil {
+		t.Fatal(err)
+	}
+	token, err := manager.createSessionForRole("admin", roleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(adminPassword string) *httptest.ResponseRecorder {
+		form := "action=reset_password&username=viewer-one&admin_password=" + adminPassword + "&password=a-temporary-viewer-password&confirm_password=a-temporary-viewer-password"
+		request := httptest.NewRequest(http.MethodPost, "/settings/users", strings.NewReader(form))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.AddCookie(&http.Cookie{Name: manager.cookieName(), Value: token})
+		response := httptest.NewRecorder()
+		manager.handleUsers(response, request)
+		return response
+	}
+	if location := post("wrong-password").Header().Get("Location"); !strings.Contains(location, "Admin+password+is+incorrect") {
+		t.Fatalf("missing reauthentication error: %s", location)
+	}
+	post("a-strong-admin-password")
+	user, err := db.Authentication().Get(context.Background(), "viewer-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !user.MustChangePassword {
+		t.Fatal("admin reset did not require a password change")
+	}
+	if !manager.authenticate(context.Background(), "viewer-one", "a-temporary-viewer-password") {
+		t.Fatal("temporary password rejected")
 	}
 }
 
