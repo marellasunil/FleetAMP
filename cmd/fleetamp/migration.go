@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
@@ -32,6 +33,14 @@ type migrationStandardizationChange struct {
 	Category string
 	Summary  string
 	Detail   string
+}
+
+type migrationHistoryStats struct {
+	Total      int
+	Groups     int
+	Pattern    int
+	Custom     int
+	Last30Days int
 }
 
 type migrationView struct {
@@ -65,6 +74,7 @@ type migrationView struct {
 	PreviewReady     bool
 	FinalHash        string
 	History          []*migrations.Record
+	HistoryStats     migrationHistoryStats
 	SavedConfig      *configs.Configuration
 	Components       []migrationComponentSummary
 	Changes          []migrationStandardizationChange
@@ -97,11 +107,18 @@ var migrationHTMLWithPreview = strings.NewReplacer(
 	`{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`, `{{else if eq .Tab "validate"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Validate migration candidate</div><div class="cardsub">Check YAML, pipeline references, secret references, and the configured Collector distribution before saving.</div></div>{{if .Validation.Valid}}<span class="badge ok">Valid</span>{{else if .Validated}}<span class="badge warn">Blocked</span>{{else}}<span class="badge off">Waiting</span>{{end}}</div><div class="cardbody">{{if .Validated}}<div class="change-list"><div class="change-item"><span class="badge {{if .Validation.YAMLValid}}ok{{else}}warn{{end}}">{{if .Validation.YAMLValid}}Passed{{else}}Failed{{end}}</span> <strong>YAML and pipeline structure</strong><div class="tiny">Component references and service pipelines must form a valid Collector document.</div></div><div class="change-item"><span class="badge {{if .Validation.CollectorValidated}}ok{{else}}off{{end}}">{{if .Validation.CollectorValidated}}Passed{{else if .Validation.CollectorSkipped}}Skipped{{else}}Not run{{end}}</span> <strong>Collector distribution</strong><div class="tiny">{{if .Validation.CollectorSkipped}}Configure FLEETAMP_OTELCOL_BINARY to enable distribution-specific validation.{{else}}Validated with the configured OpenTelemetry Collector binary.{{end}}</div></div></div>{{range .Validation.Warnings}}<div class="notice">{{.}}</div>{{end}}{{if .Validation.Error}}<div class="configerror" role="alert">{{.Validation.Error}}</div>{{end}}<div class="section-heading"><div><strong>Final candidate YAML</strong><div class="tiny">Read-only. Validation does not create a version or deployment.</div></div></div><pre class="migration-preview">{{.ProposedContent}}</pre>{{if .Validation.Valid}}<form method="post" action="/migration?tab=preview" enctype="multipart/form-data"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="agent_uid" value="{{.SelectedAgent}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="pattern_id" value="{{.SelectedPattern}}"><input type="hidden" name="proposal_hash" value="{{.FinalHash}}"><textarea name="proposed_yaml" hidden>{{.ProposedContent}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Continue to final Preview</button></div></form>{{end}}{{else}}<div class="stage-note">Complete and confirm Pattern adoption before validation. Direct navigation cannot bypass the earlier migration stages.</div>{{end}}</div></section>{{else if eq .Tab "preview"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Final preview before saving</div><div class="cardsub">Review the exact metadata and immutable YAML candidate that a future save action will use.</div></div>{{if .PreviewReady}}<span class="badge ok">Ready to save</span>{{else}}<span class="badge off">Waiting for validation</span>{{end}}</div><div class="cardbody">{{if .PreviewReady}}<div class="component-list"><div class="component-item"><strong>Target group</strong><div class="tiny code">{{.SelectedGroup}}</div></div><div class="component-item"><strong>Name and version</strong><div class="tiny">{{.Name}} · <span class="code">{{.Version}}</span></div></div><div class="component-item"><strong>Source</strong><div class="tiny">{{.Source}}{{if .SelectedAgent}} · {{.SelectedAgent}}{{end}}</div></div><div class="component-item"><strong>Pattern decision</strong><div class="tiny">{{if eq .SelectedPattern "custom"}}Custom configuration{{else}}{{.SelectedPattern}}{{end}}</div></div></div><div class="section-heading"><div><strong>Content fingerprint</strong><div class="tiny code">SHA-256 · {{.FinalHash}}</div></div></div><pre class="migration-preview">{{.ProposedContent}}</pre><div class="notice">Saving remains disabled in this change. The next stage will create the version through the governed configuration workflow without deploying it automatically.</div><div class="detailactions"><span class="btn primary" aria-disabled="true">Save version · Next stage</span></div>{{else}}<div class="stage-note">A successful server-side validation is required immediately before Preview. Return to Pattern adoption and continue through Validate.</div>{{end}}</div></section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`,
 ).Replace(migrationHTMLWithAdoption)
 
-var migrationHTML = strings.NewReplacer(
+var migrationHTMLWithHistory = strings.NewReplacer(
 	`History <span class="soon">Planned</span>`, `History`,
 	`<div class="notice">Saving remains disabled in this change. The next stage will create the version through the governed configuration workflow without deploying it automatically.</div><div class="detailactions"><span class="btn primary" aria-disabled="true">Save version · Next stage</span></div>`, `<div class="notice">Saving creates an immutable group configuration version only. It does not assign, submit for approval, or deploy the configuration.</div><form method="post" action="/migration?tab=history" enctype="multipart/form-data"><input type="hidden" name="action" value="save_migration"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="agent_uid" value="{{.SelectedAgent}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="pattern_id" value="{{.SelectedPattern}}"><input type="hidden" name="proposal_hash" value="{{.FinalHash}}"><textarea name="proposed_yaml" hidden>{{.ProposedContent}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Save immutable version</button></div></form>`,
 	`{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`, `{{else if eq .Tab "history"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Migration History</div><div class="cardsub">Append-only provenance for configuration versions created through the Migration workspace.</div></div><span class="badge ok">Immutable records</span></div><div class="cardbody">{{if .SavedConfig}}<div class="notice">✓ Saved <strong>{{.SavedConfig.Name}}</strong> version <span class="code">{{.SavedConfig.Version}}</span>. No assignment, approval request, or deployment was created.</div><div class="detailactions"><a class="btn primary" href="/groups/{{.SavedConfig.GroupID}}?configuration_saved={{.SavedConfig.ID}}">Open saved group version</a></div>{{end}}{{if .History}}<div style="overflow:auto"><table><thead><tr><th>Saved</th><th>Group</th><th>Configuration</th><th>Source</th><th>Pattern</th><th>Created by</th><th>Hash</th></tr></thead><tbody>{{range .History}}<tr><td>{{.CreatedAt}}</td><td><a href="/groups/{{.GroupID}}"><strong>{{.GroupName}}</strong></a></td><td>{{.Name}} <span class="code">{{.Version}}</span><div class="tiny code">{{.ConfigurationID}}</div></td><td>{{.Source}}{{if .AgentUID}}<div class="tiny code">{{.AgentUID}}</div>{{end}}</td><td>{{if eq .PatternID "custom"}}Custom{{else}}<span class="code">{{.PatternID}}</span>{{end}}</td><td>{{.CreatedBy}}</td><td><span class="code">{{.ContentHash}}</span></td></tr>{{end}}</tbody></table></div>{{else}}<div class="stage-note">No migration results have been saved for your accessible groups.</div>{{end}}</div></section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`,
 ).Replace(migrationHTMLWithPreview)
+
+var migrationHTML = strings.NewReplacer(
+	`<div class="cardbody">{{if .SavedConfig}}<div class="notice">✓ Saved`, `<div class="cardbody"><div class="component-list" style="margin-bottom:16px"><div class="component-item"><strong>{{.HistoryStats.Total}}</strong><div class="tiny">Saved migrations</div></div><div class="component-item"><strong>{{.HistoryStats.Groups}}</strong><div class="tiny">Groups covered</div></div><div class="component-item"><strong>{{.HistoryStats.Pattern}}</strong><div class="tiny">Pattern governed</div></div><div class="component-item"><strong>{{.HistoryStats.Custom}}</strong><div class="tiny">Custom configurations</div></div><div class="component-item"><strong>{{.HistoryStats.Last30Days}}</strong><div class="tiny">Saved in last 30 days</div></div></div>{{if .SavedConfig}}<div class="notice">✓ Saved`,
+	`<div class="detailactions"><a class="btn primary" href="/groups/{{.SavedConfig.GroupID}}?configuration_saved={{.SavedConfig.ID}}">Open saved group version</a></div>`, `<div class="detailactions"><a class="btn" href="/groups/{{.SavedConfig.GroupID}}?configuration_saved={{.SavedConfig.ID}}">Open saved group version</a><a class="btn primary" href="/groups/{{.SavedConfig.GroupID}}?configuration_id={{.SavedConfig.ID}}">Review &amp; request approval</a></div>`,
+	`<th>Created by</th><th>Hash</th></tr>`, `<th>Created by</th><th>Hash</th><th>Next step</th></tr>`,
+	`<td><span class="code">{{.ContentHash}}</span></td></tr>`, `<td><span class="code">{{.ContentHash}}</span></td><td><a class="btn" href="/groups/{{.GroupID}}?configuration_id={{.ConfigurationID}}">Request approval</a></td></tr>`,
+).Replace(migrationHTMLWithHistory)
 
 var migrationPage = template.Must(template.New("migration").Parse(migrationHTML))
 
@@ -143,6 +160,7 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 					internalServerError(w, err)
 					return
 				}
+				view.HistoryStats = buildMigrationHistoryStats(view.History, time.Now().UTC())
 				if savedID := strings.TrimSpace(r.URL.Query().Get("saved")); savedID != "" {
 					saved, getErr := configStore.Get(r.Context(), savedID)
 					if getErr == nil && configurationVisibleToGroups(saved, visibleGroups) {
@@ -579,6 +597,28 @@ func configurationVisibleToGroups(configuration *configs.Configuration, visibleG
 		}
 	}
 	return false
+}
+
+func buildMigrationHistoryStats(records []*migrations.Record, now time.Time) migrationHistoryStats {
+	stats := migrationHistoryStats{Total: len(records)}
+	groupsSeen := map[string]bool{}
+	cutoff := now.UTC().Add(-30 * 24 * time.Hour)
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		groupsSeen[record.GroupID] = true
+		if record.PatternID == "custom" {
+			stats.Custom++
+		} else {
+			stats.Pattern++
+		}
+		if !record.CreatedAt.Before(cutoff) {
+			stats.Last30Days++
+		}
+	}
+	stats.Groups = len(groupsSeen)
+	return stats
 }
 
 func validateMigrationCandidate(r *http.Request, validator *configs.Validator, policyStore storage.SectionPolicyStore, principalRole role, groupID, agentID, content string, visibleCollectors []*agents.ManagedAgent, adapter *fleetopamp.Adapter) configs.ValidationResult {
