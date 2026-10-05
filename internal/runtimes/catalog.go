@@ -17,7 +17,6 @@ type Type string
 const (
 	OTelCollector           Type = "otel-collector"
 	OTelCollectorKubernetes Type = "otel-collector-kubernetes"
-	GrafanaAlloy            Type = "grafana-alloy"
 )
 
 type ConfigFormat string
@@ -25,7 +24,6 @@ type ConfigFormat string
 const (
 	ConfigOTelYAML ConfigFormat = "OpenTelemetry YAML"
 	ConfigOTelCRD  ConfigFormat = "OpenTelemetryCollector CRD"
-	ConfigAlloy    ConfigFormat = "Alloy configuration"
 )
 
 type Support string
@@ -33,13 +31,6 @@ type Support string
 const (
 	Supported Support = "supported"
 	Planned   Support = "planned"
-)
-
-type Distribution string
-
-const (
-	BuiltIn Distribution = "built-in"
-	AddOn   Distribution = "add-on"
 )
 
 type Capability struct {
@@ -52,10 +43,6 @@ type Descriptor struct {
 	Type              Type
 	Name              string
 	Description       string
-	Distribution      Distribution
-	Bundled           bool
-	EnabledByDefault  bool
-	Notice            string
 	ConfigFormat      ConfigFormat
 	ManagementModes   []string
 	DeploymentMethods []string
@@ -84,7 +71,7 @@ func NewRegistry(providers ...Provider) (*Registry, error) {
 }
 
 func NewDefaultRegistry() *Registry {
-	r, err := NewRegistry(staticProvider{otelCollectorDescriptor()}, staticProvider{kubernetesCollectorDescriptor()}, staticProvider{alloyDescriptor()})
+	r, err := NewRegistry(staticProvider{otelCollectorDescriptor()}, staticProvider{kubernetesCollectorDescriptor()})
 	if err != nil {
 		panic(err)
 	}
@@ -145,8 +132,6 @@ func otelCollectorDescriptor() Descriptor {
 	return Descriptor{
 		Type: OTelCollector, Name: "OpenTelemetry Collector",
 		Description:       "Collector processes managed through FleetAMP's existing OpAMP control plane.",
-		Distribution:      BuiltIn,
-		EnabledByDefault:  true,
 		ConfigFormat:      ConfigOTelYAML,
 		ManagementModes:   []string{"OpAMP"},
 		DeploymentMethods: []string{"Binary", "Container", "Kubernetes workload"},
@@ -163,8 +148,6 @@ func kubernetesCollectorDescriptor() Descriptor {
 	return Descriptor{
 		Type: OTelCollectorKubernetes, Name: "Kubernetes OTel Collector",
 		Description:       "Operator-managed collectors represented as Kubernetes custom resources.",
-		Distribution:      BuiltIn,
-		EnabledByDefault:  true,
 		ConfigFormat:      ConfigOTelCRD,
 		ManagementModes:   []string{"OpenTelemetry Operator", "GitOps"},
 		DeploymentMethods: []string{"Helm", "Custom resource", "Kustomize"},
@@ -173,26 +156,6 @@ func kubernetesCollectorDescriptor() Descriptor {
 			{Name: "Configuration render", Support: Planned, Detail: "Render governed versions into operator resources."},
 			{Name: "Drift detection", Support: Planned, Detail: "Compare desired Git or API state with cluster state."},
 			{Name: "Workload deployment", Support: Planned, Detail: "Apply through an explicit GitOps or cluster integration."},
-		},
-	}
-}
-
-func alloyDescriptor() Descriptor {
-	return Descriptor{
-		Type: GrafanaAlloy, Name: "Grafana Alloy",
-		Description:       "Alloy agents governed through native remote configuration or its OTel Engine OpAMP support.",
-		Distribution:      AddOn,
-		Bundled:           false,
-		EnabledByDefault:  false,
-		Notice:            "Optional third-party integration. FleetAMP does not bundle or install Alloy and is not affiliated with, endorsed, or sponsored by Grafana Labs.",
-		ConfigFormat:      ConfigAlloy,
-		ManagementModes:   []string{"Alloy remote configuration", "Git / HTTP import", "OTel Engine OpAMP"},
-		DeploymentMethods: []string{"Binary", "Container", "Helm"},
-		Capabilities: []Capability{
-			{Name: "Discovery and health", Support: Planned, Detail: "Normalize Alloy identity and health into the fleet model."},
-			{Name: "Configuration validation", Support: Planned, Detail: "Validate Alloy syntax before version creation."},
-			{Name: "Remote configuration", Support: Planned, Detail: "Provider will select the configured Alloy management mode."},
-			{Name: "Workload deployment", Support: Planned, Detail: "Install through GitOps or an explicit deployment integration."},
 		},
 	}
 }
