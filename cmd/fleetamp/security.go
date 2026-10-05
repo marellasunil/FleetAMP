@@ -268,7 +268,8 @@ func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler
 				return
 			}
 		}
-		if isUnsafeMethod(r.Method) && !validRequestOrigin(r, cfg.AllowedOrigins) {
+		if isUnsafeMethod(r.Method) && !validRequestOrigin(r, cfg.AllowedOrigins) &&
+			!(cfg.AllowInsecure && validDevelopmentNullOrigin(r)) {
 			slog.Warn("request origin rejected", "component", "http", "event", "origin_rejected", "origin", r.Header.Get("Origin"), "host", r.Host, "remote_address", r.RemoteAddr, "fetch_site", r.Header.Get("Sec-Fetch-Site"))
 			http.Error(w, "request origin is not allowed", http.StatusForbidden)
 			return
@@ -379,6 +380,21 @@ func validLoopbackNullOrigin(r *http.Request) bool {
 	fetchSite := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
 	return loopbackHost(host) && loopbackHost(remoteHost) &&
 		(fetchSite == "same-origin" || fetchSite == "same-site")
+}
+
+// validDevelopmentNullOrigin permits Fedora browser form submissions through a local
+// Kubernetes port-forward only when insecure development mode is already enabled.
+// Production deployments must never rely on this exception.
+func validDevelopmentNullOrigin(r *http.Request) bool {
+	if strings.TrimSpace(r.Header.Get("Origin")) != "null" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		host = r.Host
+	}
+	fetchSite := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+	return loopbackHost(host) && (fetchSite == "same-origin" || fetchSite == "same-site")
 }
 
 // equivalentLoopbackOrigin treats localhost and loopback IP names as equivalent only when their effective ports match.
