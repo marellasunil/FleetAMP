@@ -40,7 +40,7 @@ func TestMigrationValidateStageRendersResultAndPreviewTransition(t *testing.T) {
 
 func TestMigrationHistoryShowsOnlyPersistedProvenance(t *testing.T) {
 	var output bytes.Buffer
-	view := migrationView{Tab: "history", History: []*migrations.Record{{
+	view := migrationView{Tab: "history", HistoryStats: migrationHistoryStats{Total: 1, Groups: 1, Custom: 1, Last30Days: 1}, History: []*migrations.Record{{
 		ID: "record-1", ConfigurationID: "config-1", GroupID: "group-1", GroupName: "Payments",
 		Name: "Imported Collector", Version: "migration-1", Source: "existing-collector",
 		AgentUID: "collector-1", PatternID: "custom", ContentHash: "abc123", CreatedBy: "owner",
@@ -50,13 +50,26 @@ func TestMigrationHistoryShowsOnlyPersistedProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := output.String()
-	for _, expected := range []string{"Migration History", "Payments", "migration-1", "collector-1", "abc123", "owner"} {
+	for _, expected := range []string{"Migration History", "Payments", "migration-1", "collector-1", "abc123", "owner", "Saved migrations", "Groups covered", "Request approval", "/groups/group-1?configuration_id=config-1"} {
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("History page missing %q", expected)
 		}
 	}
 	if strings.Contains(rendered, `History <span class="soon">Planned</span>`) {
 		t.Fatal("History is still marked as planned")
+	}
+}
+
+func TestBuildMigrationHistoryStats(t *testing.T) {
+	now := time.Date(2026, 10, 5, 18, 0, 0, 0, time.UTC)
+	records := []*migrations.Record{
+		{GroupID: "group-1", PatternID: "custom", CreatedAt: now.Add(-time.Hour)},
+		{GroupID: "group-1", PatternID: "pattern-linux", CreatedAt: now.Add(-10 * 24 * time.Hour)},
+		{GroupID: "group-2", PatternID: "pattern-otlp", CreatedAt: now.Add(-60 * 24 * time.Hour)},
+	}
+	stats := buildMigrationHistoryStats(records, now)
+	if stats.Total != 3 || stats.Groups != 2 || stats.Pattern != 2 || stats.Custom != 1 || stats.Last30Days != 2 {
+		t.Fatalf("stats=%#v", stats)
 	}
 }
 
