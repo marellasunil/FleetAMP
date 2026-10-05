@@ -38,6 +38,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/marellasunil/FleetAMP/internal/addons"
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/events"
@@ -225,6 +226,7 @@ func main() {
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry())
+	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerUIRoutes(mux, guideCatalogStore, auth)
 
 	httpServer := &http.Server{

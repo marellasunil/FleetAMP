@@ -8,10 +8,10 @@ import (
 func TestDefaultRegistryDescribesSupportedRuntimes(t *testing.T) {
 	r := NewDefaultRegistry()
 	listed := r.List()
-	if len(listed) != 3 {
-		t.Fatalf("List() returned %d providers, want 3", len(listed))
+	if len(listed) != 2 {
+		t.Fatalf("List() returned %d providers, want 2", len(listed))
 	}
-	for _, runtimeType := range []Type{OTelCollector, OTelCollectorKubernetes, GrafanaAlloy} {
+	for _, runtimeType := range []Type{OTelCollector, OTelCollectorKubernetes} {
 		descriptor, ok := r.Get(runtimeType)
 		if !ok {
 			t.Fatalf("Get(%q) did not find the provider", runtimeType)
@@ -32,11 +32,11 @@ func TestRegistryRejectsDuplicateProviders(t *testing.T) {
 
 func TestRegistryReturnsDefensiveCopies(t *testing.T) {
 	r := NewDefaultRegistry()
-	descriptor, _ := r.Get(GrafanaAlloy)
+	descriptor, _ := r.Get(OTelCollector)
 	descriptor.ManagementModes[0] = "changed"
 	descriptor.Capabilities[0].Name = "changed"
 
-	again, _ := r.Get(GrafanaAlloy)
+	again, _ := r.Get(OTelCollector)
 	if again.ManagementModes[0] == "changed" || again.Capabilities[0].Name == "changed" {
 		t.Fatal("Get() exposed mutable catalog state")
 	}
@@ -45,18 +45,5 @@ func TestRegistryReturnsDefensiveCopies(t *testing.T) {
 func TestRegistryUnknownRuntime(t *testing.T) {
 	if _, ok := NewDefaultRegistry().Get(Type("missing")); ok {
 		t.Fatal("Get() found an unknown runtime")
-	}
-}
-
-func TestAlloyIsOptionalUnbundledAddOn(t *testing.T) {
-	descriptor, ok := NewDefaultRegistry().Get(GrafanaAlloy)
-	if !ok {
-		t.Fatal("Grafana Alloy provider is missing")
-	}
-	if descriptor.Distribution != AddOn || descriptor.Bundled || descriptor.EnabledByDefault {
-		t.Fatalf("Alloy distribution = %q, bundled = %t, enabled = %t; want optional unbundled add-on", descriptor.Distribution, descriptor.Bundled, descriptor.EnabledByDefault)
-	}
-	if descriptor.Notice == "" {
-		t.Fatal("Alloy add-on must include a third-party notice")
 	}
 }
