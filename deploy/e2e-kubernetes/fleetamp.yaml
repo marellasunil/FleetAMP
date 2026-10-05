@@ -52,6 +52,8 @@ spec:
               value: 0.0.0.0:8080
             - name: FLEETAMP_OPAMP_ADDR
               value: 0.0.0.0:4320
+            - name: FLEETAMP_ALLOW_INSECURE
+              value: "true"
             - name: FLEETAMP_DATA_DIR
               value: /var/lib/fleetamp
             - name: FLEETAMP_DATABASE_PATH
