@@ -1,0 +1,269 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collector-new-config
+data:
+  supervisor.yaml: |
+    server:
+      endpoint: ws://fleetamp:4320/v1/opamp
+    capabilities:
+      reports_effective_config: true
+      reports_health: true
+      accepts_remote_config: true
+      reports_remote_config: true
+      reports_available_components: true
+    agent:
+      executable: /otelcol-contrib
+      description:
+        non_identifying_attributes:
+          fleetamp.agent.id: fleetamp-new
+          service.name: fleetamp-new
+          deployment.environment: e2e
+          fleetamp.test.scenario: new-managed
+    storage:
+      directory: /var/lib/otel-supervisor
+    healthcheck:
+      endpoint: 0.0.0.0:13133
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector-new
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: collector-new
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: collector-new
+        fleetamp.io/scenario: new-managed
+    spec:
+      containers:
+        - name: supervisor
+          image: fleetamp-opamp-supervisor:0.149.0
+          imagePullPolicy: Never
+          args: ["--config", "/etc/fleetamp-supervisor/supervisor.yaml"]
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/fleetamp-supervisor
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/otel-supervisor
+      volumes:
+        - name: config
+          configMap:
+            name: collector-new-config
+        - name: state
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collector-fresh-config
+data:
+  supervisor.yaml: |
+    server:
+      endpoint: ws://fleetamp:4320/v1/opamp
+    capabilities:
+      reports_effective_config: true
+      reports_health: true
+      accepts_remote_config: true
+      reports_remote_config: true
+      reports_available_components: true
+    agent:
+      executable: /otelcol-contrib
+      config_files:
+        - /etc/otelcol/base.yaml
+      description:
+        non_identifying_attributes:
+          fleetamp.agent.id: otel-fresh
+          service.name: otel-fresh
+          deployment.environment: e2e
+          fleetamp.test.scenario: fresh-managed
+    storage:
+      directory: /var/lib/otel-supervisor
+    healthcheck:
+      endpoint: 0.0.0.0:13133
+  base.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch: {}
+    exporters:
+      debug:
+        verbosity: basic
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector-fresh
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: collector-fresh
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: collector-fresh
+        fleetamp.io/scenario: fresh-managed
+    spec:
+      containers:
+        - name: supervisor
+          image: fleetamp-opamp-supervisor:0.149.0
+          imagePullPolicy: Never
+          args: ["--config", "/etc/fleetamp-supervisor/supervisor.yaml"]
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: supervisor-config
+              mountPath: /etc/fleetamp-supervisor
+              readOnly: true
+            - name: collector-config
+              mountPath: /etc/otelcol
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/otel-supervisor
+      volumes:
+        - name: supervisor-config
+          configMap:
+            name: collector-fresh-config
+            items:
+              - key: supervisor.yaml
+                path: supervisor.yaml
+        - name: collector-config
+          configMap:
+            name: collector-fresh-config
+            items:
+              - key: base.yaml
+                path: base.yaml
+        - name: state
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collector-existing-config
+data:
+  otelcol.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      opamp:
+        server:
+          ws:
+            endpoint: ws://fleetamp:4320/v1/opamp
+        instance_uid: 018f3f5a-7b2c-7d91-8a22-111111111111
+        capabilities:
+          reports_effective_config: true
+          reports_health: true
+          reports_available_components: true
+        agent_description:
+          non_identifying_attributes:
+            fleetamp.agent.id: otel-existing
+            service.name: payments-existing-collector
+            deployment.environment: e2e
+            team: payments
+            fleetamp.test.scenario: existing-external
+    receivers:
+      hostmetrics:
+        collection_interval: 30s
+        scrapers:
+          cpu: {}
+          memory: {}
+          load: {}
+          filesystem:
+            exclude_mount_points:
+              mount_points: ["/dev/*", "/proc/*", "/sys/*"]
+              match_type: regexp
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      resource:
+        attributes:
+          - key: service.namespace
+            value: payments
+            action: upsert
+          - key: deployment.environment.name
+            value: test
+            action: upsert
+    exporters:
+      debug:
+        verbosity: detailed
+    service:
+      extensions: [health_check, opamp]
+      pipelines:
+        metrics:
+          receivers: [hostmetrics, otlp]
+          processors: [resource]
+          exporters: [debug]
+        traces:
+          receivers: [otlp]
+          processors: [resource]
+          exporters: [debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector-existing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: collector-existing
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: collector-existing
+        fleetamp.io/scenario: existing-external
+    spec:
+      containers:
+        - name: otelcol
+          image: fleetamp-opamp-supervisor:0.149.0
+          imagePullPolicy: Never
+          command: ["/otelcol-contrib"]
+          args: ["--config", "/etc/otelcol/otelcol.yaml"]
+          ports:
+            - name: health
+              containerPort: 13133
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: collector-existing-config
