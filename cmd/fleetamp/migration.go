@@ -33,23 +33,23 @@ type migrationStandardizationChange struct {
 }
 
 type migrationView struct {
-	Page            string
-	Tab             string
-	Groups          []*groups.Group
-	Collectors      []*agents.ManagedAgent
-	SelectedGroup   string
-	SelectedAgent   string
-	Source          string
-	Name            string
-	Version         string
-	Content         string
-	OriginalContent string
-	FileName        string
-	Parsed          bool
-	Standardized    bool
-	ApplyBaseline   bool
-	AdoptionReady   bool
-	AdoptionChecks  []migrationAdoptionCheck
+	Page             string
+	Tab              string
+	Groups           []*groups.Group
+	Collectors       []*agents.ManagedAgent
+	SelectedGroup    string
+	SelectedAgent    string
+	Source           string
+	Name             string
+	Version          string
+	Content          string
+	OriginalContent  string
+	FileName         string
+	Parsed           bool
+	Standardized     bool
+	ApplyBaseline    bool
+	AdoptionReady    bool
+	AdoptionChecks   []migrationAdoptionCheck
 	PatternMatches   []migrationPatternMatch
 	SelectedPattern  string
 	PatternConfirmed bool
@@ -58,10 +58,10 @@ type migrationView struct {
 	ProposedContent  string
 	ProposedHash     string
 	PatternAdopted   bool
-	Components      []migrationComponentSummary
-	Changes         []migrationStandardizationChange
-	Warnings        []string
-	Error           string
+	Components       []migrationComponentSummary
+	Changes          []migrationStandardizationChange
+	Warnings         []string
+	Error            string
 }
 
 const migrationHTMLBase = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Configuration Migration · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `
@@ -74,6 +74,7 @@ var migrationHTML = strings.NewReplacer(
 	`<button class="btn primary" type="submit">{{if eq .SelectedPattern "custom"}}`, `<button class="btn primary" type="submit" name="action" value="confirm_adoption">{{if eq .SelectedPattern "custom"}}`,
 ).Replace(strings.NewReplacer(
 	"PR 4 · Pattern Matching", "PR 5 · Adopt / Upgrade Pattern",
+	`<nav class="tabs" aria-label="Migration stages"><a class="tab {{if eq .Tab "import"}}active{{end}}"`, `<nav class="tabs" aria-label="Migration stages"><a class="tab" href="/migration/fleet-adoption">Fleet Adoption</a><a class="tab {{if eq .Tab "import"}}active{{end}}"`,
 	`Pattern Matching</a><a class="tab {{if eq .Tab "validate"}}active{{end}}"`, `Pattern Matching</a><a class="tab {{if eq .Tab "pattern-adopt"}}active{{end}}" href="/migration?tab=pattern-adopt">Adopt / Upgrade</a><a class="tab {{if eq .Tab "validate"}}active{{end}}"`,
 	`<span class="btn primary" aria-disabled="true">Continue to Validate · Next PR</span>`, `<button class="btn primary" type="submit" formaction="/migration?tab=pattern-adopt" name="action" value="preview_adoption">Compare Pattern changes</button>`,
 	`{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`, `{{else if eq .Tab "pattern-adopt"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Adopt / Upgrade to Pattern</div><div class="cardsub">Review the complete configuration before explicitly adopting the current governed Pattern.</div></div>{{if .PatternAdopted}}<span class="badge ok">Adoption confirmed</span>{{else}}<span class="badge off">Preview only</span>{{end}}</div><div class="cardbody">{{if .ProposedContent}}<div class="notice">Pattern: <strong>{{.PatternName}}</strong> <span class="code">{{.SelectedPattern}}</span>. Only the matched receiver is replaced; all other Collector sections remain unchanged.</div><div class="change-list" style="margin-top:12px">{{range .PatternChanges}}<div class="change-item"><span class="badge off">{{.Category}}</span> <strong>{{.Summary}}</strong><div class="tiny">{{.Detail}}</div></div>{{else}}<div class="notice">This configuration already conforms to the selected Pattern.</div>{{end}}</div><div class="compare-grid"><div><div class="section-heading"><strong>Current standardized YAML</strong></div><pre class="migration-preview">{{.Content}}</pre></div><div><div class="section-heading"><strong>Proposed governed YAML</strong></div><pre class="migration-preview">{{.ProposedContent}}</pre></div></div><form method="post" action="/migration?tab=pattern-adopt" enctype="multipart/form-data"><input type="hidden" name="action" value="confirm_adoption"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="agent_uid" value="{{.SelectedAgent}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="pattern_id" value="{{.SelectedPattern}}"><textarea name="yaml" hidden>{{.Content}}</textarea><div class="detailactions"><a class="btn" href="/migration?tab=pattern-match">Back to matching</a><button class="btn primary" type="submit">{{if eq .SelectedPattern "custom"}}Confirm custom configuration{{else}}Adopt Pattern changes{{end}}</button>{{if .PatternAdopted}}<span class="btn primary" aria-disabled="true">Continue to Validate · Next PR</span>{{end}}</div></form>{{else}}<div class="stage-note">Confirm a Pattern match or choose custom configuration before this stage.</div>{{end}}</div></section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`,
@@ -83,6 +84,7 @@ var migrationHTML = strings.NewReplacer(
 var migrationPage = template.Must(template.New("migration").Parse(migrationHTML))
 
 func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, patternStore storage.DestinationProfileStore, agentStore *memory.AgentStore, adapter *fleetopamp.Adapter, auth *authManager) {
+	registerFleetAdoptionRoute(mux, groupStore, patternStore, agentStore, adapter, auth)
 	mux.HandleFunc("/migration", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/migration" {
 			http.NotFound(w, r)
