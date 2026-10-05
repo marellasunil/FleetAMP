@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/FleetAMP/internal/migrations"
 )
 
 func TestMigrationValidateStageRendersResultAndPreviewTransition(t *testing.T) {
@@ -36,6 +38,28 @@ func TestMigrationValidateStageRendersResultAndPreviewTransition(t *testing.T) {
 	}
 }
 
+func TestMigrationHistoryShowsOnlyPersistedProvenance(t *testing.T) {
+	var output bytes.Buffer
+	view := migrationView{Tab: "history", History: []*migrations.Record{{
+		ID: "record-1", ConfigurationID: "config-1", GroupID: "group-1", GroupName: "Payments",
+		Name: "Imported Collector", Version: "migration-1", Source: "existing-collector",
+		AgentUID: "collector-1", PatternID: "custom", ContentHash: "abc123", CreatedBy: "owner",
+		CreatedAt: time.Date(2026, 10, 5, 18, 0, 0, 0, time.UTC),
+	}}}
+	if err := migrationPage.Execute(&output, view); err != nil {
+		t.Fatal(err)
+	}
+	rendered := output.String()
+	for _, expected := range []string{"Migration History", "Payments", "migration-1", "collector-1", "abc123", "owner"} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("History page missing %q", expected)
+		}
+	}
+	if strings.Contains(rendered, `History <span class="soon">Planned</span>`) {
+		t.Fatal("History is still marked as planned")
+	}
+}
+
 func TestMigrationPreviewIsReadOnlyAndShowsFingerprint(t *testing.T) {
 	var output bytes.Buffer
 	view := migrationView{
@@ -52,13 +76,13 @@ func TestMigrationPreviewIsReadOnlyAndShowsFingerprint(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := output.String()
-	for _, expected := range []string{"Final preview before saving", "SHA-256 · abc123", "Save version · Next stage", "Saving remains disabled"} {
+	for _, expected := range []string{"Final preview before saving", "SHA-256 · abc123", "Save immutable version", "does not assign, submit for approval, or deploy"} {
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("Preview page missing %q", expected)
 		}
 	}
-	if strings.Contains(rendered, `action="save"`) {
-		t.Fatal("Preview unexpectedly exposed a save action")
+	if strings.Contains(rendered, `action="deploy"`) || strings.Contains(rendered, `action="submit_deployment"`) {
+		t.Fatal("Preview unexpectedly exposed a deployment or approval action")
 	}
 }
 

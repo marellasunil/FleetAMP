@@ -120,6 +120,7 @@ func main() {
 	auditStore := database.Audit()
 	guideCatalogStore := database.GuideCatalog()
 	groupSecretStore := database.GroupSecrets()
+	migrationStore := database.Migrations()
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
@@ -221,7 +222,7 @@ func main() {
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
 	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
-	registerMigrationRoutes(mux, groupStore, destinationProfileStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
+	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
 
 	httpServer := &http.Server{

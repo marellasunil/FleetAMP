@@ -85,6 +85,9 @@ func (d *Database) GuideCatalog() *GuideCatalogStore { return &GuideCatalogStore
 
 func (d *Database) GroupSecrets() *GroupSecretStore { return &GroupSecretStore{db: d.db} }
 
+// Migrations returns the append-only migration provenance repository.
+func (d *Database) Migrations() *MigrationStore { return &MigrationStore{db: d.db} }
+
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -97,6 +100,15 @@ func (d *Database) initialize(ctx context.Context) error {
             created_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_configurations_created_at ON configurations(created_at)`,
+		`CREATE TABLE IF NOT EXISTS migration_history (
+			id TEXT PRIMARY KEY, configuration_id TEXT NOT NULL UNIQUE,
+			group_id TEXT NOT NULL, group_name TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
+			source TEXT NOT NULL, agent_uid TEXT NOT NULL DEFAULT '', pattern_id TEXT NOT NULL,
+			content_hash TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+			FOREIGN KEY(configuration_id) REFERENCES configurations(id),
+			FOREIGN KEY(group_id) REFERENCES groups(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_migration_history_group_created ON migration_history(group_id,created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS assignments (
             agent_instance_uid TEXT NOT NULL, configuration_id TEXT NOT NULL,
             configuration_hash TEXT NOT NULL, status TEXT NOT NULL,
