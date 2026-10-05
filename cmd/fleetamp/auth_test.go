@@ -59,7 +59,7 @@ func (s *memoryAdministratorStore) Create(_ context.Context, user sqlitestore.Us
 	return nil
 }
 
-func (s *memoryAdministratorStore) ReplacePassword(_ context.Context, username string, salt, hash []byte) error {
+func (s *memoryAdministratorStore) ReplacePassword(_ context.Context, username string, salt, hash []byte, mustChange bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.user == nil || !strings.EqualFold(s.user.Username, username) {
@@ -67,7 +67,15 @@ func (s *memoryAdministratorStore) ReplacePassword(_ context.Context, username s
 	}
 	s.user.PasswordSalt = append([]byte(nil), salt...)
 	s.user.PasswordHash = append([]byte(nil), hash...)
+	s.user.MustChangePassword = mustChange
 	return nil
+}
+
+func (s *memoryAdministratorStore) IssueRecoveryToken(context.Context, string, []byte, time.Time) error {
+	return nil
+}
+func (s *memoryAdministratorStore) ConsumeRecoveryToken(context.Context, string, []byte, time.Time) (bool, error) {
+	return false, nil
 }
 
 func (s *memoryAdministratorStore) UpdateRole(_ context.Context, username, nextRole string) error {

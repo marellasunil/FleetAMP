@@ -3,6 +3,7 @@ package sqlite
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"path/filepath"
@@ -12,6 +13,31 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/groups"
 )
+
+func TestPasswordRecoveryTokenIsSingleUse(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "recovery.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := db.Authentication()
+	if err := store.Create(ctx, User{Username: "admin", Role: "admin", Enabled: true, PasswordSalt: []byte("salt"), PasswordHash: []byte("hash")}); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("single-use-token"))
+	if err := store.IssueRecoveryToken(ctx, "admin", digest[:], time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := store.ConsumeRecoveryToken(ctx, "admin", digest[:], time.Now())
+	if err != nil || !ok {
+		t.Fatalf("first consume ok=%t err=%v", ok, err)
+	}
+	ok, err = store.ConsumeRecoveryToken(ctx, "admin", digest[:], time.Now())
+	if err != nil || ok {
+		t.Fatalf("second consume ok=%t err=%v", ok, err)
+	}
+}
 
 func TestExistingAdministratorMigratesToAdminRole(t *testing.T) {
 	ctx := context.Background()

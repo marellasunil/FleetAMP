@@ -70,6 +70,8 @@ legacy role and group fields during the compatibility period, while normalized
 membership tables are the source of truth for new assignments.
 
 The Users tab is an identity summary. Group membership and role assignment are
-managed from Group Members. Administrators reset another user's password from a
-confirmation dialog; users continue to manage their own password and timezone
-from My Account.
+managed from Group Members. Administrators reauthenticate before resetting
+another user's password; the temporary password forces a change at next
+sign-in. Users verify their current password when changing it from My Account.
+Short-lived single-use recovery tokens provide a host-controlled break-glass
+path when no administrator can sign in.

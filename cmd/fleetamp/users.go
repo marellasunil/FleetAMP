@@ -17,18 +17,19 @@ import (
 )
 
 type userSummary struct {
-	Username          string
-	Email             string
-	Role              string
-	Enabled           bool
-	Groups            []*groups.Group
-	GroupOptions      []userGroupOption
-	GroupIDs          []string
-	Timezone          string
-	LastLoginAt       *time.Time
-	PasswordChangedAt time.Time
-	AssignedRoles     []roleSummary
-	RoleOptions       []userRoleOption
+	Username           string
+	Email              string
+	Role               string
+	Enabled            bool
+	Groups             []*groups.Group
+	GroupOptions       []userGroupOption
+	GroupIDs           []string
+	Timezone           string
+	LastLoginAt        *time.Time
+	PasswordChangedAt  time.Time
+	MustChangePassword bool
+	AssignedRoles      []roleSummary
+	RoleOptions        []userRoleOption
 }
 
 type userGroupOption struct {
@@ -124,7 +125,7 @@ const usersPageHTML = `<!doctype html><html><head><meta charset="utf-8">
 </tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Username}}</strong>
 {{if .Email}}<div class="tiny">{{.Email}}</div>{{end}}{{if eq .Username $.CurrentUser}}<div class="tiny">Current session</div>{{end}}</td><td>
 <div class="chips">{{range .AssignedRoles}}<span class="chip">{{.Name}}</span>{{else}}<span class="tiny">No assigned roles</span>{{end}}</div></td><td><div class="chips">{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a>{{else}}{{if eq .Role "admin"}}<span class="chip">All groups</span>{{else}}<span class="tiny">No group access</span>{{end}}{{end}}</div></td>
-<td>{{if .LastLoginAt}}{{.LastLoginAt}}{{else}}<span class="tiny">Never</span>{{end}}<div class="tiny">Timezone: {{.Timezone}}</div></td><td><form method="post" action="/settings/users"><input type="hidden" name="action" value="status"><input type="hidden" name="username" value="{{.Username}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button class="btn {{if .Enabled}}ok{{else}}off{{end}}" type="submit" title="Click to {{if .Enabled}}disable{{else}}enable{{end}} this user">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</button></form></td><td><div class="action-row"><a class="btn" href="/settings/users?tab=group-members&user={{.Username}}">Edit access</a><button class="btn" type="button" onclick="document.getElementById('reset-{{.Username}}').showModal()">Reset password</button></div><dialog id="reset-{{.Username}}" class="modal"><form class="userforms" method="post" action="/settings/users"><input type="hidden" name="action" value="reset_password"><input type="hidden" name="username" value="{{.Username}}"><strong>Reset password for {{.Username}}</strong><label>New password<input class="input" type="password" name="password" required minlength="16" autocomplete="new-password"></label><label>Confirm password<input class="input" type="password" name="confirm_password" required minlength="16" autocomplete="new-password"></label><div class="useractions"><button class="btn primary" type="submit">Reset</button><button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button></div></form></dialog></td></tr>{{end}}
+<td>{{if .LastLoginAt}}{{.LastLoginAt}}{{else}}<span class="tiny">Never</span>{{end}}<div class="tiny">Timezone: {{.Timezone}}</div></td><td><form method="post" action="/settings/users"><input type="hidden" name="action" value="status"><input type="hidden" name="username" value="{{.Username}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button class="btn {{if .Enabled}}ok{{else}}off{{end}}" type="submit" title="Click to {{if .Enabled}}disable{{else}}enable{{end}} this user">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</button></form>{{if .MustChangePassword}}<div class="tiny">Password change required</div>{{end}}</td><td><div class="action-row"><a class="btn" href="/settings/users?tab=group-members&user={{.Username}}">Edit access</a>{{if ne .Username $.CurrentUser}}<button class="btn" type="button" onclick="document.getElementById('reset-{{.Username}}').showModal()">Reset password</button>{{end}}</div>{{if ne .Username $.CurrentUser}}<dialog id="reset-{{.Username}}" class="modal"><form class="userforms" method="post" action="/settings/users"><input type="hidden" name="action" value="reset_password"><input type="hidden" name="username" value="{{.Username}}"><strong>Reset password for {{.Username}}</strong><p class="tiny">The user will be signed out and required to choose a new password at next sign-in.</p><label>Your Admin password<input class="input" type="password" name="admin_password" required autocomplete="current-password"></label><label>Temporary password<input class="input" type="password" name="password" required minlength="16" autocomplete="new-password"></label><label>Confirm temporary password<input class="input" type="password" name="confirm_password" required minlength="16" autocomplete="new-password"></label><div class="useractions"><button class="btn primary" type="submit">Reset and require change</button><button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button></div></form></dialog>{{end}}</td></tr>{{end}}
 </tbody></table></div>{{else}}<div class="empty">No users configured.</div>{{end}}` + paginationHTML + `
 </section>{{else if eq .Tab "group-members"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Group members</div><div class="cardsub">Manage people and their group-scoped roles without granting organization-wide access</div></div></div>{{if .AccessGroups}}<div style="overflow:auto"><table><thead><tr><th>Access group</th><th>Members</th><th>Collector scope</th><th>Status</th><th>Action</th></tr></thead><tbody>{{range .AccessGroups}}{{$group := .Group}}<tr><td><strong>{{.Group.Name}}</strong><div class="tiny code">{{.Group.ID}}</div></td><td>{{len .Members}}<div class="userforms">{{range .Members}}<div class="owner-card"><div><strong>{{.Username}}</strong><div class="chips">{{range .AssignedRoles}}<span class="chip">{{.Name}}</span>{{end}}</div></div><details class="member-editor"><summary class="btn">Edit</summary><div class="member-panel"><form class="userforms" method="post" action="/settings/users"><input type="hidden" name="action" value="membership"><input type="hidden" name="username" value="{{.Username}}"><input type="hidden" name="group_id" value="{{$group.ID}}"><strong>{{.Username}} · {{$group.Name}}</strong><div class="membership-grid">{{range .RoleOptions}}<label class="membership-option"><input type="checkbox" name="group_role_ids" value="{{.ID}}" {{if .Selected}}checked{{end}}> {{.Name}}</label>{{end}}</div><div class="action-row"><button class="btn primary" type="submit">Save roles</button><button class="btn" type="submit" name="remove" value="true">Remove member</button><button class="btn" type="button" onclick="this.closest('details').removeAttribute('open')">Cancel</button></div></form></div></details></div>{{else}}<span class="tiny">No users assigned</span>{{end}}</div></td><td>{{range $k,$v := .Group.Selector}}<span class="code">{{$k}}={{$v}}</span> {{end}}</td><td>{{if .Group.Enabled}}<span class="badge ok">Active</span>{{else}}<span class="badge off">Disabled</span>{{end}}</td><td><div class="action-row"><details class="member-editor"><summary class="btn primary">Add member</summary><div class="member-panel"><form class="userforms" method="post" action="/settings/users"><input type="hidden" name="action" value="membership"><input type="hidden" name="group_id" value="{{$group.ID}}"><strong>Add member to {{$group.Name}}</strong><label>Search user<input class="input" name="username" list="candidates-{{$group.ID}}" required placeholder="Type a username"></label><datalist id="candidates-{{$group.ID}}">{{range .Candidates}}<option value="{{.Username}}">{{.Email}}</option>{{end}}</datalist><div class="membership-grid">{{range $.Roles}}{{if eq .Scope "Group"}}<label class="membership-option"><input type="checkbox" name="group_role_ids" value="{{.ID}}"> {{.Name}}</label>{{end}}{{end}}</div><div class="action-row"><button class="btn primary" type="submit">Add member</button><button class="btn" type="button" onclick="this.closest('details').removeAttribute('open')">Cancel</button></div></form></div></details><a class="btn" href="/groups/{{$group.ID}}">View group</a></div></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No access scopes exist. Create a Collector Group first.</div>{{end}}</section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Built-in roles</div><div class="cardsub">Stable permission sets today; fine-grained custom permissions are planned as an additive migration</div></div></div><div class="cardbody groupgrid">{{range .Roles}}<div class="owner-card"><div><strong>{{.Name}}</strong><div class="tiny code">{{.ID}} · {{.Scope}}</div><p class="tiny">{{.Description}}</p><div class="chips">{{range .Permissions}}<span class="chip">{{.}}</span>{{end}}</div></div></div>{{end}}</div></section>{{end}}</div></main></div><script>
 document.addEventListener('click', (event) => {
@@ -174,9 +175,10 @@ type accountPageData struct {
 	Page, Username, Email, Role, Timezone, Message, Error string
 	Groups                                                []*groups.Group
 	LastLoginAt                                           *time.Time
+	ForcePasswordChange                                   bool
 }
 
-const accountPageHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>My account · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / My account</div><div class="pagetitle">{{.Username}}</div><div class="subtitle">Review your access and manage personal security and display preferences.</div></div></header><div class="content">{{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}<div class="detailgrid"><section class="card"><div class="cardhead"><div><div class="cardtitle">Access</div><div class="cardsub">Your effective FleetAMP scope</div></div></div><div class="cardbody"><div class="kv"><span>Role</span><strong>{{.Role}}</strong><span>Email</span><span>{{if .Email}}{{.Email}}{{else}}Not configured{{end}}</span><span>Last login</span><span>{{if .LastLoginAt}}{{.LastLoginAt}}{{else}}Current session is your first recorded login{{end}}</span><span>Groups</span><span>{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a> {{else}}{{if eq .Role "admin"}}All groups (Admin){{else}}No groups assigned{{end}}{{end}}</span></div></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Preferences</div><div class="cardsub">Used when FleetAMP displays local dates and times</div></div></div><div class="cardbody"><form class="detailform" method="post" action="/account"><input type="hidden" name="action" value="timezone"><label>Timezone<input class="input" name="timezone" value="{{.Timezone}}" placeholder="Europe/Amsterdam" required></label><button class="btn primary" type="submit">Save timezone</button></form></div></section><section class="card wide"><div class="cardhead"><div><div class="cardtitle">Reset password</div><div class="cardsub">Changing your password signs out all active sessions</div></div></div><div class="cardbody"><form class="detailform" method="post" action="/account"><input type="hidden" name="action" value="password"><label>New password<input class="input" type="password" name="password" required minlength="16" autocomplete="new-password"></label><label>Confirm password<input class="input" type="password" name="confirm_password" required minlength="16" autocomplete="new-password"></label><button class="btn primary" type="submit">Reset my password</button></form></div></section></div></div></main></div></body></html>`
+const accountPageHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>My account · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / My account</div><div class="pagetitle">{{.Username}}</div><div class="subtitle">Review your access and manage personal security and display preferences.</div></div></header><div class="content">{{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}{{if .ForcePasswordChange}}<div class="configerror">You must change your temporary password before continuing.</div>{{end}}<div class="detailgrid"><section class="card"><div class="cardhead"><div><div class="cardtitle">Access</div><div class="cardsub">Your effective FleetAMP scope</div></div></div><div class="cardbody"><div class="kv"><span>Role</span><strong>{{.Role}}</strong><span>Email</span><span>{{if .Email}}{{.Email}}{{else}}Not configured{{end}}</span><span>Last login</span><span>{{if .LastLoginAt}}{{.LastLoginAt}}{{else}}Current session is your first recorded login{{end}}</span><span>Groups</span><span>{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a> {{else}}{{if eq .Role "admin"}}All groups (Admin){{else}}No groups assigned{{end}}{{end}}</span></div></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Preferences</div><div class="cardsub">Used when FleetAMP displays local dates and times</div></div></div><div class="cardbody"><form class="detailform" method="post" action="/account"><input type="hidden" name="action" value="timezone"><label>Timezone<input class="input" name="timezone" value="{{.Timezone}}" placeholder="Europe/Amsterdam" required></label><button class="btn primary" type="submit">Save timezone</button></form></div></section><section class="card wide"><div class="cardhead"><div><div class="cardtitle">Change password</div><div class="cardsub">Verify your current password. Changing it signs out all active sessions.</div></div></div><div class="cardbody"><form class="detailform" method="post" action="/account"><input type="hidden" name="action" value="password"><label>Current password<input class="input" type="password" name="current_password" required autocomplete="current-password"></label><label>New password<input class="input" type="password" name="password" required minlength="16" autocomplete="new-password"></label><label>Confirm password<input class="input" type="password" name="confirm_password" required minlength="16" autocomplete="new-password"></label><button class="btn primary" type="submit">Change my password</button></form></div></section></div></div></main></div></body></html>`
 
 var accountPage = template.Must(template.New("account").Parse(accountPageHTML))
 
@@ -328,7 +330,7 @@ func (a *authManager) createUser(ctx context.Context, username, email, password,
 		return err
 	}
 	if err := a.store.Create(ctx, sqlitestore.User{
-		Username: username, Email: email, Role: legacyRole, Enabled: true, GroupIDs: groupIDs, Timezone: "UTC",
+		Username: username, Email: email, Role: legacyRole, Enabled: true, GroupIDs: groupIDs, Timezone: "UTC", MustChangePassword: true,
 		PasswordSalt: salt, PasswordHash: passwordDigest(password, a.pepper, salt),
 	}); err != nil {
 		return err
@@ -428,7 +430,7 @@ func (a *authManager) revokeUserSessions(username string) {
 	}
 }
 
-func (a *authManager) resetUserPassword(ctx context.Context, username, password string) error {
+func (a *authManager) resetUserPassword(ctx context.Context, username, password string, mustChange bool) error {
 	if len(password) < minimumAdminPassword {
 		return fmt.Errorf("password must contain at least %d characters", minimumAdminPassword)
 	}
@@ -437,7 +439,7 @@ func (a *authManager) resetUserPassword(ctx context.Context, username, password 
 		return err
 	}
 	if err := a.store.ReplacePassword(ctx, username, salt,
-		passwordDigest(password, a.pepper, salt)); err != nil {
+		passwordDigest(password, a.pepper, salt), mustChange); err != nil {
 		return err
 	}
 	a.revokeUserSessions(username)
@@ -490,7 +492,8 @@ func (a *authManager) handleAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var err error
-		switch r.FormValue("action") {
+		action := r.FormValue("action")
+		switch action {
 		case "timezone":
 			zone := strings.TrimSpace(r.FormValue("timezone"))
 			if _, loadErr := time.LoadLocation(zone); loadErr != nil {
@@ -499,10 +502,12 @@ func (a *authManager) handleAccount(w http.ResponseWriter, r *http.Request) {
 				err = a.store.UpdateTimezone(r.Context(), username, zone)
 			}
 		case "password":
-			if r.FormValue("password") != r.FormValue("confirm_password") {
+			if !a.authenticate(r.Context(), username, r.FormValue("current_password")) {
+				err = fmt.Errorf("current password is incorrect")
+			} else if r.FormValue("password") != r.FormValue("confirm_password") {
 				err = fmt.Errorf("passwords do not match")
 			} else {
-				err = a.resetUserPassword(r.Context(), username, r.FormValue("password"))
+				err = a.resetUserPassword(r.Context(), username, r.FormValue("password"), false)
 			}
 		default:
 			err = fmt.Errorf("unsupported account action")
@@ -511,6 +516,11 @@ func (a *authManager) handleAccount(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			values.Set("error", err.Error())
 		} else {
+			if action == "password" {
+				a.clearSession(w, r)
+				http.Redirect(w, r, "/login?password_changed=1", http.StatusSeeOther)
+				return
+			}
 			values.Set("message", "Account updated.")
 		}
 		http.Redirect(w, r, "/account?"+values.Encode(), http.StatusSeeOther)
@@ -525,7 +535,7 @@ func (a *authManager) handleAccount(w http.ResponseWriter, r *http.Request) {
 		internalServerError(w, err)
 		return
 	}
-	view := accountPageData{Page: "account", Username: user.Username, Email: user.Email, Role: user.Role, Timezone: user.Timezone, LastLoginAt: user.LastLoginAt, Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error")}
+	view := accountPageData{Page: "account", Username: user.Username, Email: user.Email, Role: user.Role, Timezone: user.Timezone, LastLoginAt: user.LastLoginAt, Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error"), ForcePasswordChange: user.MustChangePassword || r.URL.Query().Get("force") == "1"}
 	for _, id := range user.GroupIDs {
 		if group, groupErr := a.groupStore.Get(r.Context(), id); groupErr == nil {
 			view.Groups = append(view.Groups, group)
@@ -650,11 +660,19 @@ func (a *authManager) handleUsers(w http.ResponseWriter, r *http.Request) {
 	case "membership":
 		err = a.updateGroupMembership(r.Context(), target, strings.TrimSpace(r.FormValue("group_id")), r.Form["group_role_ids"], strings.EqualFold(r.FormValue("remove"), "true"))
 	case "reset_password":
+		if strings.EqualFold(actor, target) {
+			err = fmt.Errorf("change your own password from My account")
+			break
+		}
+		if !a.authenticate(r.Context(), actor, r.FormValue("admin_password")) {
+			err = fmt.Errorf("your Admin password is incorrect")
+			break
+		}
 		if r.FormValue("password") != r.FormValue("confirm_password") {
 			err = fmt.Errorf("passwords do not match")
 			break
 		}
-		err = a.resetUserPassword(r.Context(), target, r.FormValue("password"))
+		err = a.resetUserPassword(r.Context(), target, r.FormValue("password"), true)
 	default:
 		err = fmt.Errorf("unsupported user-management action")
 	}
@@ -758,7 +776,7 @@ func (a *authManager) renderUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	userByName := map[string]userSummary{}
 	for _, user := range users {
-		summary := userSummary{Username: user.Username, Email: user.Email, Role: user.Role, Enabled: user.Enabled,
+		summary := userSummary{Username: user.Username, Email: user.Email, Role: user.Role, Enabled: user.Enabled, MustChangePassword: user.MustChangePassword,
 			GroupIDs: user.GroupIDs, Timezone: user.Timezone, LastLoginAt: user.LastLoginAt,
 			PasswordChangedAt: user.PasswordChangedAt}
 		selected := map[string]bool{}

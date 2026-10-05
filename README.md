@@ -288,7 +288,12 @@ block approval or deployment operations.
 FleetAMP listens on localhost by default. The first administrator is created
 through a one-time `/setup` flow. Passwords are stored as Argon2id verifiers
 bound to a per-server pepper, which can be protected by TPM-backed systemd
-credentials. Remote OpAMP access requires a bearer token unless
+credentials. Self-service password changes require the current password.
+Administrator resets require Admin reauthentication, revoke the target's
+sessions, and force a password change at next sign-in. A short-lived,
+single-use break-glass token supports account recovery without exposing or
+replacing the server pepper. See [password management and recovery](docs/password-recovery.md).
+Remote OpAMP access requires a bearer token unless
 `FLEETAMP_ALLOW_INSECURE=true` is explicitly set for an isolated development
 environment. Protect the web UI/API and OpAMP traffic with FleetAMP native
 TLS or explicit TLS termination at a trusted proxy/load balancer. Optional
