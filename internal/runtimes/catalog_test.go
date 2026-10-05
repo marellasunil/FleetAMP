@@ -47,3 +47,16 @@ func TestRegistryUnknownRuntime(t *testing.T) {
 		t.Fatal("Get() found an unknown runtime")
 	}
 }
+
+func TestAlloyIsOptionalUnbundledAddOn(t *testing.T) {
+	descriptor, ok := NewDefaultRegistry().Get(GrafanaAlloy)
+	if !ok {
+		t.Fatal("Grafana Alloy provider is missing")
+	}
+	if descriptor.Distribution != AddOn || descriptor.Bundled || descriptor.EnabledByDefault {
+		t.Fatalf("Alloy distribution = %q, bundled = %t, enabled = %t; want optional unbundled add-on", descriptor.Distribution, descriptor.Bundled, descriptor.EnabledByDefault)
+	}
+	if descriptor.Notice == "" {
+		t.Fatal("Alloy add-on must include a third-party notice")
+	}
+}

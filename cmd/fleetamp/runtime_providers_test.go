@@ -18,7 +18,7 @@ func TestRuntimeProvidersPageShowsCapabilityMatrix(t *testing.T) {
 		t.Fatalf("GET /runtime-providers status = %d, want %d", response.Code, http.StatusOK)
 	}
 	body := response.Body.String()
-	for _, text := range []string{"OpenTelemetry Collector", "Kubernetes OTel Collector", "Grafana Alloy", "supported", "planned", "GitHub, GitLab, and Azure DevOps"} {
+	for _, text := range []string{"OpenTelemetry Collector", "Kubernetes OTel Collector", "Grafana Alloy", "supported", "planned", "add-on", "does not bundle or install Alloy", "GitHub, GitLab, and Azure DevOps"} {
 		if !strings.Contains(body, text) {
 			t.Errorf("page does not contain %q", text)
 		}

@@ -35,6 +35,13 @@ const (
 	Planned   Support = "planned"
 )
 
+type Distribution string
+
+const (
+	BuiltIn Distribution = "built-in"
+	AddOn   Distribution = "add-on"
+)
+
 type Capability struct {
 	Name    string
 	Support Support
@@ -45,6 +52,10 @@ type Descriptor struct {
 	Type              Type
 	Name              string
 	Description       string
+	Distribution      Distribution
+	Bundled           bool
+	EnabledByDefault  bool
+	Notice            string
 	ConfigFormat      ConfigFormat
 	ManagementModes   []string
 	DeploymentMethods []string
@@ -134,6 +145,8 @@ func otelCollectorDescriptor() Descriptor {
 	return Descriptor{
 		Type: OTelCollector, Name: "OpenTelemetry Collector",
 		Description:       "Collector processes managed through FleetAMP's existing OpAMP control plane.",
+		Distribution:      BuiltIn,
+		EnabledByDefault:  true,
 		ConfigFormat:      ConfigOTelYAML,
 		ManagementModes:   []string{"OpAMP"},
 		DeploymentMethods: []string{"Binary", "Container", "Kubernetes workload"},
@@ -150,6 +163,8 @@ func kubernetesCollectorDescriptor() Descriptor {
 	return Descriptor{
 		Type: OTelCollectorKubernetes, Name: "Kubernetes OTel Collector",
 		Description:       "Operator-managed collectors represented as Kubernetes custom resources.",
+		Distribution:      BuiltIn,
+		EnabledByDefault:  true,
 		ConfigFormat:      ConfigOTelCRD,
 		ManagementModes:   []string{"OpenTelemetry Operator", "GitOps"},
 		DeploymentMethods: []string{"Helm", "Custom resource", "Kustomize"},
@@ -166,6 +181,10 @@ func alloyDescriptor() Descriptor {
 	return Descriptor{
 		Type: GrafanaAlloy, Name: "Grafana Alloy",
 		Description:       "Alloy agents governed through native remote configuration or its OTel Engine OpAMP support.",
+		Distribution:      AddOn,
+		Bundled:           false,
+		EnabledByDefault:  false,
+		Notice:            "Optional third-party integration. FleetAMP does not bundle or install Alloy and is not affiliated with, endorsed, or sponsored by Grafana Labs.",
 		ConfigFormat:      ConfigAlloy,
 		ManagementModes:   []string{"Alloy remote configuration", "Git / HTTP import", "OTel Engine OpAMP"},
 		DeploymentMethods: []string{"Binary", "Container", "Helm"},
