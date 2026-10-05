@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fleetamp-e2e
+  labels:
+    app.kubernetes.io/part-of: fleetamp
+    fleetamp.io/purpose: e2e-testing
