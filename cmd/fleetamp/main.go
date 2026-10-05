@@ -43,6 +43,7 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/events"
 	"github.com/marellasunil/FleetAMP/internal/groups"
+	"github.com/marellasunil/FleetAMP/internal/integrations"
 	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
 	"github.com/marellasunil/FleetAMP/internal/runtimes"
 	"github.com/marellasunil/FleetAMP/internal/storage"
@@ -227,6 +228,7 @@ func main() {
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry())
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
+	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog())
 	registerUIRoutes(mux, guideCatalogStore, auth)
 
 	httpServer := &http.Server{
