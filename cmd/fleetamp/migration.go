@@ -13,6 +13,7 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/groups"
+	"github.com/marellasunil/FleetAMP/internal/migrations"
 	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
 	"github.com/marellasunil/FleetAMP/internal/storage"
 	"github.com/marellasunil/FleetAMP/internal/storage/memory"
@@ -63,6 +64,8 @@ type migrationView struct {
 	Validation       configs.ValidationResult
 	PreviewReady     bool
 	FinalHash        string
+	History          []*migrations.Record
+	SavedConfig      *configs.Configuration
 	Components       []migrationComponentSummary
 	Changes          []migrationStandardizationChange
 	Warnings         []string
@@ -86,7 +89,7 @@ var migrationHTMLWithAdoption = strings.NewReplacer(
 	"Pattern Match → Validate", "Pattern Match → Adopt / Upgrade → Validate",
 ).Replace(migrationHTMLBase))
 
-var migrationHTML = strings.NewReplacer(
+var migrationHTMLWithPreview = strings.NewReplacer(
 	`Validate <span class="soon">Next</span>`, `Validate`,
 	`Preview <span class="soon">Planned</span>`, `Preview`,
 	`<textarea name="yaml" hidden>{{.Content}}</textarea><input type="hidden" name="proposal_hash" value="{{.ProposedHash}}">`, `<textarea name="yaml" hidden>{{.Content}}</textarea><textarea name="proposed_yaml" hidden>{{.ProposedContent}}</textarea><input type="hidden" name="proposal_hash" value="{{.ProposedHash}}">`,
@@ -94,9 +97,15 @@ var migrationHTML = strings.NewReplacer(
 	`{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`, `{{else if eq .Tab "validate"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Validate migration candidate</div><div class="cardsub">Check YAML, pipeline references, secret references, and the configured Collector distribution before saving.</div></div>{{if .Validation.Valid}}<span class="badge ok">Valid</span>{{else if .Validated}}<span class="badge warn">Blocked</span>{{else}}<span class="badge off">Waiting</span>{{end}}</div><div class="cardbody">{{if .Validated}}<div class="change-list"><div class="change-item"><span class="badge {{if .Validation.YAMLValid}}ok{{else}}warn{{end}}">{{if .Validation.YAMLValid}}Passed{{else}}Failed{{end}}</span> <strong>YAML and pipeline structure</strong><div class="tiny">Component references and service pipelines must form a valid Collector document.</div></div><div class="change-item"><span class="badge {{if .Validation.CollectorValidated}}ok{{else}}off{{end}}">{{if .Validation.CollectorValidated}}Passed{{else if .Validation.CollectorSkipped}}Skipped{{else}}Not run{{end}}</span> <strong>Collector distribution</strong><div class="tiny">{{if .Validation.CollectorSkipped}}Configure FLEETAMP_OTELCOL_BINARY to enable distribution-specific validation.{{else}}Validated with the configured OpenTelemetry Collector binary.{{end}}</div></div></div>{{range .Validation.Warnings}}<div class="notice">{{.}}</div>{{end}}{{if .Validation.Error}}<div class="configerror" role="alert">{{.Validation.Error}}</div>{{end}}<div class="section-heading"><div><strong>Final candidate YAML</strong><div class="tiny">Read-only. Validation does not create a version or deployment.</div></div></div><pre class="migration-preview">{{.ProposedContent}}</pre>{{if .Validation.Valid}}<form method="post" action="/migration?tab=preview" enctype="multipart/form-data"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="agent_uid" value="{{.SelectedAgent}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="pattern_id" value="{{.SelectedPattern}}"><input type="hidden" name="proposal_hash" value="{{.FinalHash}}"><textarea name="proposed_yaml" hidden>{{.ProposedContent}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Continue to final Preview</button></div></form>{{end}}{{else}}<div class="stage-note">Complete and confirm Pattern adoption before validation. Direct navigation cannot bypass the earlier migration stages.</div>{{end}}</div></section>{{else if eq .Tab "preview"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Final preview before saving</div><div class="cardsub">Review the exact metadata and immutable YAML candidate that a future save action will use.</div></div>{{if .PreviewReady}}<span class="badge ok">Ready to save</span>{{else}}<span class="badge off">Waiting for validation</span>{{end}}</div><div class="cardbody">{{if .PreviewReady}}<div class="component-list"><div class="component-item"><strong>Target group</strong><div class="tiny code">{{.SelectedGroup}}</div></div><div class="component-item"><strong>Name and version</strong><div class="tiny">{{.Name}} · <span class="code">{{.Version}}</span></div></div><div class="component-item"><strong>Source</strong><div class="tiny">{{.Source}}{{if .SelectedAgent}} · {{.SelectedAgent}}{{end}}</div></div><div class="component-item"><strong>Pattern decision</strong><div class="tiny">{{if eq .SelectedPattern "custom"}}Custom configuration{{else}}{{.SelectedPattern}}{{end}}</div></div></div><div class="section-heading"><div><strong>Content fingerprint</strong><div class="tiny code">SHA-256 · {{.FinalHash}}</div></div></div><pre class="migration-preview">{{.ProposedContent}}</pre><div class="notice">Saving remains disabled in this change. The next stage will create the version through the governed configuration workflow without deploying it automatically.</div><div class="detailactions"><span class="btn primary" aria-disabled="true">Save version · Next stage</span></div>{{else}}<div class="stage-note">A successful server-side validation is required immediately before Preview. Return to Pattern adoption and continue through Validate.</div>{{end}}</div></section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`,
 ).Replace(migrationHTMLWithAdoption)
 
+var migrationHTML = strings.NewReplacer(
+	`History <span class="soon">Planned</span>`, `History`,
+	`<div class="notice">Saving remains disabled in this change. The next stage will create the version through the governed configuration workflow without deploying it automatically.</div><div class="detailactions"><span class="btn primary" aria-disabled="true">Save version · Next stage</span></div>`, `<div class="notice">Saving creates an immutable group configuration version only. It does not assign, submit for approval, or deploy the configuration.</div><form method="post" action="/migration?tab=history" enctype="multipart/form-data"><input type="hidden" name="action" value="save_migration"><input type="hidden" name="group_id" value="{{.SelectedGroup}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="agent_uid" value="{{.SelectedAgent}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="pattern_id" value="{{.SelectedPattern}}"><input type="hidden" name="proposal_hash" value="{{.FinalHash}}"><textarea name="proposed_yaml" hidden>{{.ProposedContent}}</textarea><div class="detailactions"><button class="btn primary" type="submit">Save immutable version</button></div></form>`,
+	`{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`, `{{else if eq .Tab "history"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Migration History</div><div class="cardsub">Append-only provenance for configuration versions created through the Migration workspace.</div></div><span class="badge ok">Immutable records</span></div><div class="cardbody">{{if .SavedConfig}}<div class="notice">✓ Saved <strong>{{.SavedConfig.Name}}</strong> version <span class="code">{{.SavedConfig.Version}}</span>. No assignment, approval request, or deployment was created.</div><div class="detailactions"><a class="btn primary" href="/groups/{{.SavedConfig.GroupID}}?configuration_saved={{.SavedConfig.ID}}">Open saved group version</a></div>{{end}}{{if .History}}<div style="overflow:auto"><table><thead><tr><th>Saved</th><th>Group</th><th>Configuration</th><th>Source</th><th>Pattern</th><th>Created by</th><th>Hash</th></tr></thead><tbody>{{range .History}}<tr><td>{{.CreatedAt}}</td><td><a href="/groups/{{.GroupID}}"><strong>{{.GroupName}}</strong></a></td><td>{{.Name}} <span class="code">{{.Version}}</span><div class="tiny code">{{.ConfigurationID}}</div></td><td>{{.Source}}{{if .AgentUID}}<div class="tiny code">{{.AgentUID}}</div>{{end}}</td><td>{{if eq .PatternID "custom"}}Custom{{else}}<span class="code">{{.PatternID}}</span>{{end}}</td><td>{{.CreatedBy}}</td><td><span class="code">{{.ContentHash}}</span></td></tr>{{end}}</tbody></table></div>{{else}}<div class="stage-note">No migration results have been saved for your accessible groups.</div>{{end}}</div></section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">{{.Tab}}</div>`,
+).Replace(migrationHTMLWithPreview)
+
 var migrationPage = template.Must(template.New("migration").Parse(migrationHTML))
 
-func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, patternStore storage.DestinationProfileStore, agentStore *memory.AgentStore, adapter *fleetopamp.Adapter, validator *configs.Validator, policyStore storage.SectionPolicyStore, auth *authManager) {
+func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, patternStore storage.DestinationProfileStore, configStore storage.ConfigurationStore, migrationStore storage.MigrationStore, agentStore *memory.AgentStore, adapter *fleetopamp.Adapter, validator *configs.Validator, policyStore storage.SectionPolicyStore, auth *authManager) {
 	registerFleetAdoptionRoute(mux, groupStore, patternStore, agentStore, adapter, auth)
 	mux.HandleFunc("/migration", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/migration" {
@@ -128,6 +137,19 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 		visibleCollectors := migrationVisibleCollectors(allCollectors, visibleGroups, principalRole)
 		view := migrationView{Page: "migration", Tab: tab, Groups: visibleGroups, Collectors: visibleCollectors, SelectedGroup: strings.TrimSpace(r.URL.Query().Get("group_id")), SelectedAgent: strings.TrimSpace(r.URL.Query().Get("agent_uid")), Source: "existing-collector"}
 		if r.Method == http.MethodGet {
+			if tab == "history" {
+				view.History, err = visibleMigrationHistory(r, migrationStore, visibleGroups)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				if savedID := strings.TrimSpace(r.URL.Query().Get("saved")); savedID != "" {
+					saved, getErr := configStore.Get(r.Context(), savedID)
+					if getErr == nil && configurationVisibleToGroups(saved, visibleGroups) {
+						view.SavedConfig = saved
+					}
+				}
+			}
 			if err := migrationPage.Execute(w, view); err != nil {
 				internalServerError(w, err)
 			}
@@ -166,6 +188,73 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 			view.Error = "Configuration name and proposed version are required."
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			_ = migrationPage.Execute(w, view)
+			return
+		}
+		if tab == "history" {
+			if r.FormValue("action") != "save_migration" {
+				http.Error(w, "unknown migration history action", http.StatusBadRequest)
+				return
+			}
+			if !canManageGroup(auth, r, group) {
+				http.Error(w, "only an Admin or assigned Group Owner can save a group configuration version", http.StatusForbidden)
+				return
+			}
+			view.SelectedPattern = strings.TrimSpace(r.FormValue("pattern_id"))
+			view.ProposedContent = strings.TrimSpace(r.FormValue("proposed_yaml"))
+			if view.Source == "" {
+				view.Source = "other"
+			}
+			view.FinalHash = migrationProposalHash(view.ProposedContent, view.SelectedPattern)
+			if view.SelectedPattern == "" || view.ProposedContent == "" || strings.TrimSpace(r.FormValue("proposal_hash")) != view.FinalHash {
+				view.Error = "The final Preview changed or is incomplete. Validate and review the migration again before saving."
+				w.WriteHeader(http.StatusConflict)
+				_ = migrationPage.Execute(w, view)
+				return
+			}
+			validation := validateMigrationCandidate(r, validator, policyStore, principalRole, view.SelectedGroup, view.SelectedAgent, view.ProposedContent, visibleCollectors, adapter)
+			if !validation.Valid {
+				view.Error = "The migration candidate no longer passes validation: " + strings.TrimSpace(validation.Error)
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_ = migrationPage.Execute(w, view)
+				return
+			}
+			if view.SelectedPattern != "custom" {
+				patterns, patternErr := migrationCatalogPatterns(r.Context(), patternStore)
+				if patternErr != nil {
+					internalServerError(w, patternErr)
+					return
+				}
+				if enabledPatternByID(patterns, view.SelectedPattern) == nil {
+					view.Error = "The selected Pattern is no longer enabled. Return to Pattern Matching before saving."
+					w.WriteHeader(http.StatusConflict)
+					_ = migrationPage.Execute(w, view)
+					return
+				}
+			}
+			existing, listErr := configStore.List(r.Context())
+			if listErr != nil {
+				internalServerError(w, listErr)
+				return
+			}
+			for _, configuration := range configurationsForGroup(existing, group.ID) {
+				if configuration.Name == view.Name && configuration.Version == view.Version {
+					view.Error = "Configuration name and version already exist in this group. Return to Import and choose a new version."
+					w.WriteHeader(http.StatusConflict)
+					_ = migrationPage.Execute(w, view)
+					return
+				}
+			}
+			configuration := configs.NewGroupConfiguration(group.ID, view.Name, view.Version, view.ProposedContent, "text/yaml")
+			record := &migrations.Record{
+				ID: configuration.ID, ConfigurationID: configuration.ID, GroupID: group.ID, GroupName: group.Name,
+				Name: configuration.Name, Version: configuration.Version, Source: view.Source, AgentUID: view.SelectedAgent,
+				PatternID: view.SelectedPattern, ContentHash: configuration.Hash, CreatedBy: username, CreatedAt: configuration.CreatedAt,
+			}
+			if err := migrationStore.Save(r.Context(), configuration, record); err != nil {
+				internalServerError(w, err)
+				return
+			}
+			http.Redirect(w, r, "/migration?tab=history&saved="+configuration.ID, http.StatusSeeOther)
 			return
 		}
 		if tab == "standardize" {
@@ -460,6 +549,36 @@ func registerMigrationRoutes(mux *http.ServeMux, groupStore storage.GroupStore, 
 			internalServerError(w, err)
 		}
 	})
+}
+
+func visibleMigrationHistory(r *http.Request, store storage.MigrationStore, visibleGroups []*groups.Group) ([]*migrations.Record, error) {
+	records, err := store.List(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	visible := make(map[string]bool, len(visibleGroups))
+	for _, group := range visibleGroups {
+		visible[group.ID] = true
+	}
+	result := make([]*migrations.Record, 0, len(records))
+	for _, record := range records {
+		if visible[record.GroupID] {
+			result = append(result, record)
+		}
+	}
+	return result, nil
+}
+
+func configurationVisibleToGroups(configuration *configs.Configuration, visibleGroups []*groups.Group) bool {
+	if configuration == nil {
+		return false
+	}
+	for _, group := range visibleGroups {
+		if group.ID == configuration.GroupID {
+			return true
+		}
+	}
+	return false
 }
 
 func validateMigrationCandidate(r *http.Request, validator *configs.Validator, policyStore storage.SectionPolicyStore, principalRole role, groupID, agentID, content string, visibleCollectors []*agents.ManagedAgent, adapter *fleetopamp.Adapter) configs.ValidationResult {
