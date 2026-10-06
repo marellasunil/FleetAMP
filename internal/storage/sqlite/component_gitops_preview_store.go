@@ -34,6 +34,13 @@ func (s *ComponentGitOpsPreviewStore) GetByPlan(ctx context.Context, id string) 
 	}
 	return v, e
 }
+func (s *ComponentGitOpsPreviewStore) Get(ctx context.Context, id string) (*lifecycle.GitOpsPreview, error) {
+	v, e := scanGitOpsPreview(s.db.QueryRowContext(ctx, gitOpsPreviewSelect+` WHERE id=?`, id))
+	if errors.Is(e, sql.ErrNoRows) {
+		return nil, storage.ErrComponentGitOpsPreviewNotFound
+	}
+	return v, e
+}
 func (s *ComponentGitOpsPreviewStore) List(ctx context.Context, n int) ([]*lifecycle.GitOpsPreview, error) {
 	if n <= 0 || n > 500 {
 		n = 100

@@ -13,6 +13,7 @@ var (
 
 type ComponentGitOpsPreviewStore interface {
 	Create(context.Context, *lifecycle.GitOpsPreview) error
+	Get(context.Context, string) (*lifecycle.GitOpsPreview, error)
 	GetByPlan(context.Context, string) (*lifecycle.GitOpsPreview, error)
 	List(context.Context, int) ([]*lifecycle.GitOpsPreview, error)
 }

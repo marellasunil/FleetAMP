@@ -107,6 +107,9 @@ func (d *Database) ComponentLifecycleExecutions() *ComponentLifecycleExecutionSt
 func (d *Database) ComponentGitOpsPreviews() *ComponentGitOpsPreviewStore {
 	return &ComponentGitOpsPreviewStore{db: d.db}
 }
+func (d *Database) GitOpsPreviewApprovals() *GitOpsPreviewApprovalStore {
+	return &GitOpsPreviewApprovalStore{db: d.db}
+}
 func (d *Database) IntegrationConnections() *IntegrationConnectionStore {
 	return &IntegrationConnectionStore{db: d.db}
 }
@@ -254,6 +257,8 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_component_gitops_previews_created ON component_gitops_previews(created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS component_gitops_previews_no_update BEFORE UPDATE ON component_gitops_previews BEGIN SELECT RAISE(ABORT,'component GitOps previews are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS component_gitops_previews_no_delete BEFORE DELETE ON component_gitops_previews BEGIN SELECT RAISE(ABORT,'component GitOps previews are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS gitops_preview_approvals(id TEXT PRIMARY KEY,preview_id TEXT NOT NULL UNIQUE,preview_hash TEXT NOT NULL,plan_hash TEXT NOT NULL,connection_id TEXT NOT NULL,repository_path TEXT NOT NULL,branch TEXT NOT NULL,submitted_by TEXT NOT NULL,assigned_reviewer TEXT NOT NULL,submission_comment TEXT NOT NULL,status TEXT NOT NULL,reviewed_by TEXT NOT NULL DEFAULT '',review_comment TEXT NOT NULL DEFAULT '',reviewed_at TEXT,created_at TEXT NOT NULL,FOREIGN KEY(preview_id) REFERENCES component_gitops_previews(id))`,
+		`CREATE INDEX IF NOT EXISTS idx_gitops_preview_approvals_status ON gitops_preview_approvals(status,created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS integration_connections(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,provider TEXT NOT NULL,base_url TEXT NOT NULL DEFAULT '',organization TEXT NOT NULL,project TEXT NOT NULL DEFAULT '',repository TEXT NOT NULL,branch TEXT NOT NULL,allowed_root TEXT NOT NULL,mode TEXT NOT NULL,credential_ref TEXT NOT NULL,group_ids TEXT NOT NULL,enabled INTEGER NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_integration_connections_provider ON integration_connections(provider,created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS integration_connections_no_update BEFORE UPDATE ON integration_connections BEGIN SELECT RAISE(ABORT,'integration connection records are immutable'); END`,
