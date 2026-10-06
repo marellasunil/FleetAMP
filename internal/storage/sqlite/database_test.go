@@ -12,7 +12,47 @@ import (
 
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/groups"
+	"github.com/marellasunil/FleetAMP/internal/lifecycle"
+	"github.com/marellasunil/FleetAMP/internal/runtimes"
 )
+
+func TestComponentLifecycleRequestPersistsImmutableSpecification(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "lifecycle.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	request, err := lifecycle.NewRequest(lifecycle.Spec{
+		Operation: lifecycle.Upgrade, ComponentType: runtimes.OTelCollectorKubernetes,
+		GroupID: "payments", LabelSelector: "environment=production", DeploymentMethod: "gitops",
+		CurrentVersion: "0.148.0", DesiredVersion: "0.149.0", Reason: "approved security update",
+	}, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := db.ComponentLifecycleRequests()
+	if err := store.Create(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Get(ctx, request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.SpecHash != request.SpecHash || stored.Spec != request.Spec || stored.Status != lifecycle.Proposed {
+		t.Fatalf("stored request differs: %#v", stored)
+	}
+	listed, err := store.List(ctx, 10)
+	if err != nil || len(listed) != 1 || listed[0].ID != request.ID {
+		t.Fatalf("listed requests=%#v err=%v", listed, err)
+	}
+	if _, err := db.db.ExecContext(ctx, `UPDATE component_lifecycle_requests SET reason='changed' WHERE id=?`, request.ID); err == nil {
+		t.Fatal("immutable lifecycle request accepted an update")
+	}
+	if _, err := db.db.ExecContext(ctx, `DELETE FROM component_lifecycle_requests WHERE id=?`, request.ID); err == nil {
+		t.Fatal("immutable lifecycle request accepted a delete")
+	}
+}
 
 func TestPasswordRecoveryTokenIsSingleUse(t *testing.T) {
 	ctx := context.Background()

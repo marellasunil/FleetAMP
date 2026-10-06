@@ -3,6 +3,11 @@ package main
 import (
 	"html/template"
 	"net/http"
+	"strings"
+
+	"github.com/marellasunil/FleetAMP/internal/lifecycle"
+	"github.com/marellasunil/FleetAMP/internal/runtimes"
+	"github.com/marellasunil/FleetAMP/internal/storage"
 )
 
 type deploymentKind struct {
@@ -12,35 +17,79 @@ type deploymentKind struct {
 }
 
 type deploymentsView struct {
-	Page  string
-	Kinds []deploymentKind
+	Page     string
+	Kinds    []deploymentKind
+	Requests []*lifecycle.Request
+	Error    string
+	Message  string
 }
 
 const deploymentsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Deployments · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `
-.delivery-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.delivery-flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.delivery-step{padding:14px;border:1px solid var(--line);border-radius:9px;background:#0a1626}@media(max-width:1050px){.delivery-flow{grid-template-columns:1fr}.delivery-grid{grid-template-columns:1fr}}
-</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Delivery / Deployments</div><div class="pagetitle">Deployments</div><div class="subtitle">One governed delivery path for configuration and component lifecycle changes.</div></div><div class="topactions"><a class="btn" href="/approvals">Open approvals</a><span class="badge off">Foundation</span></div></header><div class="content"><nav class="tabs" aria-label="Deployment views"><a class="tab active" href="/deployments">Requests</a><span class="tab">Active Rollouts <span class="soon">Planned</span></span><span class="tab">History <span class="soon">Planned</span></span><span class="tab">Rollbacks <span class="soon">Planned</span></span></nav><section class="card"><div class="cardhead"><div><div class="cardtitle">Supported request types</div><div class="cardsub">Configuration delivery works today. Component lifecycle requests define the safe contract for later Kubernetes execution.</div></div></div><div class="cardbody"><div class="delivery-grid">{{range .Kinds}}<article class="component-item"><div style="display:flex;justify-content:space-between;gap:12px"><strong>{{.Name}}</strong><span class="badge {{if eq .Status "Available"}}ok{{else}}off{{end}}">{{.Status}}</span></div><div class="tiny">{{.Description}}</div></article>{{end}}</div></div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Governed delivery contract</div><div class="cardsub">Repository events and UI actions enter the same validation and approval boundary.</div></div></div><div class="cardbody delivery-flow"><div class="delivery-step"><strong>1 · Receive</strong><div class="tiny">UI, GitHub, GitLab or Azure DevOps proposes desired state.</div></div><div class="delivery-step"><strong>2 · Validate</strong><div class="tiny">Resolve group or labels, policy, compatibility and exact content hash.</div></div><div class="delivery-step"><strong>3 · Approve</strong><div class="tiny">Admin or group owner reviews the immutable request.</div></div><div class="delivery-step"><strong>4 · Roll out</strong><div class="tiny">Only the approved hash may reach eligible targets.</div></div><div class="delivery-step"><strong>5 · Verify</strong><div class="tiny">Record outcome, drift and rollback evidence in history and audit.</div></div></div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Current workflow</div><div class="cardsub">Use the established group workspace until the consolidated request table is connected.</div></div></div><div class="cardbody detailactions"><a class="btn primary" href="/groups">Create from a group</a><a class="btn" href="/approvals">Review approval queue</a><a class="btn" href="/audit-log?tab=deployment">Open deployment audit</a></div></section></div></main></div></body></html>`
+.delivery-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.delivery-flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.delivery-step{padding:14px;border:1px solid var(--line);border-radius:9px;background:#0a1626}.proposal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.proposal-card{padding:14px;border:1px solid var(--line);border-radius:9px;background:#0a1626}.proposal-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}@media(max-width:1050px){.delivery-flow,.delivery-grid,.proposal-grid,.proposal-meta{grid-template-columns:1fr}}
+</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Delivery / Deployments</div><div class="pagetitle">Deployments</div><div class="subtitle">One governed delivery path for configuration and component lifecycle changes.</div></div><div class="topactions"><a class="btn" href="/approvals">Open approvals</a><span class="badge off">Proposal foundation</span></div></header><div class="content"><nav class="tabs" aria-label="Deployment views"><a class="tab active" href="/deployments">Requests</a><span class="tab">Active Rollouts <span class="soon">Planned</span></span><span class="tab">History <span class="soon">Planned</span></span><span class="tab">Rollbacks <span class="soon">Planned</span></span></nav>{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .Error}}<div class="configerror" role="alert">{{.Error}}</div>{{end}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Create immutable component proposal</div><div class="cardsub">This freezes intent and target scope. It does not approve, install, upgrade, restart, or remove a component.</div></div><span class="badge off">No execution</span></div><div class="cardbody"><form method="post" action="/deployments"><div class="form-grid"><label class="field">Operation<select class="select" name="operation" required><option value="install">Install</option><option value="upgrade">Upgrade</option><option value="restart">Restart</option><option value="remove">Remove</option></select></label><label class="field">Component type<select class="select" name="component_type" required><option value="otel-collector">OpenTelemetry Collector</option><option value="otel-collector-kubernetes">Kubernetes OTel Collector</option><option value="otel-operator">OpenTelemetry Operator</option></select></label><label class="field">Target group ID<input class="input" name="group_id" maxlength="160" required placeholder="payments-production"></label><label class="field">Optional label selector<input class="input" name="label_selector" maxlength="500" placeholder="environment=prod,region=eu-west"></label><label class="field">Delivery method<select class="select" name="deployment_method" required><option value="gitops">GitOps</option><option value="kubernetes-api">Kubernetes API (future executor)</option><option value="systemd">Linux system service</option><option value="container-runtime">Container runtime</option><option value="manual-package">Existing package workflow</option></select></label><label class="field">Current version<input class="input" name="current_version" maxlength="80" placeholder="Required for upgrade, restart, remove"></label><label class="field">Desired version<input class="input" name="desired_version" maxlength="80" placeholder="Required for install and upgrade"></label><label class="field full">Reason<textarea class="input" name="reason" rows="3" maxlength="1000" required placeholder="Business and operational reason for this lifecycle change"></textarea></label></div><div class="notice" style="margin-top:12px">Install requires only a desired version. Upgrade requires different current and desired versions. Restart and removal require only the current version.</div><div class="detailactions"><button class="btn primary" type="submit">Create immutable proposal</button></div></form></div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Supported request types</div><div class="cardsub">Configuration delivery remains available; component lifecycle operations currently stop after immutable proposal creation.</div></div></div><div class="cardbody"><div class="delivery-grid">{{range .Kinds}}<article class="component-item"><div style="display:flex;justify-content:space-between;gap:12px"><strong>{{.Name}}</strong><span class="badge {{if eq .Status "Available"}}ok{{else}}off{{end}}">{{.Status}}</span></div><div class="tiny">{{.Description}}</div></article>{{end}}</div></div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Component lifecycle proposals</div><div class="cardsub">Specifications are append-only. Later approval and execution state will be recorded separately.</div></div></div><div class="cardbody"><div class="proposal-grid">{{range .Requests}}<article class="proposal-card"><div style="display:flex;justify-content:space-between;gap:12px"><div><strong>{{.Spec.Operation}} · {{.Spec.ComponentType}}</strong><div class="tiny code">{{.ID}}</div></div><span class="badge off">{{.Status}}</span></div><div class="proposal-meta"><div><span class="tiny">Target</span><div>{{.Spec.GroupID}}{{if .Spec.LabelSelector}} · {{.Spec.LabelSelector}}{{end}}</div></div><div><span class="tiny">Delivery</span><div>{{.Spec.DeploymentMethod}}</div></div><div><span class="tiny">Versions</span><div>{{if .Spec.CurrentVersion}}{{.Spec.CurrentVersion}}{{else}}—{{end}} → {{if .Spec.DesiredVersion}}{{.Spec.DesiredVersion}}{{else}}—{{end}}</div></div><div><span class="tiny">Requested</span><div>{{.RequestedBy}} · {{.CreatedAt}}</div></div></div><div class="notice" style="margin-top:10px"><strong>Reason</strong><div class="tiny">{{.Spec.Reason}}</div></div><div class="tiny code" style="margin-top:10px">Immutable SHA-256: {{.SpecHash}}</div></article>{{else}}<div class="empty">No component lifecycle proposals have been created.</div>{{end}}</div></div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Governed delivery contract</div><div class="cardsub">Repository events and UI actions enter the same validation and approval boundary.</div></div></div><div class="cardbody delivery-flow"><div class="delivery-step"><strong>1 · Propose</strong><div class="tiny">Freeze operation, component, target, method, versions and reason.</div></div><div class="delivery-step"><strong>2 · Validate</strong><div class="tiny">Resolve targets, policy, compatibility and exact specification hash.</div></div><div class="delivery-step"><strong>3 · Approve</strong><div class="tiny">Admin or group owner reviews the immutable request.</div></div><div class="delivery-step"><strong>4 · Roll out</strong><div class="tiny">Only the approved hash may reach an enabled executor.</div></div><div class="delivery-step"><strong>5 · Verify</strong><div class="tiny">Record health, outcome, drift and rollback evidence.</div></div></div></section></div></main></div></body></html>`
 
 var deploymentsPage = template.Must(template.New("deployments").Parse(deploymentsHTML))
 
-func registerDeploymentRoutes(mux *http.ServeMux) {
+func registerDeploymentRoutes(mux *http.ServeMux, requestStore storage.ComponentLifecycleRequestStore, auth *authManager) {
 	mux.HandleFunc("/deployments", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/deployments" {
 			http.NotFound(w, r)
 			return
 		}
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
+		switch r.Method {
+		case http.MethodGet:
+			renderDeployments(w, r, requestStore, "")
+		case http.MethodPost:
+			if auth != nil && currentRole(auth, r) == roleViewer {
+				http.Error(w, "permission denied", http.StatusForbidden)
+				return
+			}
+			if err := r.ParseForm(); err != nil {
+				renderDeployments(w, r, requestStore, "Invalid proposal form.")
+				return
+			}
+			requester := currentUsername(auth, r)
+			if requester == "" && auth == nil {
+				requester = "test-user"
+			}
+			request, err := lifecycle.NewRequest(lifecycle.Spec{
+				Operation: lifecycle.Operation(r.FormValue("operation")), ComponentType: runtimes.Type(r.FormValue("component_type")),
+				GroupID: r.FormValue("group_id"), LabelSelector: r.FormValue("label_selector"), DeploymentMethod: r.FormValue("deployment_method"),
+				CurrentVersion: r.FormValue("current_version"), DesiredVersion: r.FormValue("desired_version"), Reason: r.FormValue("reason"),
+			}, requester)
+			if err != nil {
+				renderDeployments(w, r, requestStore, err.Error())
+				return
+			}
+			if err := requestStore.Create(r.Context(), request); err != nil {
+				renderDeployments(w, r, requestStore, "Unable to save the lifecycle proposal.")
+				return
+			}
+			http.Redirect(w, r, "/deployments?created="+request.ID, http.StatusSeeOther)
+		default:
+			w.Header().Set("Allow", "GET, POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		view := deploymentsView{Page: "deployments", Kinds: []deploymentKind{
-			{Name: "Configuration deployment", Description: "Deliver an immutable, validated Collector configuration version to approved group or label targets.", Status: "Available"},
-			{Name: "Component installation", Description: "Install an approved OTel component through a future GitOps or cluster executor.", Status: "Planned"},
-			{Name: "Component upgrade", Description: "Upgrade a discovered component only after compatibility validation and approval.", Status: "Planned"},
-			{Name: "Component removal", Description: "Remove a component with target preview, dependency checks and explicit approval.", Status: "Planned"},
-		}}
-		if err := deploymentsPage.Execute(w, view); err != nil {
-			http.Error(w, "render deployments", http.StatusInternalServerError)
 		}
 	})
+}
+
+func renderDeployments(w http.ResponseWriter, r *http.Request, requestStore storage.ComponentLifecycleRequestStore, errorMessage string) {
+	requests, err := requestStore.List(r.Context(), 100)
+	if err != nil && errorMessage == "" {
+		errorMessage = "Unable to load component lifecycle proposals."
+	}
+	message := ""
+	if strings.TrimSpace(r.URL.Query().Get("created")) != "" {
+		message = "Immutable component lifecycle proposal created. No action has been executed."
+	}
+	view := deploymentsView{Page: "deployments", Requests: requests, Error: errorMessage, Message: message, Kinds: []deploymentKind{
+		{Name: "Configuration deployment", Description: "Deliver an immutable, validated Collector configuration version to approved group or label targets.", Status: "Available"},
+		{Name: "Component installation", Description: "Create an immutable installation proposal for later validation and approval.", Status: "Proposal"},
+		{Name: "Component upgrade", Description: "Freeze current and desired versions before compatibility validation.", Status: "Proposal"},
+		{Name: "Component restart", Description: "Propose a controlled restart without changing the component version.", Status: "Proposal"},
+		{Name: "Component removal", Description: "Propose removal with an explicit target and operational reason.", Status: "Proposal"},
+	}}
+	if err := deploymentsPage.Execute(w, view); err != nil {
+		http.Error(w, "render deployments", http.StatusInternalServerError)
+	}
 }
