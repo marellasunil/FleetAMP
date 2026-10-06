@@ -18,16 +18,16 @@ type GitOpsFile struct {
 	Content string `json:"content"`
 }
 type GitOpsPreview struct {
-	ID             string       `json:"id"`
-	PlanID         string       `json:"plan_id"`
-	PlanHash       string       `json:"plan_hash"`
+	ID             string                `json:"id"`
+	PlanID         string                `json:"plan_id"`
+	PlanHash       string                `json:"plan_hash"`
 	Connection     GitConnectionSnapshot `json:"connection"`
-	RepositoryPath string       `json:"repository_path"`
-	Files          []GitOpsFile `json:"files"`
-	Diff           string       `json:"diff"`
-	PreviewHash    string       `json:"preview_hash"`
-	PreparedBy     string       `json:"prepared_by"`
-	CreatedAt      time.Time    `json:"created_at"`
+	RepositoryPath string                `json:"repository_path"`
+	Files          []GitOpsFile          `json:"files"`
+	Diff           string                `json:"diff"`
+	PreviewHash    string                `json:"preview_hash"`
+	PreparedBy     string                `json:"prepared_by"`
+	CreatedAt      time.Time             `json:"created_at"`
 }
 
 // GitConnectionSnapshot freezes the repository boundary used to render a
@@ -96,10 +96,10 @@ func PrepareGitOpsPreview(plan *ExecutionPlan, request *Request, connection *int
 	lineCount := strings.Count(strings.TrimSuffix(content, "\n"), "\n") + 1
 	diff := fmt.Sprintf("diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n+%s\n", repoPath, repoPath, repoPath, lineCount, strings.ReplaceAll(strings.TrimSuffix(content, "\n"), "\n", "\n+"))
 	hashInput := struct {
-		PlanHash    string                `json:"plan_hash"`
-		Connection  GitConnectionSnapshot `json:"connection"`
-		Path        string                `json:"path"`
-		Content     string                `json:"content"`
+		PlanHash   string                `json:"plan_hash"`
+		Connection GitConnectionSnapshot `json:"connection"`
+		Path       string                `json:"path"`
+		Content    string                `json:"content"`
 	}{plan.PlanHash, snapshotGitConnection(connection), repoPath, content}
 	canonical, _ := json.Marshal(hashInput)
 	sum := sha256.Sum256(canonical)

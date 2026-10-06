@@ -27,6 +27,15 @@ func (s *ComponentGitOpsPreviewStore) Create(_ context.Context, v *lifecycle.Git
 	s.items[v.ID] = lifecycle.CloneGitOpsPreview(v)
 	return nil
 }
+func (s *ComponentGitOpsPreviewStore) Get(_ context.Context, id string) (*lifecycle.GitOpsPreview, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.items[id]
+	if !ok {
+		return nil, storage.ErrComponentGitOpsPreviewNotFound
+	}
+	return lifecycle.CloneGitOpsPreview(v), nil
+}
 func (s *ComponentGitOpsPreviewStore) GetByPlan(_ context.Context, id string) (*lifecycle.GitOpsPreview, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
