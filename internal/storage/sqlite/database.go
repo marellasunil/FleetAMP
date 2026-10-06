@@ -110,6 +110,9 @@ func (d *Database) ComponentGitOpsPreviews() *ComponentGitOpsPreviewStore {
 func (d *Database) GitOpsPreviewApprovals() *GitOpsPreviewApprovalStore {
 	return &GitOpsPreviewApprovalStore{db: d.db}
 }
+func (d *Database) GitOpsExecutions() *GitOpsExecutionStore {
+	return &GitOpsExecutionStore{db: d.db}
+}
 func (d *Database) IntegrationConnections() *IntegrationConnectionStore {
 	return &IntegrationConnectionStore{db: d.db}
 }
@@ -259,6 +262,14 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE TRIGGER IF NOT EXISTS component_gitops_previews_no_delete BEFORE DELETE ON component_gitops_previews BEGIN SELECT RAISE(ABORT,'component GitOps previews are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS gitops_preview_approvals(id TEXT PRIMARY KEY,preview_id TEXT NOT NULL UNIQUE,preview_hash TEXT NOT NULL,plan_hash TEXT NOT NULL,connection_id TEXT NOT NULL,repository_path TEXT NOT NULL,branch TEXT NOT NULL,submitted_by TEXT NOT NULL,assigned_reviewer TEXT NOT NULL,submission_comment TEXT NOT NULL,status TEXT NOT NULL,reviewed_by TEXT NOT NULL DEFAULT '',review_comment TEXT NOT NULL DEFAULT '',reviewed_at TEXT,created_at TEXT NOT NULL,FOREIGN KEY(preview_id) REFERENCES component_gitops_previews(id))`,
 		`CREATE INDEX IF NOT EXISTS idx_gitops_preview_approvals_status ON gitops_preview_approvals(status,created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS gitops_execution_requests(id TEXT PRIMARY KEY,approval_id TEXT NOT NULL UNIQUE,preview_id TEXT NOT NULL,preview_hash TEXT NOT NULL,plan_hash TEXT NOT NULL,connection_id TEXT NOT NULL,provider TEXT NOT NULL,mode TEXT NOT NULL,repository_path TEXT NOT NULL,branch TEXT NOT NULL,requested_by TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(approval_id) REFERENCES gitops_preview_approvals(id),FOREIGN KEY(preview_id) REFERENCES component_gitops_previews(id))`,
+		`CREATE INDEX IF NOT EXISTS idx_gitops_execution_requests_created ON gitops_execution_requests(created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS gitops_execution_requests_no_update BEFORE UPDATE ON gitops_execution_requests BEGIN SELECT RAISE(ABORT,'GitOps execution requests are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS gitops_execution_requests_no_delete BEFORE DELETE ON gitops_execution_requests BEGIN SELECT RAISE(ABORT,'GitOps execution requests are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS gitops_execution_events(id TEXT PRIMARY KEY,execution_id TEXT NOT NULL,status TEXT NOT NULL,actor TEXT NOT NULL,message TEXT NOT NULL,evidence TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,FOREIGN KEY(execution_id) REFERENCES gitops_execution_requests(id))`,
+		`CREATE INDEX IF NOT EXISTS idx_gitops_execution_events_execution ON gitops_execution_events(execution_id,created_at,id)`,
+		`CREATE TRIGGER IF NOT EXISTS gitops_execution_events_no_update BEFORE UPDATE ON gitops_execution_events BEGIN SELECT RAISE(ABORT,'GitOps execution events are append-only'); END`,
+		`CREATE TRIGGER IF NOT EXISTS gitops_execution_events_no_delete BEFORE DELETE ON gitops_execution_events BEGIN SELECT RAISE(ABORT,'GitOps execution events are append-only'); END`,
 		`CREATE TABLE IF NOT EXISTS integration_connections(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,provider TEXT NOT NULL,base_url TEXT NOT NULL DEFAULT '',organization TEXT NOT NULL,project TEXT NOT NULL DEFAULT '',repository TEXT NOT NULL,branch TEXT NOT NULL,allowed_root TEXT NOT NULL,mode TEXT NOT NULL,credential_ref TEXT NOT NULL,group_ids TEXT NOT NULL,enabled INTEGER NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_integration_connections_provider ON integration_connections(provider,created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS integration_connections_no_update BEFORE UPDATE ON integration_connections BEGIN SELECT RAISE(ABORT,'integration connection records are immutable'); END`,

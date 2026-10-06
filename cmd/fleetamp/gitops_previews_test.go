@@ -17,6 +17,7 @@ func TestGitOpsPreviewPageRendersWithoutGitWrite(t *testing.T) {
 	plans := memory.NewComponentLifecycleExecutionStore()
 	previews := memory.NewComponentGitOpsPreviewStore()
 	previewApprovals := memory.NewGitOpsPreviewApprovalStore()
+	executions := memory.NewGitOpsExecutionStore()
 	connections := memory.NewIntegrationConnectionStore()
 	request, _ := lifecycle.NewRequest(lifecycle.Spec{Operation: lifecycle.Upgrade, ComponentType: runtimes.OTelCollectorKubernetes, GroupID: "payments", DeploymentMethod: "gitops", CurrentVersion: "0.148.0", DesiredVersion: "0.149.0", Reason: "security"}, "operator")
 	_ = requests.Create(t.Context(), request)
@@ -25,7 +26,7 @@ func TestGitOpsPreviewPageRendersWithoutGitWrite(t *testing.T) {
 	connection, _ := integrations.NewConnection(integrations.Connection{Name: "production", Provider: integrations.GitHub, Organization: "acme", Repository: "telemetry", Branch: "main", AllowedRoot: "fleetamp/groups", Mode: integrations.ModePullRequest, CredentialRef: "secret://github/prod", GroupIDs: []string{"payments"}, Enabled: true}, "admin")
 	_ = connections.Create(t.Context(), connection)
 	mux := http.NewServeMux()
-	registerGitOpsPreviewRoutes(mux, plans, requests, previews, previewApprovals, connections, nil, nil)
+	registerGitOpsPreviewRoutes(mux, plans, requests, previews, previewApprovals, executions, connections, nil, nil)
 	form := url.Values{"plan_id": {"plan"}, "connection_id": {connection.ID}}
 	response := httptest.NewRecorder()
 	post := httptest.NewRequest(http.MethodPost, "/component-gitops-previews", strings.NewReader(form.Encode()))
@@ -62,6 +63,18 @@ func TestGitOpsPreviewPageRendersWithoutGitWrite(t *testing.T) {
 	if reviewResponse.Code != http.StatusSeeOther {
 		t.Fatalf("review status=%d body=%s", reviewResponse.Code, reviewResponse.Body.String())
 	}
+	queueForm := url.Values{"action": {"queue_execution"}, "approval_id": {approvalRows[0].ID}}
+	queueResponse := httptest.NewRecorder()
+	queue := httptest.NewRequest(http.MethodPost, "/component-gitops-previews", strings.NewReader(queueForm.Encode()))
+	queue.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	mux.ServeHTTP(queueResponse, queue)
+	if queueResponse.Code != http.StatusSeeOther {
+		t.Fatalf("queue status=%d body=%s", queueResponse.Code, queueResponse.Body.String())
+	}
+	executionRows, _ := executions.List(t.Context(), 10)
+	if len(executionRows) != 1 || executionRows[0].PreviewHash != previewRows[0].PreviewHash || executionRows[0].ApprovalID != approvalRows[0].ID {
+		t.Fatalf("execution does not pin approved preview: %#v", executionRows)
+	}
 }
 
 func TestGitOpsPreviewRejectsConnectionForDifferentGroup(t *testing.T) {
@@ -69,6 +82,7 @@ func TestGitOpsPreviewRejectsConnectionForDifferentGroup(t *testing.T) {
 	plans := memory.NewComponentLifecycleExecutionStore()
 	previews := memory.NewComponentGitOpsPreviewStore()
 	previewApprovals := memory.NewGitOpsPreviewApprovalStore()
+	executions := memory.NewGitOpsExecutionStore()
 	connections := memory.NewIntegrationConnectionStore()
 	request, _ := lifecycle.NewRequest(lifecycle.Spec{Operation: lifecycle.Install, ComponentType: runtimes.OTelCollectorKubernetes, GroupID: "payments", DeploymentMethod: "gitops", DesiredVersion: "0.149.0", Reason: "new gateway"}, "operator")
 	_ = requests.Create(t.Context(), request)
@@ -77,7 +91,7 @@ func TestGitOpsPreviewRejectsConnectionForDifferentGroup(t *testing.T) {
 	connection, _ := integrations.NewConnection(integrations.Connection{Name: "orders", Provider: integrations.GitLab, Organization: "acme", Repository: "telemetry", Branch: "main", AllowedRoot: "fleetamp/groups", Mode: integrations.ModePullRequest, CredentialRef: "secret://gitlab/prod", GroupIDs: []string{"orders"}, Enabled: true}, "admin")
 	_ = connections.Create(t.Context(), connection)
 	mux := http.NewServeMux()
-	registerGitOpsPreviewRoutes(mux, plans, requests, previews, previewApprovals, connections, nil, nil)
+	registerGitOpsPreviewRoutes(mux, plans, requests, previews, previewApprovals, executions, connections, nil, nil)
 	form := url.Values{"plan_id": {"plan"}, "connection_id": {connection.ID}}
 	response := httptest.NewRecorder()
 	post := httptest.NewRequest(http.MethodPost, "/component-gitops-previews", strings.NewReader(form.Encode()))
