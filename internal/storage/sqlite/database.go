@@ -88,6 +88,11 @@ func (d *Database) GroupSecrets() *GroupSecretStore { return &GroupSecretStore{d
 // Migrations returns the append-only migration provenance repository.
 func (d *Database) Migrations() *MigrationStore { return &MigrationStore{db: d.db} }
 
+// ComponentLifecycleRequests returns the immutable component proposal repository.
+func (d *Database) ComponentLifecycleRequests() *ComponentLifecycleRequestStore {
+	return &ComponentLifecycleRequestStore{db: d.db}
+}
+
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -179,6 +184,22 @@ func (d *Database) initialize(ctx context.Context) error {
             FOREIGN KEY(configuration_id) REFERENCES configurations(id)
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_group_deployment_requests_group_created ON group_deployment_requests(group_id, created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS component_lifecycle_requests (
+			id TEXT PRIMARY KEY, operation TEXT NOT NULL, component_type TEXT NOT NULL,
+			group_id TEXT NOT NULL, label_selector TEXT NOT NULL DEFAULT '',
+			deployment_method TEXT NOT NULL, current_version TEXT NOT NULL DEFAULT '',
+			desired_version TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL,
+			spec_hash TEXT NOT NULL, requested_by TEXT NOT NULL,
+			status TEXT NOT NULL, created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_component_lifecycle_created ON component_lifecycle_requests(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_component_lifecycle_group ON component_lifecycle_requests(group_id,created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_requests_no_update
+			BEFORE UPDATE ON component_lifecycle_requests
+			BEGIN SELECT RAISE(ABORT,'component lifecycle requests are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_requests_no_delete
+			BEFORE DELETE ON component_lifecycle_requests
+			BEGIN SELECT RAISE(ABORT,'component lifecycle requests are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS administrators (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             username TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'admin', password_salt BLOB NOT NULL,
