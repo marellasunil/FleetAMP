@@ -77,10 +77,10 @@ func TestOTelComponentsInstalledInventoryUsesManagedAgents(t *testing.T) {
 
 func TestInstalledInventorySearchDoesNotChangeSummary(t *testing.T) {
 	items := []*agents.ManagedAgent{
-		{InstanceUID: "one", Name: "one", Connected: true, Healthy: true},
-		{InstanceUID: "two", Name: "two", Connected: false, Healthy: false},
+		{InstanceUID: "uid-one", Name: "alpha", Connected: true, Healthy: true},
+		{InstanceUID: "uid-two", Name: "beta", Connected: false, Healthy: false},
 	}
-	filtered, total, healthy := installedComponentInventory(items, "one")
+	filtered, total, healthy := installedComponentInventory(items, "uid-one")
 	if len(filtered) != 1 || total != 2 || healthy != 1 {
 		t.Fatalf("inventory summary filtered=%d total=%d healthy=%d", len(filtered), total, healthy)
 	}
