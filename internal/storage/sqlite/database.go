@@ -250,7 +250,7 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_component_lifecycle_execution_created ON component_lifecycle_execution_plans(created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_execution_no_update BEFORE UPDATE ON component_lifecycle_execution_plans BEGIN SELECT RAISE(ABORT,'component lifecycle execution plans are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_execution_no_delete BEFORE DELETE ON component_lifecycle_execution_plans BEGIN SELECT RAISE(ABORT,'component lifecycle execution plans are immutable'); END`,
-		`CREATE TABLE IF NOT EXISTS component_gitops_previews(id TEXT PRIMARY KEY,plan_id TEXT NOT NULL UNIQUE,plan_hash TEXT NOT NULL,repository_path TEXT NOT NULL,files TEXT NOT NULL,diff TEXT NOT NULL,preview_hash TEXT NOT NULL,prepared_by TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(plan_id) REFERENCES component_lifecycle_execution_plans(id))`,
+		`CREATE TABLE IF NOT EXISTS component_gitops_previews(id TEXT PRIMARY KEY,plan_id TEXT NOT NULL UNIQUE,plan_hash TEXT NOT NULL,connection TEXT NOT NULL DEFAULT '{}',repository_path TEXT NOT NULL,files TEXT NOT NULL,diff TEXT NOT NULL,preview_hash TEXT NOT NULL,prepared_by TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(plan_id) REFERENCES component_lifecycle_execution_plans(id))`,
 		`CREATE INDEX IF NOT EXISTS idx_component_gitops_previews_created ON component_gitops_previews(created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS component_gitops_previews_no_update BEFORE UPDATE ON component_gitops_previews BEGIN SELECT RAISE(ABORT,'component GitOps previews are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS component_gitops_previews_no_delete BEFORE DELETE ON component_gitops_previews BEGIN SELECT RAISE(ABORT,'component GitOps previews are immutable'); END`,
@@ -358,10 +358,27 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureAuditDetailsColumn(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureGitOpsPreviewConnectionColumn(ctx); err != nil {
+		return err
+	}
 	if err := d.migrateAdministratorToUsers(ctx); err != nil {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureGitOpsPreviewConnectionColumn(ctx context.Context) error {
+	present, err := sqliteColumnExists(ctx, d.db, "component_gitops_previews", "connection")
+	if err != nil {
+		return err
+	}
+	if present {
+		return nil
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE component_gitops_previews ADD COLUMN connection TEXT NOT NULL DEFAULT '{}'`); err != nil {
+		return fmt.Errorf("add component_gitops_previews.connection column: %w", err)
+	}
+	return nil
 }
 
 func (d *Database) ensureDestinationGovernanceColumns(ctx context.Context) error {
