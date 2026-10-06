@@ -34,7 +34,8 @@ func TestDeploymentsPageDefinesGovernedDeliveryFoundation(t *testing.T) {
 		t.Error("deployments navigation is not active")
 	}
 	for _, text := range []string{
-		`.cardbody>form>.form-grid{display:grid}`,
+		`.cardbody>form>.form-grid{display:grid!important;grid-template-columns:1fr!important`,
+		`grid-template-columns:minmax(150px,.65fr) minmax(280px,1.35fr) minmax(260px,1fr)!important`,
 		`.cardbody>form>.form-grid{grid-template-columns:repeat(3,minmax(0,1fr))`,
 		`Choose whether to install, upgrade, restart or remove the component.`,
 		`Select the type of OpenTelemetry component this proposal will manage.`,
