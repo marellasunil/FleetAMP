@@ -90,6 +90,15 @@ func TestComponentLifecycleApprovalReviewIsFourEyesWorkflowState(t *testing.T) {
 	if err:=store.Review(ctx,approval.ID,lifecycle.ApprovalPending,lifecycle.ApprovalRejected,"other","late");!errors.Is(err,storage.ErrComponentLifecycleApprovalConflict){t.Fatalf("second review err=%v",err)}
 }
 
+func TestComponentLifecycleExecutionPlanPersistsImmutableEvidence(t *testing.T){
+	ctx:=context.Background();db,err:=Open(ctx,filepath.Join(t.TempDir(),"lifecycle-execution.db"));if err!=nil{t.Fatal(err)};defer db.Close()
+	request,err:=lifecycle.NewRequest(lifecycle.Spec{Operation:lifecycle.Restart,ComponentType:runtimes.OTelCollector,GroupID:"payments",DeploymentMethod:"systemd",CurrentVersion:"0.149.0",Reason:"recover"},"operator");if err!=nil{t.Fatal(err)};if err:=db.ComponentLifecycleRequests().Create(ctx,request);err!=nil{t.Fatal(err)}
+	validation:=&lifecycle.Validation{ID:"execution-validation",RequestID:request.ID,RequestSpecHash:request.SpecHash,ResultHash:"validation-hash",GroupID:"payments",GroupName:"Payments",Status:lifecycle.ValidationCompatible,Targets:[]lifecycle.TargetSnapshot{{InstanceUID:"collector-a"}},ValidatedBy:"operator",CreatedAt:time.Now().UTC()};if err:=db.ComponentLifecycleValidations().Create(ctx,validation);err!=nil{t.Fatal(err)}
+	approval,err:=lifecycle.NewApproval(request,validation,"operator","admin","review");if err!=nil{t.Fatal(err)};if err:=db.ComponentLifecycleApprovals().Create(ctx,approval);err!=nil{t.Fatal(err)};if err:=db.ComponentLifecycleApprovals().Review(ctx,approval.ID,lifecycle.ApprovalPending,lifecycle.ApprovalApproved,"admin","approved");err!=nil{t.Fatal(err)};approval.Status=lifecycle.ApprovalApproved
+	plan,err:=lifecycle.PrepareExecution(approval,request,validation,"admin");if err!=nil{t.Fatal(err)};store:=db.ComponentLifecycleExecutions();if err:=store.Create(ctx,plan);err!=nil{t.Fatal(err)};stored,err:=store.Get(ctx,plan.ID);if err!=nil||stored.PlanHash!=plan.PlanHash{t.Fatalf("stored=%#v err=%v",stored,err)}
+	if _,err:=db.db.ExecContext(ctx,`UPDATE component_lifecycle_execution_plans SET plan_hash='changed' WHERE id=?`,plan.ID);err==nil{t.Fatal("immutable execution plan accepted update")};if _,err:=db.db.ExecContext(ctx,`DELETE FROM component_lifecycle_execution_plans WHERE id=?`,plan.ID);err==nil{t.Fatal("immutable execution plan accepted delete")}
+}
+
 func TestPasswordRecoveryTokenIsSingleUse(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(ctx, filepath.Join(t.TempDir(), "recovery.db"))

@@ -127,6 +127,7 @@ func main() {
 	componentLifecycleRequestStore := database.ComponentLifecycleRequests()
 	componentLifecycleValidationStore := database.ComponentLifecycleValidations()
 	componentLifecycleApprovalStore := database.ComponentLifecycleApprovals()
+	componentLifecycleExecutionStore := database.ComponentLifecycleExecutions()
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
@@ -226,7 +227,7 @@ func main() {
 	registerAuditRoutes(mux, auditStore)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
-	registerComponentLifecycleApprovalRoutes(mux, componentLifecycleApprovalStore, groupStore, auth)
+	registerComponentLifecycleApprovalRoutes(mux, componentLifecycleApprovalStore, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleExecutionStore, groupStore, auth)
 	registerDeploymentRoutes(mux, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleApprovalStore, groupStore, agentStore, auth)
 	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
