@@ -93,6 +93,11 @@ func (d *Database) ComponentLifecycleRequests() *ComponentLifecycleRequestStore 
 	return &ComponentLifecycleRequestStore{db: d.db}
 }
 
+// ComponentLifecycleValidations returns immutable target and compatibility snapshots.
+func (d *Database) ComponentLifecycleValidations() *ComponentLifecycleValidationStore {
+	return &ComponentLifecycleValidationStore{db: d.db}
+}
+
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -200,6 +205,20 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_requests_no_delete
 			BEFORE DELETE ON component_lifecycle_requests
 			BEGIN SELECT RAISE(ABORT,'component lifecycle requests are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS component_lifecycle_validations (
+			id TEXT PRIMARY KEY, request_id TEXT NOT NULL, request_spec_hash TEXT NOT NULL,
+			group_id TEXT NOT NULL, group_name TEXT NOT NULL, group_selector TEXT NOT NULL,
+			label_selector TEXT NOT NULL, targets TEXT NOT NULL, findings TEXT NOT NULL,
+			status TEXT NOT NULL, result_hash TEXT NOT NULL, validated_by TEXT NOT NULL, created_at TEXT NOT NULL,
+			FOREIGN KEY(request_id) REFERENCES component_lifecycle_requests(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_component_lifecycle_validations_request ON component_lifecycle_validations(request_id,created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_validations_no_update
+			BEFORE UPDATE ON component_lifecycle_validations
+			BEGIN SELECT RAISE(ABORT,'component lifecycle validations are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_validations_no_delete
+			BEFORE DELETE ON component_lifecycle_validations
+			BEGIN SELECT RAISE(ABORT,'component lifecycle validations are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS administrators (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             username TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'admin', password_salt BLOB NOT NULL,

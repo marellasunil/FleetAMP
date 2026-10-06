@@ -54,6 +54,27 @@ func TestComponentLifecycleRequestPersistsImmutableSpecification(t *testing.T) {
 	}
 }
 
+func TestComponentLifecycleValidationPersistsImmutableSnapshot(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "lifecycle-validation.db"))
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	request, err := lifecycle.NewRequest(lifecycle.Spec{Operation: lifecycle.Upgrade, ComponentType: runtimes.OTelCollectorKubernetes,
+		GroupID: "payments", DeploymentMethod: "gitops", CurrentVersion: "0.148.0", DesiredVersion: "0.149.0", Reason: "security update"}, "operator")
+	if err != nil { t.Fatal(err) }
+	if err := db.ComponentLifecycleRequests().Create(ctx, request); err != nil { t.Fatal(err) }
+	validation := &lifecycle.Validation{ID: "validation-1", RequestID: request.ID, RequestSpecHash: request.SpecHash, GroupID: "payments", GroupName: "Payments",
+		GroupSelector: map[string]string{"team": "payments"}, LabelSelector: map[string]string{"environment": "production"},
+		Targets: []lifecycle.TargetSnapshot{{InstanceUID: "collector-a", Version: "0.148.0"}}, Findings: []lifecycle.Finding{}, Status: lifecycle.ValidationCompatible,
+		ResultHash: "result-hash", ValidatedBy: "admin", CreatedAt: time.Now().UTC()}
+	store := db.ComponentLifecycleValidations()
+	if err := store.Create(ctx, validation); err != nil { t.Fatal(err) }
+	stored, err := store.Get(ctx, validation.ID)
+	if err != nil || stored.ResultHash != validation.ResultHash || len(stored.Targets) != 1 { t.Fatalf("stored=%#v err=%v", stored, err) }
+	if _, err := db.db.ExecContext(ctx, `UPDATE component_lifecycle_validations SET status='blocked' WHERE id=?`, validation.ID); err == nil { t.Fatal("immutable validation accepted an update") }
+	if _, err := db.db.ExecContext(ctx, `DELETE FROM component_lifecycle_validations WHERE id=?`, validation.ID); err == nil { t.Fatal("immutable validation accepted a delete") }
+}
+
 func TestPasswordRecoveryTokenIsSingleUse(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(ctx, filepath.Join(t.TempDir(), "recovery.db"))
