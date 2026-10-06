@@ -94,6 +94,11 @@ func validateSpec(spec Spec) error {
 	if spec.GroupID == "" || spec.DeploymentMethod == "" || spec.Reason == "" {
 		return errors.Join(ErrInvalidSpec, errors.New("target group, deployment method, and reason are required"))
 	}
+	switch spec.DeploymentMethod {
+	case "gitops", "kubernetes-api", "systemd", "container-runtime", "manual-package":
+	default:
+		return errors.Join(ErrInvalidSpec, errors.New("deployment method is not supported"))
+	}
 	switch spec.Operation {
 	case Install:
 		if spec.DesiredVersion == "" || spec.CurrentVersion != "" {
