@@ -86,6 +86,56 @@ func TestInstalledInventorySearchDoesNotChangeSummary(t *testing.T) {
 	}
 }
 
+func TestOTelComponentsCompatibilityUsesReportedCapabilities(t *testing.T) {
+	store := memory.NewAgentStore()
+	agent := &agents.ManagedAgent{
+		InstanceUID: "compatible-collector",
+		Type:        agents.AgentTypeOTelCollector,
+		Name:        "checkout-gateway",
+		Version:     "0.149.0",
+		Connected:   true,
+		Healthy:     true,
+		Status:      agents.LifecycleConnected,
+		Deployment: agents.DeploymentContext{
+			Runtime:   agents.RuntimeKubernetes,
+			Cluster:   "production",
+			Namespace: "observability",
+		},
+		Capabilities: []string{"accepts_remote_config", "reports_effective_config", "reports_health"},
+	}
+	if err := store.Upsert(context.Background(), agent); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), store)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/otel-components?tab=compatibility", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET compatibility status = %d, want %d", response.Code, http.StatusOK)
+	}
+	for _, text := range []string{"Management compatibility", "checkout-gateway", "Compatible", "Remote configuration", "Effective configuration", "Kubernetes context"} {
+		if !strings.Contains(response.Body.String(), text) {
+			t.Errorf("compatibility page does not contain %q", text)
+		}
+	}
+}
+
+func TestCompatibilityAssessmentSeparatesAttentionAndUnsupported(t *testing.T) {
+	items := []*agents.ManagedAgent{
+		{InstanceUID: "ready", Type: agents.AgentTypeOTelCollector, Name: "ready", Version: "0.149.0", Deployment: agents.DeploymentContext{Runtime: agents.RuntimeVM}, Capabilities: []string{"accepts_remote_config", "reports_effective_config", "reports_health"}},
+		{InstanceUID: "missing", Type: agents.AgentTypeOTelCollector, Name: "missing"},
+		{InstanceUID: "external", Type: agents.AgentTypeGrafanaAlloy, Name: "external"},
+	}
+	assessments, total, compatible, attention, unsupported, findings := assessComponentCompatibility(items)
+	if len(assessments) != 3 || total != 3 || compatible != 1 || attention != 1 || unsupported != 1 || findings == 0 {
+		t.Fatalf("compatibility len=%d total=%d compatible=%d attention=%d unsupported=%d findings=%d", len(assessments), total, compatible, attention, unsupported, findings)
+	}
+	if assessments[0].Status != "Unsupported" {
+		t.Fatalf("first assessment status = %q, want Unsupported", assessments[0].Status)
+	}
+}
+
 func TestOTelComponentsPageRejectsMutation(t *testing.T) {
 	mux := http.NewServeMux()
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry())
