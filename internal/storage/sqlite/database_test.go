@@ -14,6 +14,7 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/groups"
 	"github.com/marellasunil/FleetAMP/internal/lifecycle"
 	"github.com/marellasunil/FleetAMP/internal/runtimes"
+	"github.com/marellasunil/FleetAMP/internal/storage"
 )
 
 func TestComponentLifecycleRequestPersistsImmutableSpecification(t *testing.T) {
@@ -73,6 +74,20 @@ func TestComponentLifecycleValidationPersistsImmutableSnapshot(t *testing.T) {
 	if err != nil || stored.ResultHash != validation.ResultHash || len(stored.Targets) != 1 { t.Fatalf("stored=%#v err=%v", stored, err) }
 	if _, err := db.db.ExecContext(ctx, `UPDATE component_lifecycle_validations SET status='blocked' WHERE id=?`, validation.ID); err == nil { t.Fatal("immutable validation accepted an update") }
 	if _, err := db.db.ExecContext(ctx, `DELETE FROM component_lifecycle_validations WHERE id=?`, validation.ID); err == nil { t.Fatal("immutable validation accepted a delete") }
+}
+
+func TestComponentLifecycleApprovalReviewIsFourEyesWorkflowState(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "lifecycle-approval.db")); if err != nil { t.Fatal(err) }; defer db.Close()
+	request, err := lifecycle.NewRequest(lifecycle.Spec{Operation: lifecycle.Restart, ComponentType: runtimes.OTelCollector, GroupID: "payments", DeploymentMethod: "systemd", CurrentVersion: "0.149.0", Reason: "recover stalled process"}, "operator"); if err != nil { t.Fatal(err) }
+	if err:=db.ComponentLifecycleRequests().Create(ctx,request);err!=nil{t.Fatal(err)}
+	validation:=&lifecycle.Validation{ID:"validation-approval",RequestID:request.ID,RequestSpecHash:request.SpecHash,ResultHash:"validation-hash",GroupID:"payments",GroupName:"Payments",Status:lifecycle.ValidationCompatible,Targets:[]lifecycle.TargetSnapshot{{InstanceUID:"collector-a"}},ValidatedBy:"operator",CreatedAt:time.Now().UTC()}
+	if err:=db.ComponentLifecycleValidations().Create(ctx,validation);err!=nil{t.Fatal(err)}
+	approval,err:=lifecycle.NewApproval(request,validation,"operator","admin","review restart");if err!=nil{t.Fatal(err)}
+	store:=db.ComponentLifecycleApprovals();if err:=store.Create(ctx,approval);err!=nil{t.Fatal(err)}
+	if err:=store.Review(ctx,approval.ID,lifecycle.ApprovalPending,lifecycle.ApprovalApproved,"admin","approved");err!=nil{t.Fatal(err)}
+	stored,err:=store.Get(ctx,approval.ID);if err!=nil||stored.Status!=lifecycle.ApprovalApproved||stored.ReviewedBy!="admin"{t.Fatalf("stored=%#v err=%v",stored,err)}
+	if err:=store.Review(ctx,approval.ID,lifecycle.ApprovalPending,lifecycle.ApprovalRejected,"other","late");!errors.Is(err,storage.ErrComponentLifecycleApprovalConflict){t.Fatalf("second review err=%v",err)}
 }
 
 func TestPasswordRecoveryTokenIsSingleUse(t *testing.T) {
