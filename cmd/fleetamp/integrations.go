@@ -40,6 +40,11 @@ const integrationFormLayoutCSS = `<style>
 .cardbody>form>.form-grid>.field:last-child{display:flex!important;align-items:center;gap:8px;border-bottom:0}
 @media(max-width:950px){.cardbody>form>.form-grid>.field{grid-template-columns:minmax(150px,.55fr) minmax(260px,1fr)!important}.cardbody>form>.form-grid>.field::after{grid-column:2}}
 @media(max-width:650px){.cardbody>form>.form-grid>.field{grid-template-columns:1fr!important}.cardbody>form>.form-grid>.field::after{grid-column:auto}}
+
+/* Progressive disclosure: Azure DevOps is the only provider with a project field. */
+.cardbody>form>.form-grid>.field:nth-child(5){display:none!important}
+.cardbody>form>.form-grid:has(select[name="provider"] option[value="azure-devops"]:checked)>.field:nth-child(5){display:grid!important}
+
 </style>`
 
 var integrationsPage = template.Must(template.New("integrations").Parse(strings.Replace(integrationsHTML, "</head>", integrationFormLayoutCSS+"</head>", 1)))
