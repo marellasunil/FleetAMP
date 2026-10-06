@@ -101,7 +101,12 @@ func (d *Database) ComponentLifecycleValidations() *ComponentLifecycleValidation
 func (d *Database) ComponentLifecycleApprovals() *ComponentLifecycleApprovalStore {
 	return &ComponentLifecycleApprovalStore{db: d.db}
 }
-func (d *Database) ComponentLifecycleExecutions() *ComponentLifecycleExecutionStore{return &ComponentLifecycleExecutionStore{db:d.db}}
+func (d *Database) ComponentLifecycleExecutions() *ComponentLifecycleExecutionStore {
+	return &ComponentLifecycleExecutionStore{db: d.db}
+}
+func (d *Database) ComponentGitOpsPreviews() *ComponentGitOpsPreviewStore {
+	return &ComponentGitOpsPreviewStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -242,6 +247,10 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_component_lifecycle_execution_created ON component_lifecycle_execution_plans(created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_execution_no_update BEFORE UPDATE ON component_lifecycle_execution_plans BEGIN SELECT RAISE(ABORT,'component lifecycle execution plans are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_execution_no_delete BEFORE DELETE ON component_lifecycle_execution_plans BEGIN SELECT RAISE(ABORT,'component lifecycle execution plans are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS component_gitops_previews(id TEXT PRIMARY KEY,plan_id TEXT NOT NULL UNIQUE,plan_hash TEXT NOT NULL,repository_path TEXT NOT NULL,files TEXT NOT NULL,diff TEXT NOT NULL,preview_hash TEXT NOT NULL,prepared_by TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(plan_id) REFERENCES component_lifecycle_execution_plans(id))`,
+		`CREATE INDEX IF NOT EXISTS idx_component_gitops_previews_created ON component_gitops_previews(created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS component_gitops_previews_no_update BEFORE UPDATE ON component_gitops_previews BEGIN SELECT RAISE(ABORT,'component GitOps previews are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS component_gitops_previews_no_delete BEFORE DELETE ON component_gitops_previews BEGIN SELECT RAISE(ABORT,'component GitOps previews are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS administrators (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             username TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'admin', password_salt BLOB NOT NULL,
