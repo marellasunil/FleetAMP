@@ -33,6 +33,16 @@ func TestDeploymentsPageDefinesGovernedDeliveryFoundation(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `class="navitem active" href="/deployments"`) {
 		t.Error("deployments navigation is not active")
 	}
+	for _, text := range []string{
+		`.cardbody>form>.form-grid{grid-template-columns:minmax(0,760px)`,
+		`Choose whether to install, upgrade, restart or remove the component.`,
+		`Select the type of OpenTelemetry component this proposal will manage.`,
+		`Required for install and upgrade proposals.`,
+	} {
+		if !strings.Contains(response.Body.String(), text) {
+			t.Errorf("vertical proposal form does not contain %q", text)
+		}
+	}
 }
 
 func TestDeploymentsPageCreatesImmutableLifecycleProposal(t *testing.T) {
