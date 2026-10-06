@@ -101,6 +101,7 @@ func (d *Database) ComponentLifecycleValidations() *ComponentLifecycleValidation
 func (d *Database) ComponentLifecycleApprovals() *ComponentLifecycleApprovalStore {
 	return &ComponentLifecycleApprovalStore{db: d.db}
 }
+func (d *Database) ComponentLifecycleExecutions() *ComponentLifecycleExecutionStore{return &ComponentLifecycleExecutionStore{db:d.db}}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -232,6 +233,15 @@ func (d *Database) initialize(ctx context.Context) error {
 			FOREIGN KEY(request_id) REFERENCES component_lifecycle_requests(id), FOREIGN KEY(validation_id) REFERENCES component_lifecycle_validations(id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_component_lifecycle_approvals_status ON component_lifecycle_approvals(status,created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS component_lifecycle_execution_plans(
+			id TEXT PRIMARY KEY,approval_id TEXT NOT NULL UNIQUE,request_id TEXT NOT NULL,request_spec_hash TEXT NOT NULL,
+			validation_id TEXT NOT NULL,validation_hash TEXT NOT NULL,executor_kind TEXT NOT NULL,operation TEXT NOT NULL,
+			component_type TEXT NOT NULL,deployment_method TEXT NOT NULL,targets TEXT NOT NULL,plan_hash TEXT NOT NULL,
+			prepared_by TEXT NOT NULL,created_at TEXT NOT NULL,
+			FOREIGN KEY(approval_id) REFERENCES component_lifecycle_approvals(id),FOREIGN KEY(request_id) REFERENCES component_lifecycle_requests(id),FOREIGN KEY(validation_id) REFERENCES component_lifecycle_validations(id))`,
+		`CREATE INDEX IF NOT EXISTS idx_component_lifecycle_execution_created ON component_lifecycle_execution_plans(created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_execution_no_update BEFORE UPDATE ON component_lifecycle_execution_plans BEGIN SELECT RAISE(ABORT,'component lifecycle execution plans are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_execution_no_delete BEFORE DELETE ON component_lifecycle_execution_plans BEGIN SELECT RAISE(ABORT,'component lifecycle execution plans are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS administrators (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             username TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'admin', password_salt BLOB NOT NULL,
