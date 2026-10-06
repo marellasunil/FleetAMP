@@ -17,7 +17,11 @@ func (s *ComponentGitOpsPreviewStore) Create(ctx context.Context, v *lifecycle.G
 	if e != nil {
 		return e
 	}
-	_, e = s.db.ExecContext(ctx, `INSERT INTO component_gitops_previews(id,plan_id,plan_hash,repository_path,files,diff,preview_hash,prepared_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, v.ID, v.PlanID, v.PlanHash, v.RepositoryPath, string(files), v.Diff, v.PreviewHash, v.PreparedBy, formatTime(v.CreatedAt))
+	connection, e := json.Marshal(v.Connection)
+	if e != nil {
+		return e
+	}
+	_, e = s.db.ExecContext(ctx, `INSERT INTO component_gitops_previews(id,plan_id,plan_hash,connection,repository_path,files,diff,preview_hash,prepared_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, v.ID, v.PlanID, v.PlanHash, string(connection), v.RepositoryPath, string(files), v.Diff, v.PreviewHash, v.PreparedBy, formatTime(v.CreatedAt))
 	if e != nil {
 		return fmt.Errorf("create component GitOps preview: %w", e)
 	}
@@ -50,14 +54,17 @@ func (s *ComponentGitOpsPreviewStore) List(ctx context.Context, n int) ([]*lifec
 	return r, rows.Err()
 }
 
-const gitOpsPreviewSelect = `SELECT id,plan_id,plan_hash,repository_path,files,diff,preview_hash,prepared_by,created_at FROM component_gitops_previews`
+const gitOpsPreviewSelect = `SELECT id,plan_id,plan_hash,connection,repository_path,files,diff,preview_hash,prepared_by,created_at FROM component_gitops_previews`
 
 type gitOpsPreviewScanner interface{ Scan(...any) error }
 
 func scanGitOpsPreview(s gitOpsPreviewScanner) (*lifecycle.GitOpsPreview, error) {
 	v := &lifecycle.GitOpsPreview{}
-	var files, created string
-	if e := s.Scan(&v.ID, &v.PlanID, &v.PlanHash, &v.RepositoryPath, &files, &v.Diff, &v.PreviewHash, &v.PreparedBy, &created); e != nil {
+	var connection, files, created string
+	if e := s.Scan(&v.ID, &v.PlanID, &v.PlanHash, &connection, &v.RepositoryPath, &files, &v.Diff, &v.PreviewHash, &v.PreparedBy, &created); e != nil {
+		return nil, e
+	}
+	if e := json.Unmarshal([]byte(connection), &v.Connection); e != nil {
 		return nil, e
 	}
 	if e := json.Unmarshal([]byte(files), &v.Files); e != nil {

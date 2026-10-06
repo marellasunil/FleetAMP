@@ -230,7 +230,7 @@ func main() {
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
 	registerComponentLifecycleApprovalRoutes(mux, componentLifecycleApprovalStore, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleExecutionStore, groupStore, auth)
-	registerGitOpsPreviewRoutes(mux, componentLifecycleExecutionStore, componentLifecycleRequestStore, componentGitOpsPreviewStore, auth)
+	registerGitOpsPreviewRoutes(mux, componentLifecycleExecutionStore, componentLifecycleRequestStore, componentGitOpsPreviewStore, integrationConnectionStore, auth)
 	registerDeploymentRoutes(mux, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleApprovalStore, groupStore, agentStore, auth)
 	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
