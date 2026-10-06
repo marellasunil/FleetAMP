@@ -43,6 +43,7 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/events"
 	"github.com/marellasunil/FleetAMP/internal/groups"
+	"github.com/marellasunil/FleetAMP/internal/integrations"
 	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
 	"github.com/marellasunil/FleetAMP/internal/runtimes"
 	"github.com/marellasunil/FleetAMP/internal/storage"
@@ -222,11 +223,13 @@ func main() {
 	registerAuditRoutes(mux, auditStore)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
+	registerDeploymentRoutes(mux)
 	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry())
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
+	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog())
 	registerUIRoutes(mux, guideCatalogStore, auth)
 
 	httpServer := &http.Server{

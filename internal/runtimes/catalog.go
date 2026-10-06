@@ -17,6 +17,7 @@ type Type string
 const (
 	OTelCollector           Type = "otel-collector"
 	OTelCollectorKubernetes Type = "otel-collector-kubernetes"
+	OTelOperator            Type = "otel-operator"
 )
 
 type ConfigFormat string
@@ -46,6 +47,8 @@ type Descriptor struct {
 	ConfigFormat      ConfigFormat
 	ManagementModes   []string
 	DeploymentMethods []string
+	Roles             []string
+	WorkloadModes     []string
 	Capabilities      []Capability
 }
 
@@ -71,7 +74,7 @@ func NewRegistry(providers ...Provider) (*Registry, error) {
 }
 
 func NewDefaultRegistry() *Registry {
-	r, err := NewRegistry(staticProvider{otelCollectorDescriptor()}, staticProvider{kubernetesCollectorDescriptor()})
+	r, err := NewRegistry(staticProvider{otelCollectorDescriptor()}, staticProvider{kubernetesCollectorDescriptor()}, staticProvider{otelOperatorDescriptor()})
 	if err != nil {
 		panic(err)
 	}
@@ -124,6 +127,8 @@ func cloneDescriptor(source Descriptor) Descriptor {
 	result := source
 	result.ManagementModes = append([]string(nil), source.ManagementModes...)
 	result.DeploymentMethods = append([]string(nil), source.DeploymentMethods...)
+	result.Roles = append([]string(nil), source.Roles...)
+	result.WorkloadModes = append([]string(nil), source.WorkloadModes...)
 	result.Capabilities = append([]Capability(nil), source.Capabilities...)
 	return result
 }
@@ -135,6 +140,8 @@ func otelCollectorDescriptor() Descriptor {
 		ConfigFormat:      ConfigOTelYAML,
 		ManagementModes:   []string{"OpAMP"},
 		DeploymentMethods: []string{"Binary", "Container", "Kubernetes workload"},
+		Roles:             []string{"Agent", "Gateway"},
+		WorkloadModes:     []string{"System service", "Container", "DaemonSet", "Deployment", "Sidecar"},
 		Capabilities: []Capability{
 			{Name: "Discovery and health", Support: Supported, Detail: "Reported through OpAMP."},
 			{Name: "Remote configuration", Support: Supported, Detail: "Governed version delivery through OpAMP."},
@@ -151,11 +158,31 @@ func kubernetesCollectorDescriptor() Descriptor {
 		ConfigFormat:      ConfigOTelCRD,
 		ManagementModes:   []string{"OpenTelemetry Operator", "GitOps"},
 		DeploymentMethods: []string{"Helm", "Custom resource", "Kustomize"},
+		Roles:             []string{"Agent", "Gateway"},
+		WorkloadModes:     []string{"DaemonSet", "Deployment", "StatefulSet", "Sidecar"},
 		Capabilities: []Capability{
 			{Name: "Discovery and health", Support: Planned, Detail: "Observe workload and custom-resource status."},
 			{Name: "Configuration render", Support: Planned, Detail: "Render governed versions into operator resources."},
 			{Name: "Drift detection", Support: Planned, Detail: "Compare desired Git or API state with cluster state."},
 			{Name: "Workload deployment", Support: Planned, Detail: "Apply through an explicit GitOps or cluster integration."},
+		},
+	}
+}
+
+func otelOperatorDescriptor() Descriptor {
+	return Descriptor{
+		Type: OTelOperator, Name: "OpenTelemetry Operator",
+		Description:       "Kubernetes operator for managing Collector workloads and auto-instrumentation resources.",
+		ConfigFormat:      ConfigOTelCRD,
+		ManagementModes:   []string{"Kubernetes API", "GitOps"},
+		DeploymentMethods: []string{"Helm", "Operator manifests"},
+		Roles:             []string{"Lifecycle controller"},
+		WorkloadModes:     []string{"Deployment"},
+		Capabilities: []Capability{
+			{Name: "Installation discovery", Support: Planned, Detail: "Inventory operator versions and cluster scope."},
+			{Name: "Compatibility checks", Support: Planned, Detail: "Validate Operator, Collector and CRD compatibility."},
+			{Name: "Governed upgrades", Support: Planned, Detail: "Create an immutable request before changing a cluster."},
+			{Name: "Workload deployment", Support: Planned, Detail: "Requires an explicit GitOps or cluster integration."},
 		},
 	}
 }
