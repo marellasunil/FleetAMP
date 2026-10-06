@@ -129,6 +129,7 @@ func main() {
 	componentLifecycleApprovalStore := database.ComponentLifecycleApprovals()
 	componentLifecycleExecutionStore := database.ComponentLifecycleExecutions()
 	componentGitOpsPreviewStore := database.ComponentGitOpsPreviews()
+	integrationConnectionStore := database.IntegrationConnections()
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
@@ -236,7 +237,7 @@ func main() {
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
-	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog())
+	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
 
 	httpServer := &http.Server{

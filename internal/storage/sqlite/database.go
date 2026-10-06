@@ -107,6 +107,9 @@ func (d *Database) ComponentLifecycleExecutions() *ComponentLifecycleExecutionSt
 func (d *Database) ComponentGitOpsPreviews() *ComponentGitOpsPreviewStore {
 	return &ComponentGitOpsPreviewStore{db: d.db}
 }
+func (d *Database) IntegrationConnections() *IntegrationConnectionStore {
+	return &IntegrationConnectionStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -251,6 +254,10 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_component_gitops_previews_created ON component_gitops_previews(created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS component_gitops_previews_no_update BEFORE UPDATE ON component_gitops_previews BEGIN SELECT RAISE(ABORT,'component GitOps previews are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS component_gitops_previews_no_delete BEFORE DELETE ON component_gitops_previews BEGIN SELECT RAISE(ABORT,'component GitOps previews are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS integration_connections(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,provider TEXT NOT NULL,base_url TEXT NOT NULL DEFAULT '',organization TEXT NOT NULL,project TEXT NOT NULL DEFAULT '',repository TEXT NOT NULL,branch TEXT NOT NULL,allowed_root TEXT NOT NULL,mode TEXT NOT NULL,credential_ref TEXT NOT NULL,group_ids TEXT NOT NULL,enabled INTEGER NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS idx_integration_connections_provider ON integration_connections(provider,created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS integration_connections_no_update BEFORE UPDATE ON integration_connections BEGIN SELECT RAISE(ABORT,'integration connection records are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS integration_connections_no_delete BEFORE DELETE ON integration_connections BEGIN SELECT RAISE(ABORT,'integration connection records are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS administrators (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             username TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'admin', password_salt BLOB NOT NULL,

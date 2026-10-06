@@ -1,36 +1,76 @@
 package main
 
 import (
+	"github.com/marellasunil/FleetAMP/internal/groups"
+	"github.com/marellasunil/FleetAMP/internal/integrations"
+	"github.com/marellasunil/FleetAMP/internal/storage"
 	"html/template"
 	"net/http"
-
-	"github.com/marellasunil/FleetAMP/internal/integrations"
+	"strings"
 )
 
 type integrationsView struct {
-	Page      string
-	Providers []integrations.Provider
+	Page           string
+	Providers      []integrations.Provider
+	Connections    []*integrations.Connection
+	Groups         []*groups.Group
+	Message, Error string
 }
 
-const integrationsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Integrations · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `
-.integration-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.integration-card .cardbody{display:grid;gap:15px}.integration-list{display:flex;flex-wrap:wrap;gap:7px}@media(max-width:1050px){.integration-grid{grid-template-columns:1fr}}
-</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Administration / Integrations</div><div class="pagetitle">Git Integrations</div><div class="subtitle">Connect existing repositories without creating repositories or pipelines.</div></div><div class="topactions"><span class="badge off">Connection foundation</span></div></header><div class="content"><section class="card"><div class="cardhead"><div><div class="cardtitle">Choose your Git provider</div><div class="cardsub">This release defines connection and synchronization capabilities only. Credentials and provider API calls are not enabled.</div></div></div><div class="cardbody"><div class="notice">A future connection wizard will request the minimum permissions required by the organization-selected mode. Repository events will create immutable candidates; they will never bypass FleetAMP validation or approval.</div><div class="integration-grid" style="margin-top:16px">{{range .Providers}}<article class="card integration-card"><div class="cardhead"><div><div class="cardtitle">{{.Name}}</div><div class="cardsub code">{{.ID}}</div></div><span class="badge off">{{.Status}}</span></div><div class="cardbody"><p>{{.Description}}</p><div><strong>Authentication options</strong><div class="integration-list" style="margin-top:8px">{{range .AuthOptions}}<span class="chip">{{.}}</span>{{end}}</div></div><div><strong>Capabilities</strong><div class="integration-list" style="margin-top:8px">{{range .Capabilities}}<span class="chip">{{.}}</span>{{end}}</div></div><div><strong>Synchronization modes</strong><div class="integration-list" style="margin-top:8px">{{range .SupportedModes}}<span class="chip">{{.}}</span>{{end}}</div></div><div class="detailactions"><span class="btn primary" aria-disabled="true">Connect · Next milestone</span></div></div></article>{{end}}</div></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Governance boundary</div><div class="cardsub">The integration transports desired state; FleetAMP remains the deployment authority.</div></div></div><div class="cardbody"><div class="component-list"><div class="component-item"><strong>No repository creation</strong><div class="tiny">Users select an existing repository, branch, and allowed path.</div></div><div class="component-item"><strong>No pipeline creation</strong><div class="tiny">Signed webhooks or service hooks notify FleetAMP directly.</div></div><div class="component-item"><strong>Approval required</strong><div class="tiny">Every imported or written-back configuration uses the existing approval workflow.</div></div><div class="component-item"><strong>Controlled deployment</strong><div class="tiny">Only the exact approved content hash can be deployed to allowed groups or labels.</div></div></div></div></section></div></main></div></body></html>`
+const integrationsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Integrations · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `.integration-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}@media(max-width:1050px){.integration-grid{grid-template-columns:1fr}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Administration / Integrations</div><div class="pagetitle">Git Integrations</div><div class="subtitle">Scope existing repositories for governed delivery.</div></div><span class="badge off">No provider API calls</span></header><div class="content">{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Register repository connection</div><div class="cardsub">Stores scope and a secret reference only; never a raw token.</div></div></div><div class="cardbody"><form method="post"><div class="form-grid"><label class="field">Name<input class="input" name="name" required></label><label class="field">Provider<select class="select" name="provider">{{range .Providers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label class="field">Base URL<input class="input" name="base_url" placeholder="Optional for provider cloud"></label><label class="field">Organization / group<input class="input" name="organization" required></label><label class="field">Azure DevOps project<input class="input" name="project"></label><label class="field">Existing repository<input class="input" name="repository" required></label><label class="field">Branch<input class="input" name="branch" value="main" required></label><label class="field">Allowed root<input class="input" name="allowed_root" value="fleetamp/groups" required></label><label class="field">Mode<select class="select" name="mode"><option value="fleetamp-pull-request">FleetAMP pull request</option><option value="git-managed">Git managed</option><option value="observe-only">Observe only</option><option value="fleetamp-direct-commit">Direct commit</option><option value="fleetamp-primary-sync">FleetAMP primary sync</option></select></label><label class="field">Credential reference<input class="input" name="credential_ref" required placeholder="secret://github/production"></label><fieldset class="field full"><legend>Allowed FleetAMP groups</legend>{{range .Groups}}<label><input type="checkbox" name="group_ids" value="{{.ID}}"> {{.Name}}</label>{{else}}<span class="tiny">Create a group first.</span>{{end}}</fieldset><label class="field"><input type="checkbox" name="enabled" value="true" checked> Enabled</label></div><div class="notice">Repository/pipeline creation, connection tests and Git writes remain disabled.</div><div class="detailactions"><button class="btn primary">Register connection scope</button></div></form></div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Registered connections</div><div class="cardsub">Immutable repository security boundaries.</div></div></div>{{if .Connections}}<div style="overflow:auto"><table><thead><tr><th>Name</th><th>Provider / repository</th><th>Branch / allowed root</th><th>Mode</th><th>Groups</th><th>Credential</th><th>Status</th></tr></thead><tbody>{{range .Connections}}<tr><td><strong>{{.Name}}</strong><div class="tiny code">{{.ID}}</div></td><td>{{.Provider}}<div class="tiny">{{.Organization}}{{if .Project}}/{{.Project}}{{end}}/{{.Repository}}</div></td><td>{{.Branch}}<div class="tiny code">{{.AllowedRoot}}</div></td><td>{{.Mode}}</td><td>{{len .GroupIDs}}</td><td class="code">{{.CredentialRef}}</td><td><span class="badge {{if .Enabled}}ok{{else}}off{{end}}">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</span></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No connections registered.</div>{{end}}</section><section class="card" style="margin-top:16px"><div class="cardbody integration-grid">{{range .Providers}}<article class="component-item"><strong>{{.Name}}</strong><div class="tiny">{{.Description}}</div></article>{{end}}</div></section></div></main></div></body></html>`
 
 var integrationsPage = template.Must(template.New("integrations").Parse(integrationsHTML))
 
-func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog) {
+func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog, connections storage.IntegrationConnectionStore, groupStore storage.GroupStore, auth *authManager) {
 	mux.HandleFunc("/settings/integrations", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/settings/integrations" {
 			http.NotFound(w, r)
 			return
 		}
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
+		errorMessage := ""
+		if r.Method == http.MethodPost {
+			if currentRole(auth, r) != roleAdmin {
+				http.Error(w, "administrator access required", http.StatusForbidden)
+				return
+			}
+			if e := r.ParseForm(); e != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			creator := currentUsername(auth, r)
+			if creator == "" && auth == nil {
+				creator = "test-admin"
+			}
+			v, e := integrations.NewConnection(integrations.Connection{Name: r.FormValue("name"), Provider: integrations.ProviderID(r.FormValue("provider")), BaseURL: r.FormValue("base_url"), Organization: r.FormValue("organization"), Project: r.FormValue("project"), Repository: r.FormValue("repository"), Branch: r.FormValue("branch"), AllowedRoot: r.FormValue("allowed_root"), Mode: r.FormValue("mode"), CredentialRef: r.FormValue("credential_ref"), GroupIDs: r.Form["group_ids"], Enabled: r.FormValue("enabled") == "true"}, creator)
+			if e != nil {
+				errorMessage = e.Error()
+			} else if e = connections.Create(r.Context(), v); e != nil {
+				errorMessage = "Connection name already exists."
+			} else {
+				http.Redirect(w, r, "/settings/integrations?created="+v.ID, http.StatusSeeOther)
+				return
+			}
+		} else if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if err := integrationsPage.Execute(w, integrationsView{Page: "settings-integrations", Providers: catalog.List()}); err != nil {
-			http.Error(w, "render integrations", http.StatusInternalServerError)
+		rows, e := connections.List(r.Context(), 200)
+		if e != nil {
+			internalServerError(w, e)
+			return
+		}
+		groupRows, e := groupStore.List(r.Context())
+		if e != nil {
+			internalServerError(w, e)
+			return
+		}
+		message := ""
+		if strings.TrimSpace(r.URL.Query().Get("created")) != "" {
+			message = "Connection scope registered. No provider API was called and no Git content changed."
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if e := integrationsPage.Execute(w, integrationsView{Page: "settings-integrations", Providers: catalog.List(), Connections: rows, Groups: groupRows, Message: message, Error: errorMessage}); e != nil {
+			internalServerError(w, e)
 		}
 	})
 }
