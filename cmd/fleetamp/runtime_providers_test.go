@@ -136,6 +136,27 @@ func TestCompatibilityAssessmentSeparatesAttentionAndUnsupported(t *testing.T) {
 	}
 }
 
+func TestOTelComponentsInstallationGuidesAreReadOnly(t *testing.T) {
+	mux := http.NewServeMux()
+	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry())
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/otel-components?tab=guides", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET installation guides status = %d, want %d", response.Code, http.StatusOK)
+	}
+	body := response.Body.String()
+	for _, text := range []string{"Choose an installation model", "Linux system service", "Container runtime", "Kubernetes workload", "OpenTelemetry Operator", "GitOps-managed Kubernetes", "Prerequisites", "Recommended sequence", "Verify before governance", "Read-only guidance"} {
+		if !strings.Contains(body, text) {
+			t.Errorf("installation guides page does not contain %q", text)
+		}
+	}
+	for _, forbidden := range []string{"Install now", "Run installation", "Connect repository"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("installation guides page contains mutation control %q", forbidden)
+		}
+	}
+}
+
 func TestOTelComponentsPageRejectsMutation(t *testing.T) {
 	mux := http.NewServeMux()
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry())
