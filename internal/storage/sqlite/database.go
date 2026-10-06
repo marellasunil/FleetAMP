@@ -98,6 +98,10 @@ func (d *Database) ComponentLifecycleValidations() *ComponentLifecycleValidation
 	return &ComponentLifecycleValidationStore{db: d.db}
 }
 
+func (d *Database) ComponentLifecycleApprovals() *ComponentLifecycleApprovalStore {
+	return &ComponentLifecycleApprovalStore{db: d.db}
+}
+
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
 	statements := []string{
@@ -219,6 +223,15 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE TRIGGER IF NOT EXISTS component_lifecycle_validations_no_delete
 			BEFORE DELETE ON component_lifecycle_validations
 			BEGIN SELECT RAISE(ABORT,'component lifecycle validations are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS component_lifecycle_approvals (
+			id TEXT PRIMARY KEY, request_id TEXT NOT NULL, request_spec_hash TEXT NOT NULL,
+			validation_id TEXT NOT NULL UNIQUE, validation_hash TEXT NOT NULL, group_id TEXT NOT NULL, group_name TEXT NOT NULL,
+			operation TEXT NOT NULL, component_type TEXT NOT NULL, target_count INTEGER NOT NULL,
+			requested_by TEXT NOT NULL, assigned_reviewer TEXT NOT NULL, submission_comment TEXT NOT NULL,
+			status TEXT NOT NULL, reviewed_by TEXT NOT NULL DEFAULT '', review_comment TEXT NOT NULL DEFAULT '', reviewed_at TEXT, created_at TEXT NOT NULL,
+			FOREIGN KEY(request_id) REFERENCES component_lifecycle_requests(id), FOREIGN KEY(validation_id) REFERENCES component_lifecycle_validations(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_component_lifecycle_approvals_status ON component_lifecycle_approvals(status,created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS administrators (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             username TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'admin', password_salt BLOB NOT NULL,

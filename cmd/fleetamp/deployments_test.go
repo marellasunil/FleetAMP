@@ -19,13 +19,13 @@ import (
 
 func TestDeploymentsPageDefinesGovernedDeliveryFoundation(t *testing.T) {
 	mux := http.NewServeMux()
-	registerDeploymentRoutes(mux, memory.NewComponentLifecycleRequestStore(), memory.NewComponentLifecycleValidationStore(), nil, memory.NewAgentStore(), nil)
+	registerDeploymentRoutes(mux, memory.NewComponentLifecycleRequestStore(), memory.NewComponentLifecycleValidationStore(), memory.NewComponentLifecycleApprovalStore(), nil, memory.NewAgentStore(), nil)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/deployments", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("GET /deployments status = %d, want %d", response.Code, http.StatusOK)
 	}
-	for _, text := range []string{"Create immutable component proposal", "Component installation", "Component upgrade", "Component restart", "Component removal", "Approve", "exact specification hash"} {
+	for _, text := range []string{"Create immutable component proposal", "Install", "Upgrade", "Restart", "Remove", "Approve", "exact specification hash"} {
 		if !strings.Contains(response.Body.String(), text) {
 			t.Errorf("page does not contain %q", text)
 		}
@@ -38,7 +38,7 @@ func TestDeploymentsPageDefinesGovernedDeliveryFoundation(t *testing.T) {
 func TestDeploymentsPageCreatesImmutableLifecycleProposal(t *testing.T) {
 	store := memory.NewComponentLifecycleRequestStore()
 	mux := http.NewServeMux()
-	registerDeploymentRoutes(mux, store, memory.NewComponentLifecycleValidationStore(), nil, memory.NewAgentStore(), nil)
+	registerDeploymentRoutes(mux, store, memory.NewComponentLifecycleValidationStore(), memory.NewComponentLifecycleApprovalStore(), nil, memory.NewAgentStore(), nil)
 	form := url.Values{
 		"operation": {"upgrade"}, "component_type": {"otel-collector-kubernetes"}, "group_id": {"payments"},
 		"label_selector": {"environment=production"}, "deployment_method": {"gitops"},
@@ -62,7 +62,7 @@ func TestDeploymentsPageCreatesImmutableLifecycleProposal(t *testing.T) {
 
 func TestDeploymentsPageRejectsInvalidLifecycleProposal(t *testing.T) {
 	mux := http.NewServeMux()
-	registerDeploymentRoutes(mux, memory.NewComponentLifecycleRequestStore(), memory.NewComponentLifecycleValidationStore(), nil, memory.NewAgentStore(), nil)
+	registerDeploymentRoutes(mux, memory.NewComponentLifecycleRequestStore(), memory.NewComponentLifecycleValidationStore(), memory.NewComponentLifecycleApprovalStore(), nil, memory.NewAgentStore(), nil)
 	form := url.Values{"operation": {"upgrade"}, "component_type": {"otel-collector"}, "group_id": {"payments"}, "deployment_method": {"gitops"}, "current_version": {"0.149.0"}, "desired_version": {"0.149.0"}, "reason": {"no change"}}
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/deployments", strings.NewReader(form.Encode()))
@@ -92,7 +92,7 @@ func TestDeploymentsPageCreatesImmutableValidationSnapshot(t *testing.T) {
 		Labels: map[string]string{"environment": "production"}, Capabilities: []string{"reports_health"}}); err != nil { t.Fatal(err) }
 	validations := memory.NewComponentLifecycleValidationStore()
 	mux := http.NewServeMux()
-	registerDeploymentRoutes(mux, requests, validations, database.Groups(), agentsStore, nil)
+	registerDeploymentRoutes(mux, requests, validations, memory.NewComponentLifecycleApprovalStore(), database.Groups(), agentsStore, nil)
 	form := url.Values{"action": {"validate"}, "request_id": {request.ID}}
 	response := httptest.NewRecorder()
 	httpRequest := httptest.NewRequest(http.MethodPost, "/deployments", strings.NewReader(form.Encode()))
