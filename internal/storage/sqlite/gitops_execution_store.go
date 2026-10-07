@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/lifecycle"
 	"github.com/marellasunil/FleetAMP/internal/storage"
@@ -76,6 +77,74 @@ func (s *GitOpsExecutionStore) ListEvents(ctx context.Context, id string) ([]*li
 		result = append(result, v)
 	}
 	return result, rows.Err()
+}
+
+func (s *GitOpsExecutionStore) Claim(ctx context.Context, worker string, now, until time.Time) (*lifecycle.GitOpsExecutionRequest, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, gitOpsExecutionSelect+` WHERE id IN (SELECT r.id FROM gitops_execution_requests r JOIN gitops_execution_events e ON e.id=(SELECT e2.id FROM gitops_execution_events e2 WHERE e2.execution_id=r.id ORDER BY e2.created_at DESC,e2.id DESC LIMIT 1) LEFT JOIN gitops_execution_leases l ON l.execution_id=r.id WHERE e.status=? AND (l.execution_id IS NULL OR l.lease_until<=?) ORDER BY r.created_at LIMIT 20)`, lifecycle.GitOpsExecutionQueued, formatTime(now))
+	if err != nil {
+		return nil, err
+	}
+	candidates := []*lifecycle.GitOpsExecutionRequest{}
+	for rows.Next() {
+		value, scanErr := scanGitOpsExecutionRequest(rows)
+		if scanErr != nil {
+			rows.Close()
+			return nil, scanErr
+		}
+		candidates = append(candidates, value)
+	}
+	rows.Close()
+	for _, value := range candidates {
+		result, execErr := tx.ExecContext(ctx, `INSERT INTO gitops_execution_leases(execution_id,worker_id,lease_until,claimed_at) VALUES(?,?,?,?) ON CONFLICT(execution_id) DO UPDATE SET worker_id=excluded.worker_id,lease_until=excluded.lease_until,claimed_at=excluded.claimed_at WHERE gitops_execution_leases.lease_until<=?`, value.ID, worker, formatTime(until), formatTime(now), formatTime(now))
+		if execErr != nil {
+			return nil, execErr
+		}
+		count, _ := result.RowsAffected()
+		if count != 1 {
+			continue
+		}
+		event, eventErr := lifecycle.NewGitOpsExecutionEvent(value.ID, lifecycle.GitOpsExecutionClaimed, worker, "Execution claimed by provider worker", map[string]string{"lease_until": until.UTC().Format(time.RFC3339Nano)})
+		if eventErr != nil {
+			return nil, eventErr
+		}
+		if eventErr = insertGitOpsExecutionEvent(ctx, tx, event); eventErr != nil {
+			return nil, eventErr
+		}
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return value, nil
+	}
+	return nil, storage.ErrGitOpsExecutionQueueEmpty
+}
+
+func (s *GitOpsExecutionStore) Complete(ctx context.Context, worker string, event *lifecycle.GitOpsExecutionEvent) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var owner string
+	if err = tx.QueryRowContext(ctx, `SELECT worker_id FROM gitops_execution_leases WHERE execution_id=?`, event.ExecutionID).Scan(&owner); errors.Is(err, sql.ErrNoRows) {
+		return storage.ErrGitOpsExecutionLeaseConflict
+	} else if err != nil {
+		return err
+	}
+	if owner != worker {
+		return storage.ErrGitOpsExecutionLeaseConflict
+	}
+	if err = insertGitOpsExecutionEvent(ctx, tx, event); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM gitops_execution_leases WHERE execution_id=? AND worker_id=?`, event.ExecutionID, worker); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 const gitOpsExecutionSelect = `SELECT id,approval_id,preview_id,preview_hash,plan_hash,connection_id,provider,mode,repository_path,branch,requested_by,created_at FROM gitops_execution_requests`

@@ -270,6 +270,8 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_gitops_execution_events_execution ON gitops_execution_events(execution_id,created_at,id)`,
 		`CREATE TRIGGER IF NOT EXISTS gitops_execution_events_no_update BEFORE UPDATE ON gitops_execution_events BEGIN SELECT RAISE(ABORT,'GitOps execution events are append-only'); END`,
 		`CREATE TRIGGER IF NOT EXISTS gitops_execution_events_no_delete BEFORE DELETE ON gitops_execution_events BEGIN SELECT RAISE(ABORT,'GitOps execution events are append-only'); END`,
+		`CREATE TABLE IF NOT EXISTS gitops_execution_leases(execution_id TEXT PRIMARY KEY,worker_id TEXT NOT NULL,lease_until TEXT NOT NULL,claimed_at TEXT NOT NULL,FOREIGN KEY(execution_id) REFERENCES gitops_execution_requests(id))`,
+		`CREATE INDEX IF NOT EXISTS idx_gitops_execution_leases_until ON gitops_execution_leases(lease_until)`,
 		`CREATE TABLE IF NOT EXISTS integration_connections(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,provider TEXT NOT NULL,base_url TEXT NOT NULL DEFAULT '',organization TEXT NOT NULL,project TEXT NOT NULL DEFAULT '',repository TEXT NOT NULL,branch TEXT NOT NULL,allowed_root TEXT NOT NULL,mode TEXT NOT NULL,credential_ref TEXT NOT NULL,group_ids TEXT NOT NULL,enabled INTEGER NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_integration_connections_provider ON integration_connections(provider,created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS integration_connections_no_update BEFORE UPDATE ON integration_connections BEGIN SELECT RAISE(ABORT,'integration connection records are immutable'); END`,

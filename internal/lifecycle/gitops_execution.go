@@ -13,6 +13,7 @@ type GitOpsExecutionStatus string
 const (
 	GitOpsExecutionQueued    GitOpsExecutionStatus = "queued"
 	GitOpsExecutionClaimed   GitOpsExecutionStatus = "claimed"
+	GitOpsExecutionExecuting GitOpsExecutionStatus = "executing"
 	GitOpsExecutionSucceeded GitOpsExecutionStatus = "succeeded"
 	GitOpsExecutionFailed    GitOpsExecutionStatus = "failed"
 )
@@ -73,6 +74,23 @@ func randomGitOpsExecutionID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(raw), nil
+}
+
+func NewGitOpsExecutionEvent(executionID string, status GitOpsExecutionStatus, actor, message string, evidence map[string]string) (*GitOpsExecutionEvent, error) {
+	executionID, actor, message = strings.TrimSpace(executionID), strings.TrimSpace(actor), strings.TrimSpace(message)
+	if executionID == "" || actor == "" || message == "" {
+		return nil, errors.New("execution ID, actor, and message are required")
+	}
+	switch status {
+	case GitOpsExecutionClaimed, GitOpsExecutionExecuting, GitOpsExecutionSucceeded, GitOpsExecutionFailed:
+	default:
+		return nil, errors.New("invalid execution event status")
+	}
+	id, err := randomGitOpsExecutionID()
+	if err != nil {
+		return nil, err
+	}
+	return &GitOpsExecutionEvent{ID: id, ExecutionID: executionID, Status: status, Actor: actor, Message: message, Evidence: evidence, CreatedAt: time.Now().UTC()}, nil
 }
 
 func CloneGitOpsExecutionRequest(v *GitOpsExecutionRequest) *GitOpsExecutionRequest {

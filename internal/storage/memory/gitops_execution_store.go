@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/lifecycle"
 	"github.com/marellasunil/FleetAMP/internal/storage"
@@ -13,10 +14,16 @@ type GitOpsExecutionStore struct {
 	mu       sync.RWMutex
 	requests map[string]*lifecycle.GitOpsExecutionRequest
 	events   map[string][]*lifecycle.GitOpsExecutionEvent
+	leases   map[string]gitOpsLease
+}
+
+type gitOpsLease struct {
+	worker string
+	until  time.Time
 }
 
 func NewGitOpsExecutionStore() *GitOpsExecutionStore {
-	return &GitOpsExecutionStore{requests: map[string]*lifecycle.GitOpsExecutionRequest{}, events: map[string][]*lifecycle.GitOpsExecutionEvent{}}
+	return &GitOpsExecutionStore{requests: map[string]*lifecycle.GitOpsExecutionRequest{}, events: map[string][]*lifecycle.GitOpsExecutionEvent{}, leases: map[string]gitOpsLease{}}
 }
 
 func (s *GitOpsExecutionStore) Create(_ context.Context, request *lifecycle.GitOpsExecutionRequest, event *lifecycle.GitOpsExecutionEvent) error {
@@ -74,6 +81,37 @@ func (s *GitOpsExecutionStore) ListEvents(_ context.Context, id string) ([]*life
 		result = append(result, lifecycle.CloneGitOpsExecutionEvent(v))
 	}
 	return result, nil
+}
+
+func (s *GitOpsExecutionStore) Claim(_ context.Context, worker string, now, until time.Time) (*lifecycle.GitOpsExecutionRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, request := range s.requests {
+		events := s.events[id]
+		if len(events) == 0 || events[len(events)-1].Status != lifecycle.GitOpsExecutionQueued {
+			continue
+		}
+		if lease, ok := s.leases[id]; ok && lease.until.After(now) {
+			continue
+		}
+		s.leases[id] = gitOpsLease{worker: worker, until: until}
+		event, _ := lifecycle.NewGitOpsExecutionEvent(id, lifecycle.GitOpsExecutionClaimed, worker, "Execution claimed by provider worker", map[string]string{"lease_until": until.UTC().Format(time.RFC3339Nano)})
+		s.events[id] = append(s.events[id], event)
+		return lifecycle.CloneGitOpsExecutionRequest(request), nil
+	}
+	return nil, storage.ErrGitOpsExecutionQueueEmpty
+}
+
+func (s *GitOpsExecutionStore) Complete(_ context.Context, worker string, event *lifecycle.GitOpsExecutionEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lease, ok := s.leases[event.ExecutionID]
+	if !ok || lease.worker != worker {
+		return storage.ErrGitOpsExecutionLeaseConflict
+	}
+	s.events[event.ExecutionID] = append(s.events[event.ExecutionID], lifecycle.CloneGitOpsExecutionEvent(event))
+	delete(s.leases, event.ExecutionID)
+	return nil
 }
 
 var _ storage.GitOpsExecutionStore = (*GitOpsExecutionStore)(nil)
