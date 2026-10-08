@@ -133,6 +133,8 @@ func main() {
 	gitOpsPreviewApprovalStore := database.GitOpsPreviewApprovals()
 	gitOpsExecutionStore := database.GitOpsExecutions()
 	integrationConnectionStore := database.IntegrationConnections()
+	integrationValidationStore := database.IntegrationValidations()
+	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
@@ -253,7 +255,7 @@ func main() {
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
 	registerComponentLifecycleApprovalRoutes(mux, componentLifecycleApprovalStore, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleExecutionStore, groupStore, auth)
-	registerGitOpsPreviewRoutes(mux, componentLifecycleExecutionStore, componentLifecycleRequestStore, componentGitOpsPreviewStore, gitOpsPreviewApprovalStore, gitOpsExecutionStore, integrationConnectionStore, groupStore, auth)
+	registerGitOpsPreviewRoutes(mux, componentLifecycleExecutionStore, componentLifecycleRequestStore, componentGitOpsPreviewStore, gitOpsPreviewApprovalStore, gitOpsExecutionStore, integrationConnectionStore, integrationValidationStore, groupStore, auth)
 	registerGitOpsExecutionRoutes(mux, gitOpsExecutionStore, componentGitOpsPreviewStore, componentLifecycleExecutionStore, componentLifecycleRequestStore, groupStore, auth)
 	registerDeploymentRoutes(mux, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleApprovalStore, groupStore, agentStore, auth)
 	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
@@ -261,7 +263,7 @@ func main() {
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
-	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, groupStore, auth)
+	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
 
 	httpServer := &http.Server{

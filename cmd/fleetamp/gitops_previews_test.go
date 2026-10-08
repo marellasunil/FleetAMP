@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGitOpsPreviewPageRendersWithoutGitWrite(t *testing.T) {
@@ -19,6 +20,7 @@ func TestGitOpsPreviewPageRendersWithoutGitWrite(t *testing.T) {
 	previewApprovals := memory.NewGitOpsPreviewApprovalStore()
 	executions := memory.NewGitOpsExecutionStore()
 	connections := memory.NewIntegrationConnectionStore()
+	validations := memory.NewIntegrationValidationStore()
 	request, _ := lifecycle.NewRequest(lifecycle.Spec{Operation: lifecycle.Upgrade, ComponentType: runtimes.OTelCollectorKubernetes, GroupID: "payments", DeploymentMethod: "gitops", CurrentVersion: "0.148.0", DesiredVersion: "0.149.0", Reason: "security"}, "operator")
 	_ = requests.Create(t.Context(), request)
 	plan := &lifecycle.ExecutionPlan{ID: "plan", RequestID: request.ID, RequestSpecHash: request.SpecHash, ExecutorKind: lifecycle.ExecutorGitOps, PlanHash: "plan-hash"}
@@ -26,7 +28,7 @@ func TestGitOpsPreviewPageRendersWithoutGitWrite(t *testing.T) {
 	connection, _ := integrations.NewConnection(integrations.Connection{Name: "production", Provider: integrations.GitHub, Organization: "acme", Repository: "telemetry", Branch: "main", AllowedRoot: "fleetamp/groups", Mode: integrations.ModePullRequest, CredentialRef: "secret://github/prod", GroupIDs: []string{"payments"}, Enabled: true}, "admin")
 	_ = connections.Create(t.Context(), connection)
 	mux := http.NewServeMux()
-	registerGitOpsPreviewRoutes(mux, plans, requests, previews, previewApprovals, executions, connections, nil, nil)
+	registerGitOpsPreviewRoutes(mux, plans, requests, previews, previewApprovals, executions, connections, validations, nil, nil)
 	form := url.Values{"plan_id": {"plan"}, "connection_id": {connection.ID}}
 	response := httptest.NewRecorder()
 	post := httptest.NewRequest(http.MethodPost, "/component-gitops-previews", strings.NewReader(form.Encode()))
@@ -68,6 +70,15 @@ func TestGitOpsPreviewPageRendersWithoutGitWrite(t *testing.T) {
 	queue := httptest.NewRequest(http.MethodPost, "/component-gitops-previews", strings.NewReader(queueForm.Encode()))
 	queue.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	mux.ServeHTTP(queueResponse, queue)
+	if queueResponse.Code != http.StatusConflict || !strings.Contains(queueResponse.Body.String(), "validation is missing, failed, or expired") {
+		t.Fatalf("unvalidated queue status=%d body=%s", queueResponse.Code, queueResponse.Body.String())
+	}
+	validation, _ := integrations.NewConnectionValidation(connection, "passed", "admin", "provider access verified", nil, time.Hour)
+	_ = validations.Create(t.Context(), validation)
+	queueResponse = httptest.NewRecorder()
+	queue = httptest.NewRequest(http.MethodPost, "/component-gitops-previews", strings.NewReader(queueForm.Encode()))
+	queue.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	mux.ServeHTTP(queueResponse, queue)
 	if queueResponse.Code != http.StatusSeeOther {
 		t.Fatalf("queue status=%d body=%s", queueResponse.Code, queueResponse.Body.String())
 	}
@@ -94,7 +105,7 @@ func TestGitOpsPreviewRejectsConnectionForDifferentGroup(t *testing.T) {
 	connection, _ := integrations.NewConnection(integrations.Connection{Name: "orders", Provider: integrations.GitLab, Organization: "acme", Repository: "telemetry", Branch: "main", AllowedRoot: "fleetamp/groups", Mode: integrations.ModePullRequest, CredentialRef: "secret://gitlab/prod", GroupIDs: []string{"orders"}, Enabled: true}, "admin")
 	_ = connections.Create(t.Context(), connection)
 	mux := http.NewServeMux()
-	registerGitOpsPreviewRoutes(mux, plans, requests, previews, previewApprovals, executions, connections, nil, nil)
+	registerGitOpsPreviewRoutes(mux, plans, requests, previews, previewApprovals, executions, connections, nil, nil, nil)
 	form := url.Values{"plan_id": {"plan"}, "connection_id": {connection.ID}}
 	response := httptest.NewRecorder()
 	post := httptest.NewRequest(http.MethodPost, "/component-gitops-previews", strings.NewReader(form.Encode()))

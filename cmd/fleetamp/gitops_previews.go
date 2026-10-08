@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type gitOpsPreviewsView struct {
@@ -28,7 +29,7 @@ const gitOpsPreviewsHTML = `<!doctype html><html><head><meta charset="utf-8"><me
 
 var gitOpsPreviewsPage = template.Must(template.New("gitops-previews").Parse(gitOpsPreviewsHTML))
 
-func registerGitOpsPreviewRoutes(mux *http.ServeMux, plans storage.ComponentLifecycleExecutionStore, requests storage.ComponentLifecycleRequestStore, previews storage.ComponentGitOpsPreviewStore, previewApprovals storage.GitOpsPreviewApprovalStore, executions storage.GitOpsExecutionStore, connections storage.IntegrationConnectionStore, groupStore storage.GroupStore, auth *authManager) {
+func registerGitOpsPreviewRoutes(mux *http.ServeMux, plans storage.ComponentLifecycleExecutionStore, requests storage.ComponentLifecycleRequestStore, previews storage.ComponentGitOpsPreviewStore, previewApprovals storage.GitOpsPreviewApprovalStore, executions storage.GitOpsExecutionStore, connections storage.IntegrationConnectionStore, validations storage.IntegrationValidationStore, groupStore storage.GroupStore, auth *authManager) {
 	mux.HandleFunc("/component-gitops-previews", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/component-gitops-previews" {
 			http.NotFound(w, r)
@@ -50,6 +51,12 @@ func registerGitOpsPreviewRoutes(mux *http.ServeMux, plans storage.ComponentLife
 				if err != nil || !canAccessGitOpsPreview(auth, r, preview, plans, requests, groupStore) {
 					http.Error(w, "forbidden", http.StatusForbidden)
 					return
+				}
+				if validations != nil {
+					if _, err := validations.LatestUsable(r.Context(), preview.Connection.ID, time.Now().UTC()); err != nil {
+						http.Error(w, "repository connection validation is missing, failed, or expired; test the connection before queueing", http.StatusConflict)
+						return
+					}
 				}
 				requestedBy := currentUsername(auth, r)
 				if requestedBy == "" && auth == nil {
