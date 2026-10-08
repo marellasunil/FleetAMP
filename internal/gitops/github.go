@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/marellasunil/FleetAMP/internal/integrations"
@@ -24,6 +25,61 @@ type GitHubAdapter struct {
 	Connections storage.IntegrationConnectionStore
 	Secrets     SecretResolver
 	Client      *http.Client
+}
+
+func (a *GitHubAdapter) Status(ctx context.Context, request *lifecycle.GitOpsExecutionRequest, preview *lifecycle.GitOpsPreview, evidence map[string]string) (StatusResult, error) {
+	if request == nil || preview == nil || request.Provider != string(integrations.GitHub) || request.PreviewID != preview.ID || request.PreviewHash != preview.PreviewHash || request.ConnectionID != preview.Connection.ID {
+		return StatusResult{}, errors.New("GitHub execution evidence is invalid")
+	}
+	if a.Connections == nil || a.Secrets == nil {
+		return StatusResult{}, errors.New("GitHub adapter credential services are unavailable")
+	}
+	pullRequestNumber, err := strconv.Atoi(strings.TrimSpace(evidence["pull_request_number"]))
+	if err != nil || pullRequestNumber < 1 {
+		return StatusResult{}, errors.New("GitHub pull request number is unavailable")
+	}
+	connection, err := a.Connections.Get(ctx, request.ConnectionID)
+	if err != nil {
+		return StatusResult{}, errors.New("GitHub connection is unavailable")
+	}
+	if err = validateLiveGitHubConnection(connection, preview); err != nil {
+		return StatusResult{}, err
+	}
+	token, err := a.Secrets.Resolve(ctx, connection.CredentialRef)
+	if err != nil {
+		return StatusResult{}, err
+	}
+	apiBase := strings.TrimRight(connection.BaseURL, "/")
+	if apiBase == "" {
+		apiBase = defaultGitHubAPI
+	}
+	if err = validateGitHubAPIBase(apiBase); err != nil {
+		return StatusResult{}, err
+	}
+	client := a.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	github := githubClient{baseURL: apiBase, token: token, client: client}
+	pullRequest, err := github.pullRequest(ctx, connection.Organization, connection.Repository, pullRequestNumber)
+	if err != nil {
+		return StatusResult{}, err
+	}
+	status := lifecycle.GitOpsChangeOpen
+	message := "GitHub pull request remains open"
+	if pullRequest.Merged {
+		status, message = lifecycle.GitOpsChangeMerged, "GitHub pull request was merged"
+	} else if pullRequest.State == "closed" {
+		status, message = lifecycle.GitOpsChangeClosed, "GitHub pull request was closed without merge"
+	}
+	return StatusResult{Status: status, Message: message, Evidence: map[string]string{
+		"provider":            "github",
+		"pull_request_number": strconv.Itoa(pullRequest.Number),
+		"pull_request_url":    pullRequest.HTMLURL,
+		"provider_state":      pullRequest.State,
+		"provider_updated_at": pullRequest.UpdatedAt,
+		"merge_commit_sha":    pullRequest.MergeCommitSHA,
+	}}, nil
 }
 
 func (a *GitHubAdapter) Execute(ctx context.Context, request *lifecycle.GitOpsExecutionRequest, preview *lifecycle.GitOpsPreview) (Result, error) {
@@ -210,8 +266,23 @@ func (c githubClient) putFile(ctx context.Context, owner, repository, branch str
 }
 
 type githubPullRequest struct {
-	Number  int    `json:"number"`
-	HTMLURL string `json:"html_url"`
+	Number         int    `json:"number"`
+	HTMLURL        string `json:"html_url"`
+	State          string `json:"state"`
+	Merged         bool   `json:"merged"`
+	MergeCommitSHA string `json:"merge_commit_sha"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
+func (c githubClient) pullRequest(ctx context.Context, owner, repository string, number int) (githubPullRequest, error) {
+	var result githubPullRequest
+	if err := c.doJSON(ctx, http.MethodGet, c.repoURL(owner, repository, "pulls/"+strconv.Itoa(number)), nil, &result, http.StatusOK); err != nil {
+		return githubPullRequest{}, fmt.Errorf("read GitHub pull request status: %w", err)
+	}
+	if result.Number == 0 || (result.State != "open" && result.State != "closed") {
+		return githubPullRequest{}, errors.New("GitHub pull request status response is invalid")
+	}
+	return result, nil
 }
 
 func (c githubClient) ensurePullRequest(ctx context.Context, owner, repository, baseBranch, headBranch string, request *lifecycle.GitOpsExecutionRequest) (string, int, error) {

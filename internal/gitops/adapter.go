@@ -14,10 +14,20 @@ type Result struct {
 	Evidence map[string]string
 }
 
+type StatusResult struct {
+	Status   lifecycle.GitOpsExecutionStatus
+	Message  string
+	Evidence map[string]string
+}
+
 // Adapter is the provider boundary. A future GitHub, GitLab, or Azure DevOps
 // implementation can satisfy this interface without changing lifecycle code.
 type Adapter interface {
 	Execute(context.Context, *lifecycle.GitOpsExecutionRequest, *lifecycle.GitOpsPreview) (Result, error)
+}
+
+type StatusAdapter interface {
+	Status(context.Context, *lifecycle.GitOpsExecutionRequest, *lifecycle.GitOpsPreview, map[string]string) (StatusResult, error)
 }
 
 type Registry struct{ adapters map[string]Adapter }
@@ -25,6 +35,18 @@ type Registry struct{ adapters map[string]Adapter }
 func NewDryRunRegistry() *Registry {
 	noop := NoopAdapter{}
 	return &Registry{adapters: map[string]Adapter{"github": noop, "gitlab": noop, "azure-devops": noop}}
+}
+
+func (r *Registry) StatusAdapter(provider string) (StatusAdapter, error) {
+	adapter, err := r.Adapter(provider)
+	if err != nil {
+		return nil, err
+	}
+	statusAdapter, ok := adapter.(StatusAdapter)
+	if !ok {
+		return nil, fmt.Errorf("Git provider %q does not support status synchronization", provider)
+	}
+	return statusAdapter, nil
 }
 
 func (r *Registry) Adapter(provider string) (Adapter, error) {

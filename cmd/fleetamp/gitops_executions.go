@@ -146,11 +146,11 @@ func gitOpsExecutionAttempt(events []*lifecycle.GitOpsExecutionEvent) int {
 
 func gitOpsExecutionStatusClass(status lifecycle.GitOpsExecutionStatus) string {
 	switch status {
-	case lifecycle.GitOpsExecutionSucceeded:
+	case lifecycle.GitOpsExecutionSucceeded, lifecycle.GitOpsChangeMerged:
 		return "ok status-succeeded"
-	case lifecycle.GitOpsExecutionFailed:
+	case lifecycle.GitOpsExecutionFailed, lifecycle.GitOpsChangeClosed:
 		return "off status-failed"
-	case lifecycle.GitOpsExecutionClaimed, lifecycle.GitOpsExecutionExecuting:
+	case lifecycle.GitOpsExecutionClaimed, lifecycle.GitOpsExecutionExecuting, lifecycle.GitOpsChangeOpen:
 		return "warn"
 	default:
 		return "off"
