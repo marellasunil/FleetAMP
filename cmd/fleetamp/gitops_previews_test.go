@@ -71,6 +71,9 @@ func TestGitOpsPreviewPageRendersWithoutGitWrite(t *testing.T) {
 	if queueResponse.Code != http.StatusSeeOther {
 		t.Fatalf("queue status=%d body=%s", queueResponse.Code, queueResponse.Body.String())
 	}
+	if location := queueResponse.Header().Get("Location"); !strings.HasPrefix(location, "/component-gitops-executions?queued=") {
+		t.Fatalf("queue redirect=%q", location)
+	}
 	executionRows, _ := executions.List(t.Context(), 10)
 	if len(executionRows) != 1 || executionRows[0].PreviewHash != previewRows[0].PreviewHash || executionRows[0].ApprovalID != approvalRows[0].ID {
 		t.Fatalf("execution does not pin approved preview: %#v", executionRows)

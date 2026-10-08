@@ -64,7 +64,7 @@ func registerGitOpsPreviewRoutes(mux *http.ServeMux, plans storage.ComponentLife
 					http.Error(w, "approved preview already queued", http.StatusConflict)
 					return
 				}
-				http.Redirect(w, r, "/component-gitops-previews?queued="+execution.ID, http.StatusSeeOther)
+				http.Redirect(w, r, "/component-gitops-executions?queued="+execution.ID, http.StatusSeeOther)
 				return
 			}
 			if action == "submit_preview_approval" {

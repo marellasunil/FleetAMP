@@ -42,6 +42,7 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/events"
+	"github.com/marellasunil/FleetAMP/internal/gitops"
 	"github.com/marellasunil/FleetAMP/internal/groups"
 	"github.com/marellasunil/FleetAMP/internal/integrations"
 	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
@@ -136,6 +137,12 @@ func main() {
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
 	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
 	go runApprovalExpiryLoop(ctx, groupRequestStore, groupStore, notifier)
+	if boolEnv("FLEETAMP_GITOPS_WORKER_ENABLED") {
+		workerID := envOrDefault("FLEETAMP_GITOPS_WORKER_ID", "fleetamp-local-worker")
+		gitOpsWorker := &gitops.Worker{ID: workerID, Executions: gitOpsExecutionStore, Previews: componentGitOpsPreviewStore, Adapters: gitops.NewDryRunRegistry(), LeaseTTL: durationEnvOrDefault("FLEETAMP_GITOPS_LEASE_TTL", 30*time.Second)}
+		go gitOpsWorker.Run(ctx, durationEnvOrDefault("FLEETAMP_GITOPS_WORKER_INTERVAL", 5*time.Second))
+		slog.Info("GitOps dry-run worker enabled", "component", "gitops_worker", "worker_id", workerID)
+	}
 
 	go func() {
 		if err := adapter.Start(ctx); err != nil && ctx.Err() == nil {
@@ -233,6 +240,7 @@ func main() {
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
 	registerComponentLifecycleApprovalRoutes(mux, componentLifecycleApprovalStore, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleExecutionStore, groupStore, auth)
 	registerGitOpsPreviewRoutes(mux, componentLifecycleExecutionStore, componentLifecycleRequestStore, componentGitOpsPreviewStore, gitOpsPreviewApprovalStore, gitOpsExecutionStore, integrationConnectionStore, groupStore, auth)
+	registerGitOpsExecutionRoutes(mux, gitOpsExecutionStore, componentGitOpsPreviewStore, componentLifecycleExecutionStore, componentLifecycleRequestStore, groupStore, auth)
 	registerDeploymentRoutes(mux, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleApprovalStore, groupStore, agentStore, auth)
 	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
