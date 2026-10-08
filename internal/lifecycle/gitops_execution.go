@@ -17,6 +17,9 @@ const (
 	GitOpsExecutionExecuting GitOpsExecutionStatus = "executing"
 	GitOpsExecutionSucceeded GitOpsExecutionStatus = "succeeded"
 	GitOpsExecutionFailed    GitOpsExecutionStatus = "failed"
+	GitOpsChangeOpen         GitOpsExecutionStatus = "change_open"
+	GitOpsChangeMerged       GitOpsExecutionStatus = "change_merged"
+	GitOpsChangeClosed       GitOpsExecutionStatus = "change_closed"
 )
 
 // GitOpsExecutionRequest is an immutable outbox command for one approved
@@ -83,7 +86,7 @@ func NewGitOpsExecutionEvent(executionID string, status GitOpsExecutionStatus, a
 		return nil, errors.New("execution ID, actor, and message are required")
 	}
 	switch status {
-	case GitOpsExecutionClaimed, GitOpsExecutionExecuting, GitOpsExecutionSucceeded, GitOpsExecutionFailed:
+	case GitOpsExecutionClaimed, GitOpsExecutionExecuting, GitOpsExecutionSucceeded, GitOpsExecutionFailed, GitOpsChangeOpen, GitOpsChangeMerged, GitOpsChangeClosed:
 	default:
 		return nil, errors.New("invalid execution event status")
 	}

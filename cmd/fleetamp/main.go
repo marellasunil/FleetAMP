@@ -146,6 +146,12 @@ func main() {
 				fatalLog("initialize GitHub GitOps adapter", err)
 			}
 			slog.Warn("GitHub GitOps repository writes enabled", "component", "gitops_worker", "worker_id", workerID)
+			if boolEnv("FLEETAMP_GITOPS_GITHUB_STATUS_SYNC_ENABLED") {
+				statusSyncID := envOrDefault("FLEETAMP_GITOPS_STATUS_SYNC_ID", workerID+"-status")
+				statusSync := &gitops.StatusSynchronizer{ID: statusSyncID, Executions: gitOpsExecutionStore, Previews: componentGitOpsPreviewStore, Adapters: gitOpsAdapters}
+				go statusSync.Run(ctx, durationEnvOrDefault("FLEETAMP_GITOPS_STATUS_SYNC_INTERVAL", 30*time.Second))
+				slog.Info("GitHub pull request status synchronization enabled", "component", "gitops_status_sync", "synchronizer_id", statusSyncID)
+			}
 		}
 		gitOpsWorker := &gitops.Worker{ID: workerID, Executions: gitOpsExecutionStore, Previews: componentGitOpsPreviewStore, Adapters: gitOpsAdapters, LeaseTTL: durationEnvOrDefault("FLEETAMP_GITOPS_LEASE_TTL", 30*time.Second)}
 		go gitOpsWorker.Run(ctx, durationEnvOrDefault("FLEETAMP_GITOPS_WORKER_INTERVAL", 5*time.Second))

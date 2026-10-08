@@ -105,3 +105,22 @@ func TestEnvironmentSecretResolverMapsReferenceWithoutExposingValue(t *testing.T
 		t.Fatalf("value=%q err=%v", value, err)
 	}
 }
+
+func TestGitHubClientReadsMergedPullRequestStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/telemetry/pulls/42" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.example/acme/telemetry/pull/42","state":"closed","merged":true,"merge_commit_sha":"merged-sha","updated_at":"2026-10-08T21:00:00Z"}`))
+	}))
+	defer server.Close()
+	client := githubClient{baseURL: server.URL, token: "token", client: server.Client()}
+	status, err := client.pullRequest(t.Context(), "acme", "telemetry", 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Merged || status.State != "closed" || status.MergeCommitSHA != "merged-sha" {
+		t.Fatalf("status=%#v", status)
+	}
+}
