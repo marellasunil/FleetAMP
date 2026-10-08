@@ -85,7 +85,7 @@ func (s *GitOpsExecutionStore) Claim(ctx context.Context, worker string, now, un
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, gitOpsExecutionSelect+` WHERE id IN (SELECT r.id FROM gitops_execution_requests r JOIN gitops_execution_events e ON e.id=(SELECT e2.id FROM gitops_execution_events e2 WHERE e2.execution_id=r.id ORDER BY e2.created_at DESC,e2.id DESC LIMIT 1) LEFT JOIN gitops_execution_leases l ON l.execution_id=r.id WHERE e.status=? AND (l.execution_id IS NULL OR l.lease_until<=?) ORDER BY r.created_at LIMIT 20)`, lifecycle.GitOpsExecutionQueued, formatTime(now))
+	rows, err := tx.QueryContext(ctx, gitOpsExecutionSelect+` WHERE id IN (SELECT r.id FROM gitops_execution_requests r JOIN gitops_execution_events e ON e.id=(SELECT e2.id FROM gitops_execution_events e2 WHERE e2.execution_id=r.id ORDER BY e2.created_at DESC,e2.id DESC LIMIT 1) LEFT JOIN gitops_execution_leases l ON l.execution_id=r.id WHERE (e.status=? AND (l.execution_id IS NULL OR l.lease_until<=?)) OR (e.status=? AND l.lease_until<=?) ORDER BY r.created_at LIMIT 20)`, lifecycle.GitOpsExecutionQueued, formatTime(now), lifecycle.GitOpsExecutionClaimed, formatTime(now))
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +142,37 @@ func (s *GitOpsExecutionStore) Complete(ctx context.Context, worker string, even
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM gitops_execution_leases WHERE execution_id=? AND worker_id=?`, event.ExecutionID, worker); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *GitOpsExecutionStore) Retry(ctx context.Context, event *lifecycle.GitOpsExecutionEvent, maxAttempts int) error {
+	if event == nil || event.Status != lifecycle.GitOpsExecutionQueued {
+		return storage.ErrGitOpsExecutionNotRetryable
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var latest string
+	if err = tx.QueryRowContext(ctx, `SELECT status FROM gitops_execution_events WHERE execution_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, event.ExecutionID).Scan(&latest); errors.Is(err, sql.ErrNoRows) {
+		return storage.ErrGitOpsExecutionNotFound
+	} else if err != nil {
+		return err
+	}
+	if lifecycle.GitOpsExecutionStatus(latest) != lifecycle.GitOpsExecutionFailed {
+		return storage.ErrGitOpsExecutionNotRetryable
+	}
+	var attempts int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM gitops_execution_events WHERE execution_id=? AND status=?`, event.ExecutionID, lifecycle.GitOpsExecutionQueued).Scan(&attempts); err != nil {
+		return err
+	}
+	if maxAttempts > 0 && attempts >= maxAttempts {
+		return storage.ErrGitOpsExecutionNotRetryable
+	}
+	if err = insertGitOpsExecutionEvent(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
