@@ -13,6 +13,7 @@ var (
 	ErrGitOpsExecutionConflict      = errors.New("GitOps execution request already exists")
 	ErrGitOpsExecutionQueueEmpty    = errors.New("GitOps execution queue is empty")
 	ErrGitOpsExecutionLeaseConflict = errors.New("GitOps execution lease is not owned by worker")
+	ErrGitOpsExecutionNotRetryable  = errors.New("GitOps execution is not retryable")
 )
 
 type GitOpsExecutionStore interface {
@@ -23,4 +24,5 @@ type GitOpsExecutionStore interface {
 	ListEvents(context.Context, string) ([]*lifecycle.GitOpsExecutionEvent, error)
 	Claim(context.Context, string, time.Time, time.Time) (*lifecycle.GitOpsExecutionRequest, error)
 	Complete(context.Context, string, *lifecycle.GitOpsExecutionEvent) error
+	Retry(context.Context, *lifecycle.GitOpsExecutionEvent, int) error
 }

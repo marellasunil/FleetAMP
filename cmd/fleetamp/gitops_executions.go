@@ -14,12 +14,15 @@ type gitOpsExecutionMonitorView struct {
 	Executions          []gitOpsExecutionView
 	Message             string
 	GitHubWritesEnabled bool
+	IsAdmin             bool
 }
 
 type gitOpsExecutionView struct {
-	Request *lifecycle.GitOpsExecutionRequest
-	Events  []*lifecycle.GitOpsExecutionEvent
-	Latest  *lifecycle.GitOpsExecutionEvent
+	Request  *lifecycle.GitOpsExecutionRequest
+	Events   []*lifecycle.GitOpsExecutionEvent
+	Latest   *lifecycle.GitOpsExecutionEvent
+	Attempt  int
+	CanRetry bool
 }
 
 const gitOpsExecutionsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="10"><title>GitOps executions · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `
@@ -28,12 +31,62 @@ const gitOpsExecutionsHTML = `<!doctype html><html><head><meta charset="utf-8"><
 
 var gitOpsExecutionsPage = template.Must(template.New("gitops-executions").Funcs(template.FuncMap{
 	"statusClass": gitOpsExecutionStatusClass,
-}).Parse(gitOpsExecutionsHTML))
+}).Parse(strings.Replace(gitOpsExecutionsHTML,
+	`</div></div><div class="execution-timeline"><strong>Status history</strong>`,
+	`</div></div>{{if and $.IsAdmin .CanRetry}}<form class="detailform" style="margin:0 16px 16px" method="post" action="/component-gitops-executions"><input type="hidden" name="action" value="retry"><input type="hidden" name="execution_id" value="{{.Request.ID}}"><label>Retry reason<input class="input" name="reason" required maxlength="500" placeholder="Explain why this failed execution should be retried"></label><div class="tiny">Attempt {{.Attempt}} of 3 will reuse the same execution ID and Git branch.</div><button class="btn primary" type="submit">Retry failed execution</button></form>{{end}}<div class="execution-timeline"><strong>Status history</strong>`, 1)))
+
+const maxGitOpsExecutionAttempts = 3
 
 func registerGitOpsExecutionRoutes(mux *http.ServeMux, executions storage.GitOpsExecutionStore, previews storage.ComponentGitOpsPreviewStore, plans storage.ComponentLifecycleExecutionStore, requests storage.ComponentLifecycleRequestStore, groupStore storage.GroupStore, auth *authManager) {
 	mux.HandleFunc("/component-gitops-executions", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/component-gitops-executions" {
 			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodPost {
+			if auth != nil && currentRole(auth, r) != roleAdmin {
+				http.Error(w, "administrator access required", http.StatusForbidden)
+				return
+			}
+			if err := r.ParseForm(); err != nil || r.FormValue("action") != "retry" {
+				http.Error(w, "invalid retry request", http.StatusBadRequest)
+				return
+			}
+			execution, err := executions.Get(r.Context(), strings.TrimSpace(r.FormValue("execution_id")))
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			preview, err := previews.Get(r.Context(), execution.PreviewID)
+			if err != nil || !canAccessGitOpsPreview(auth, r, preview, plans, requests, groupStore) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			reason := strings.TrimSpace(r.FormValue("reason"))
+			if reason == "" || len(reason) > 500 {
+				http.Error(w, "retry reason is required and must not exceed 500 characters", http.StatusUnprocessableEntity)
+				return
+			}
+			events, err := executions.ListEvents(r.Context(), execution.ID)
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			attempt := gitOpsExecutionAttempt(events) + 1
+			actor := currentUsername(auth, r)
+			if actor == "" && auth == nil {
+				actor = "test-admin"
+			}
+			event, err := lifecycle.NewGitOpsExecutionRetryEvent(execution.ID, actor, reason, attempt)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+			if err = executions.Retry(r.Context(), event, maxGitOpsExecutionAttempts); err != nil {
+				http.Error(w, "execution cannot be retried in its current state or has reached the attempt limit", http.StatusConflict)
+				return
+			}
+			http.Redirect(w, r, "/component-gitops-executions?retried="+execution.ID, http.StatusSeeOther)
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -56,21 +109,39 @@ func registerGitOpsExecutionRoutes(mux *http.ServeMux, executions storage.GitOps
 				internalServerError(w, err)
 				return
 			}
-			view := gitOpsExecutionView{Request: execution, Events: events}
+			view := gitOpsExecutionView{Request: execution, Events: events, Attempt: gitOpsExecutionAttempt(events) + 1}
 			if len(events) > 0 {
 				view.Latest = events[len(events)-1]
+				view.CanRetry = view.Latest.Status == lifecycle.GitOpsExecutionFailed && view.Attempt <= maxGitOpsExecutionAttempts
 			}
 			visible = append(visible, view)
 		}
 		message := ""
 		if strings.TrimSpace(r.URL.Query().Get("queued")) != "" {
-			message = "Approved preview queued. The dry-run worker will claim it and record provider-neutral evidence; no Git write will occur."
+			if boolEnv("FLEETAMP_GITOPS_GITHUB_WRITES_ENABLED") {
+				message = "Approved preview queued for governed GitHub pull-request delivery."
+			} else {
+				message = "Approved preview queued. The dry-run worker will record evidence without writing to Git."
+			}
+		}
+		if strings.TrimSpace(r.URL.Query().Get("retried")) != "" {
+			message = "Failed execution queued for an administrator-approved retry."
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := gitOpsExecutionsPage.Execute(w, gitOpsExecutionMonitorView{Page: "deployments", Executions: visible, Message: message, GitHubWritesEnabled: boolEnv("FLEETAMP_GITOPS_GITHUB_WRITES_ENABLED")}); err != nil {
+		if err := gitOpsExecutionsPage.Execute(w, gitOpsExecutionMonitorView{Page: "deployments", Executions: visible, Message: message, GitHubWritesEnabled: boolEnv("FLEETAMP_GITOPS_GITHUB_WRITES_ENABLED"), IsAdmin: auth == nil || currentRole(auth, r) == roleAdmin}); err != nil {
 			internalServerError(w, err)
 		}
 	})
+}
+
+func gitOpsExecutionAttempt(events []*lifecycle.GitOpsExecutionEvent) int {
+	attempts := 0
+	for _, event := range events {
+		if event.Status == lifecycle.GitOpsExecutionQueued {
+			attempts++
+		}
+	}
+	return attempts
 }
 
 func gitOpsExecutionStatusClass(status lifecycle.GitOpsExecutionStatus) string {

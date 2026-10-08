@@ -88,10 +88,15 @@ func (s *GitOpsExecutionStore) Claim(_ context.Context, worker string, now, unti
 	defer s.mu.Unlock()
 	for id, request := range s.requests {
 		events := s.events[id]
-		if len(events) == 0 || events[len(events)-1].Status != lifecycle.GitOpsExecutionQueued {
+		if len(events) == 0 {
 			continue
 		}
-		if lease, ok := s.leases[id]; ok && lease.until.After(now) {
+		latest := events[len(events)-1].Status
+		lease, leased := s.leases[id]
+		if latest != lifecycle.GitOpsExecutionQueued && !(latest == lifecycle.GitOpsExecutionClaimed && leased && !lease.until.After(now)) {
+			continue
+		}
+		if leased && lease.until.After(now) {
 			continue
 		}
 		s.leases[id] = gitOpsLease{worker: worker, until: until}
@@ -100,6 +105,32 @@ func (s *GitOpsExecutionStore) Claim(_ context.Context, worker string, now, unti
 		return lifecycle.CloneGitOpsExecutionRequest(request), nil
 	}
 	return nil, storage.ErrGitOpsExecutionQueueEmpty
+}
+
+func (s *GitOpsExecutionStore) Retry(_ context.Context, event *lifecycle.GitOpsExecutionEvent, maxAttempts int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if event == nil || event.Status != lifecycle.GitOpsExecutionQueued {
+		return storage.ErrGitOpsExecutionNotRetryable
+	}
+	events, ok := s.events[event.ExecutionID]
+	if !ok {
+		return storage.ErrGitOpsExecutionNotFound
+	}
+	if len(events) == 0 || events[len(events)-1].Status != lifecycle.GitOpsExecutionFailed {
+		return storage.ErrGitOpsExecutionNotRetryable
+	}
+	attempts := 0
+	for _, existing := range events {
+		if existing.Status == lifecycle.GitOpsExecutionQueued {
+			attempts++
+		}
+	}
+	if maxAttempts > 0 && attempts >= maxAttempts {
+		return storage.ErrGitOpsExecutionNotRetryable
+	}
+	s.events[event.ExecutionID] = append(events, lifecycle.CloneGitOpsExecutionEvent(event))
+	return nil
 }
 
 func (s *GitOpsExecutionStore) Complete(_ context.Context, worker string, event *lifecycle.GitOpsExecutionEvent) error {

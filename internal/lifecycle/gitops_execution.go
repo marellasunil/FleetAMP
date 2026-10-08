@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -91,6 +92,29 @@ func NewGitOpsExecutionEvent(executionID string, status GitOpsExecutionStatus, a
 		return nil, err
 	}
 	return &GitOpsExecutionEvent{ID: id, ExecutionID: executionID, Status: status, Actor: actor, Message: message, Evidence: evidence, CreatedAt: time.Now().UTC()}, nil
+}
+
+func NewGitOpsExecutionRetryEvent(executionID, actor, reason string, attempt int) (*GitOpsExecutionEvent, error) {
+	executionID, actor, reason = strings.TrimSpace(executionID), strings.TrimSpace(actor), strings.TrimSpace(reason)
+	if executionID == "" || actor == "" || reason == "" {
+		return nil, errors.New("execution ID, retry actor, and retry reason are required")
+	}
+	if attempt < 2 {
+		return nil, errors.New("retry attempt must be at least 2")
+	}
+	id, err := randomGitOpsExecutionID()
+	if err != nil {
+		return nil, err
+	}
+	return &GitOpsExecutionEvent{
+		ID:          id,
+		ExecutionID: executionID,
+		Status:      GitOpsExecutionQueued,
+		Actor:       actor,
+		Message:     "Failed GitOps execution queued for retry: " + reason,
+		Evidence:    map[string]string{"retry": "true", "attempt": fmt.Sprintf("%d", attempt), "reason": reason},
+		CreatedAt:   time.Now().UTC(),
+	}, nil
 }
 
 func CloneGitOpsExecutionRequest(v *GitOpsExecutionRequest) *GitOpsExecutionRequest {
