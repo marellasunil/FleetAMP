@@ -7,12 +7,18 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+	"time"
 )
+
+type integrationConnectionRow struct {
+	*integrations.Connection
+	Validation *integrations.ConnectionValidation
+}
 
 type integrationsView struct {
 	Page           string
 	Providers      []integrations.Provider
-	Connections    []*integrations.Connection
+	Connections    []integrationConnectionRow
 	Groups         []*groups.Group
 	Message, Error string
 }
@@ -22,7 +28,7 @@ const integrationsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta
 <article class="guidance-card guidance-github"><strong>GitHub connection requirements</strong><div class="tiny">Use an existing owner and repository. Store the credential externally and enter only its secret:// reference. Observe mode needs repository read access; pull-request workflows also need contents write and pull-request access.</div></article>
 <article class="guidance-card guidance-gitlab"><strong>GitLab connection requirements</strong><div class="tiny">Use an existing group or namespace and project repository. Store the access token externally and enter only its secret:// reference. Grant repository read access, plus write and merge-request access only when the selected mode requires it.</div></article>
 <article class="guidance-card guidance-azure"><strong>Azure DevOps connection requirements</strong><div class="tiny">Use an existing organization, project and repository. Store the PAT externally and enter only its secret:// reference. Grant Code read for observation; add Code write and pull-request contribution only for governed change workflows.</div></article>
-</div><div class="notice">Repository/pipeline creation, connection tests and Git writes remain disabled.</div><div class="detailactions"><button class="btn primary">Register connection scope</button></div></form></div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Registered connections</div><div class="cardsub">Immutable repository security boundaries.</div></div></div>{{if .Connections}}<div style="overflow:auto"><table><thead><tr><th>Name</th><th>Provider / repository</th><th>Branch / allowed root</th><th>Mode</th><th>Groups</th><th>Credential</th><th>Status</th></tr></thead><tbody>{{range .Connections}}<tr><td><strong>{{.Name}}</strong><div class="tiny code">{{.ID}}</div></td><td>{{.Provider}}<div class="tiny">{{.Organization}}{{if .Project}}/{{.Project}}{{end}}/{{.Repository}}</div></td><td>{{.Branch}}<div class="tiny code">{{.AllowedRoot}}</div></td><td>{{.Mode}}</td><td>{{len .GroupIDs}}</td><td class="code">{{.CredentialRef}}</td><td><span class="badge {{if .Enabled}}ok{{else}}off{{end}}">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</span></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No connections registered.</div>{{end}}</section><section class="card" style="margin-top:16px"><div class="cardbody integration-grid">{{range .Providers}}<article class="component-item"><strong>{{.Name}}</strong><div class="tiny">{{.Description}}</div></article>{{end}}</div></section></div></main></div></body></html>`
+</div><div class="notice">FleetAMP never creates repositories or pipelines. Credentials are resolved only while validating or executing an approved change.</div><div class="detailactions"><button class="btn primary">Register connection scope</button></div></form></div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Registered connections</div><div class="cardsub">Immutable repository security boundaries with expiring validation evidence.</div></div></div>{{if .Connections}}<div style="overflow:auto"><table><thead><tr><th>Name</th><th>Provider / repository</th><th>Branch / allowed root</th><th>Mode</th><th>Groups</th><th>Validation</th><th>Action</th></tr></thead><tbody>{{range .Connections}}<tr><td><strong>{{.Name}}</strong><div class="tiny code">{{.ID}}</div></td><td>{{.Provider}}<div class="tiny">{{.Organization}}{{if .Project}}/{{.Project}}{{end}}/{{.Repository}}</div></td><td>{{.Branch}}<div class="tiny code">{{.AllowedRoot}}</div></td><td>{{.Mode}}</td><td>{{len .GroupIDs}}</td><td>{{if .Validation}}<span class="badge {{if eq .Validation.Status "passed"}}ok{{else}}off{{end}}">{{.Validation.Status}}</span><div class="tiny">{{.Validation.Message}}</div><div class="tiny">Expires {{.Validation.ExpiresAt}}</div>{{else}}<span class="badge warn">not tested</span>{{end}}</td><td><form method="post"><input type="hidden" name="action" value="test_connection"><input type="hidden" name="connection_id" value="{{.ID}}"><button class="btn" type="submit">Test connection</button></form></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No connections registered.</div>{{end}}</section><section class="card" style="margin-top:16px"><div class="cardbody integration-grid">{{range .Providers}}<article class="component-item"><strong>{{.Name}}</strong><div class="tiny">{{.Description}}</div></article>{{end}}</div></section></div></main></div></body></html>`
 
 const integrationFormLayoutCSS = `<style>
 .cardbody>form>.form-grid{display:grid!important;grid-template-columns:1fr!important;gap:0!important}
@@ -70,7 +76,7 @@ var integrationsPage = template.Must(template.New("integrations").Parse(strings.
 	"</head>", integrationFormLayoutCSS+"</head>",
 ).Replace(integrationsHTML)))
 
-func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog, connections storage.IntegrationConnectionStore, groupStore storage.GroupStore, auth *authManager) {
+func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog, connections storage.IntegrationConnectionStore, validations storage.IntegrationValidationStore, validator *integrations.ConnectionValidator, validationTTL time.Duration, groupStore storage.GroupStore, auth *authManager) {
 	mux.HandleFunc("/settings/integrations", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/settings/integrations" {
 			http.NotFound(w, r)
@@ -90,6 +96,29 @@ func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog
 			if creator == "" && auth == nil {
 				creator = "test-admin"
 			}
+			if r.FormValue("action") == "test_connection" {
+				connection, e := connections.Get(r.Context(), r.FormValue("connection_id"))
+				if e != nil {
+					http.Error(w, "connection not found", http.StatusNotFound)
+					return
+				}
+				evidence, validationErr := validator.Validate(r.Context(), connection)
+				status, validationMessage := "passed", "Provider repository and branch validation passed."
+				if validationErr != nil {
+					status, validationMessage = "failed", validationErr.Error()
+				}
+				record, e := integrations.NewConnectionValidation(connection, status, creator, validationMessage, evidence, validationTTL)
+				if e != nil {
+					internalServerError(w, e)
+					return
+				}
+				if e = validations.Create(r.Context(), record); e != nil {
+					internalServerError(w, e)
+					return
+				}
+				http.Redirect(w, r, "/settings/integrations?validated="+record.ID, http.StatusSeeOther)
+				return
+			}
 			v, e := integrations.NewConnection(integrations.Connection{Name: r.FormValue("name"), Provider: integrations.ProviderID(r.FormValue("provider")), BaseURL: r.FormValue("base_url"), Organization: r.FormValue("organization"), Project: r.FormValue("project"), Repository: r.FormValue("repository"), Branch: r.FormValue("branch"), AllowedRoot: r.FormValue("allowed_root"), Mode: r.FormValue("mode"), CredentialRef: r.FormValue("credential_ref"), GroupIDs: r.Form["group_ids"], Enabled: r.FormValue("enabled") == "true"}, creator)
 			if e != nil {
 				errorMessage = e.Error()
@@ -108,6 +137,15 @@ func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog
 			internalServerError(w, e)
 			return
 		}
+		connectionRows := make([]integrationConnectionRow, 0, len(rows))
+		for _, connection := range rows {
+			validation, validationErr := validations.Latest(r.Context(), connection.ID)
+			if validationErr != nil && validationErr != storage.ErrIntegrationValidationNotFound {
+				internalServerError(w, validationErr)
+				return
+			}
+			connectionRows = append(connectionRows, integrationConnectionRow{Connection: connection, Validation: validation})
+		}
 		groupRows, e := groupStore.List(r.Context())
 		if e != nil {
 			internalServerError(w, e)
@@ -116,9 +154,11 @@ func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog
 		message := ""
 		if strings.TrimSpace(r.URL.Query().Get("created")) != "" {
 			message = "Connection scope registered. No provider API was called and no Git content changed."
+		} else if strings.TrimSpace(r.URL.Query().Get("validated")) != "" {
+			message = "Connection test completed and immutable validation evidence was recorded."
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if e := integrationsPage.Execute(w, integrationsView{Page: "settings-integrations", Providers: catalog.List(), Connections: rows, Groups: groupRows, Message: message, Error: errorMessage}); e != nil {
+		if e := integrationsPage.Execute(w, integrationsView{Page: "settings-integrations", Providers: catalog.List(), Connections: connectionRows, Groups: groupRows, Message: message, Error: errorMessage}); e != nil {
 			internalServerError(w, e)
 		}
 	})

@@ -116,6 +116,9 @@ func (d *Database) GitOpsExecutions() *GitOpsExecutionStore {
 func (d *Database) IntegrationConnections() *IntegrationConnectionStore {
 	return &IntegrationConnectionStore{db: d.db}
 }
+func (d *Database) IntegrationValidations() *IntegrationValidationStore {
+	return &IntegrationValidationStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -276,6 +279,10 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_integration_connections_provider ON integration_connections(provider,created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS integration_connections_no_update BEFORE UPDATE ON integration_connections BEGIN SELECT RAISE(ABORT,'integration connection records are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS integration_connections_no_delete BEFORE DELETE ON integration_connections BEGIN SELECT RAISE(ABORT,'integration connection records are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS integration_connection_validations(id TEXT PRIMARY KEY,connection_id TEXT NOT NULL,provider TEXT NOT NULL,status TEXT NOT NULL,message TEXT NOT NULL,evidence TEXT NOT NULL DEFAULT '{}',validated_by TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL,FOREIGN KEY(connection_id) REFERENCES integration_connections(id))`,
+		`CREATE INDEX IF NOT EXISTS idx_integration_connection_validations_connection ON integration_connection_validations(connection_id,created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS integration_connection_validations_no_update BEFORE UPDATE ON integration_connection_validations BEGIN SELECT RAISE(ABORT,'integration validation records are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS integration_connection_validations_no_delete BEFORE DELETE ON integration_connection_validations BEGIN SELECT RAISE(ABORT,'integration validation records are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS administrators (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             username TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'admin', password_salt BLOB NOT NULL,
