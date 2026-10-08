@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/marellasunil/FleetAMP/internal/lifecycle"
 )
@@ -32,6 +33,17 @@ func (r *Registry) Adapter(provider string) (Adapter, error) {
 		return nil, fmt.Errorf("unsupported Git provider %q", provider)
 	}
 	return adapter, nil
+}
+
+func (r *Registry) Register(provider string, adapter Adapter) error {
+	if r == nil || strings.TrimSpace(provider) == "" || adapter == nil {
+		return errors.New("provider and adapter are required")
+	}
+	if r.adapters == nil {
+		r.adapters = map[string]Adapter{}
+	}
+	r.adapters[strings.TrimSpace(provider)] = adapter
+	return nil
 }
 
 type NoopAdapter struct{}

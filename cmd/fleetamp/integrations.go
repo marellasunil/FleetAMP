@@ -64,7 +64,11 @@ const integrationFormLayoutCSS = `<style>
 
 </style>`
 
-var integrationsPage = template.Must(template.New("integrations").Parse(strings.Replace(integrationsHTML, "</head>", integrationFormLayoutCSS+"</head>", 1)))
+var integrationsPage = template.Must(template.New("integrations").Parse(strings.NewReplacer(
+	"<span class=\"badge off\">No provider API calls</span>", "<span class=\"badge off\">Governed provider access</span>",
+	"Repository/pipeline creation, connection tests and Git writes remain disabled.", "FleetAMP never creates repositories or pipelines. GitHub pull-request writes require exact-preview approval and the server-side write-enable flag; GitLab and Azure DevOps remain dry-run.",
+	"</head>", integrationFormLayoutCSS+"</head>",
+).Replace(integrationsHTML)))
 
 func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog, connections storage.IntegrationConnectionStore, groupStore storage.GroupStore, auth *authManager) {
 	mux.HandleFunc("/settings/integrations", func(w http.ResponseWriter, r *http.Request) {

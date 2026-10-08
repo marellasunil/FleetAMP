@@ -139,9 +139,17 @@ func main() {
 	go runApprovalExpiryLoop(ctx, groupRequestStore, groupStore, notifier)
 	if boolEnv("FLEETAMP_GITOPS_WORKER_ENABLED") {
 		workerID := envOrDefault("FLEETAMP_GITOPS_WORKER_ID", "fleetamp-local-worker")
-		gitOpsWorker := &gitops.Worker{ID: workerID, Executions: gitOpsExecutionStore, Previews: componentGitOpsPreviewStore, Adapters: gitops.NewDryRunRegistry(), LeaseTTL: durationEnvOrDefault("FLEETAMP_GITOPS_LEASE_TTL", 30*time.Second)}
+		gitOpsAdapters := gitops.NewDryRunRegistry()
+		if boolEnv("FLEETAMP_GITOPS_GITHUB_WRITES_ENABLED") {
+			githubAdapter := &gitops.GitHubAdapter{Connections: integrationConnectionStore, Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_GITOPS_HTTP_TIMEOUT", 30*time.Second)}}
+			if err := gitOpsAdapters.Register("github", githubAdapter); err != nil {
+				fatalLog("initialize GitHub GitOps adapter", err)
+			}
+			slog.Warn("GitHub GitOps repository writes enabled", "component", "gitops_worker", "worker_id", workerID)
+		}
+		gitOpsWorker := &gitops.Worker{ID: workerID, Executions: gitOpsExecutionStore, Previews: componentGitOpsPreviewStore, Adapters: gitOpsAdapters, LeaseTTL: durationEnvOrDefault("FLEETAMP_GITOPS_LEASE_TTL", 30*time.Second)}
 		go gitOpsWorker.Run(ctx, durationEnvOrDefault("FLEETAMP_GITOPS_WORKER_INTERVAL", 5*time.Second))
-		slog.Info("GitOps dry-run worker enabled", "component", "gitops_worker", "worker_id", workerID)
+		slog.Info("GitOps worker enabled", "component", "gitops_worker", "worker_id", workerID)
 	}
 
 	go func() {
