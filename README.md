@@ -156,6 +156,15 @@ Fleet, Groups & Labels, administration, and Audit Log. See the
 [scalable console guide](docs/scalable-console.md) for the navigation model and
 current compatibility boundaries.
 
+v0.3 also introduces governed component lifecycle and GitOps foundations:
+immutable install/upgrade/restart/remove proposals, target compatibility
+snapshots, group-scoped repository connections, exact-preview approval, an
+execution outbox, retry and lease recovery, and execution statistics/audit
+visibility. GitHub pull-request delivery and status synchronization are
+optional and disabled by default. GitLab and Azure DevOps are connection
+validation and dry-run providers in this release. Kubernetes API, systemd and
+container lifecycle executors remain future work.
+
 ## Project structure
 
 ```text

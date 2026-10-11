@@ -10,11 +10,12 @@ import (
 )
 
 type gitOpsExecutionMonitorView struct {
-	Page                string
-	Executions          []gitOpsExecutionView
-	Message             string
-	GitHubWritesEnabled bool
-	IsAdmin             bool
+	Page                                                       string
+	Executions                                                 []gitOpsExecutionView
+	Message                                                    string
+	GitHubWritesEnabled                                        bool
+	IsAdmin                                                    bool
+	Total, InProgress, OpenChanges, Completed, Failed, Retries int
 }
 
 type gitOpsExecutionView struct {
@@ -27,7 +28,7 @@ type gitOpsExecutionView struct {
 
 const gitOpsExecutionsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="10"><title>GitOps executions · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `
 .execution-list{display:grid;gap:16px}.execution-card{border:1px solid var(--line);border-radius:10px;background:#0a1626;overflow:hidden}.execution-summary{display:grid;grid-template-columns:minmax(240px,2fr) repeat(3,minmax(140px,1fr));gap:14px;padding:16px}.execution-timeline{border-top:1px solid var(--line);padding:14px 16px}.execution-event{display:grid;grid-template-columns:120px minmax(180px,1fr) minmax(220px,2fr);gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.execution-event:last-child{border-bottom:0}.evidence{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}.evidence span{padding:3px 7px;border:1px solid var(--line);border-radius:6px}.status-failed{color:#fecaca}.status-succeeded{color:#bbf7d0}@media(max-width:900px){.execution-summary,.execution-event{grid-template-columns:1fr}}
-</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Delivery / GitOps Executions</div><div class="pagetitle">GitOps execution monitor</div><div class="subtitle">Append-only worker status and evidence for approved immutable previews.</div></div><div class="topactions"><a class="btn" href="/component-gitops-previews">Previews & approvals</a><a class="btn" href="/component-gitops-executions">Refresh</a>{{if .GitHubWritesEnabled}}<span class="badge warn">GitHub PR writes enabled</span>{{else}}<span class="badge off">Dry-run adapters</span>{{end}}</div></header><div class="content">{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .GitHubWritesEnabled}}<div class="notice">Approved GitHub pull-request executions can create a FleetAMP branch, commit the approved files and open a pull request. GitLab and Azure DevOps remain dry-run.</div>{{else}}<div class="notice">The current provider adapters validate the workflow and record evidence only. They do not create commits, branches, pull requests or deployments.</div>{{end}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Execution outbox</div><div class="cardsub">This page refreshes every 10 seconds. Each timeline is immutable audit evidence.</div></div></div><div class="cardbody execution-list">{{range .Executions}}<article class="execution-card"><div class="execution-summary"><div><span class="tiny">Repository path</span><div><strong>{{.Request.RepositoryPath}}</strong></div><div class="tiny code">Execution: {{.Request.ID}}</div></div><div><span class="tiny">Provider / mode</span><div>{{.Request.Provider}}</div><div class="tiny">{{.Request.Mode}}</div></div><div><span class="tiny">Branch</span><div>{{.Request.Branch}}</div><div class="tiny">Requested by {{.Request.RequestedBy}}</div></div><div><span class="tiny">Latest status</span>{{if .Latest}}<div><span class="badge {{statusClass .Latest.Status}}">{{.Latest.Status}}</span></div><div class="tiny">{{.Latest.CreatedAt}}</div>{{else}}<span class="badge off">unknown</span>{{end}}</div></div><div class="execution-timeline"><strong>Status history</strong>{{range .Events}}<div class="execution-event"><div><span class="badge {{statusClass .Status}}">{{.Status}}</span><div class="tiny">{{.CreatedAt}}</div></div><div><strong>{{.Actor}}</strong><div class="tiny code">{{.ID}}</div></div><div>{{.Message}}{{if .Evidence}}<div class="evidence">{{range $key, $value := .Evidence}}<span class="tiny code">{{$key}}={{$value}}</span>{{end}}</div>{{end}}</div></div>{{end}}</div></article>{{else}}<div class="empty">No approved GitOps executions have been queued.</div>{{end}}</div></section></div></main></div></body></html>`
+</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Delivery / GitOps Executions</div><div class="pagetitle">GitOps execution monitor</div><div class="subtitle">Append-only worker status and evidence for approved immutable previews.</div></div><div class="topactions"><a class="btn" href="/component-gitops-previews">Previews & approvals</a><a class="btn" href="/component-gitops-executions">Refresh</a>{{if .GitHubWritesEnabled}}<span class="badge warn">GitHub PR writes enabled</span>{{else}}<span class="badge off">Dry-run adapters</span>{{end}}</div></header><div class="content">{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .GitHubWritesEnabled}}<div class="notice">Approved GitHub pull-request executions can create a FleetAMP branch, commit the approved files and open a pull request. GitLab and Azure DevOps remain dry-run.</div>{{else}}<div class="notice">The current provider adapters validate the workflow and record evidence only. They do not create commits, branches, pull requests or deployments.</div>{{end}}<div class="metrics"><div class="metric"><div class="metriclabel">Executions</div><div class="metricvalue">{{.Total}}</div><div class="metricnote">Visible immutable requests</div></div><div class="metric"><div class="metriclabel">In progress</div><div class="metricvalue purple">{{.InProgress}}</div><div class="metricnote">Queued, claimed or executing</div></div><div class="metric"><div class="metriclabel">Open changes</div><div class="metricvalue purple">{{.OpenChanges}}</div><div class="metricnote">Provider pull requests open</div></div><div class="metric"><div class="metriclabel">Completed</div><div class="metricvalue green">{{.Completed}}</div><div class="metricnote">Dry-run success or merged</div></div><div class="metric"><div class="metriclabel">Failed / closed</div><div class="metricvalue">{{.Failed}}</div><div class="metricnote">Requires review</div></div><div class="metric"><div class="metriclabel">Retries</div><div class="metricvalue">{{.Retries}}</div><div class="metricnote">Administrator-authorized retries</div></div></div><section class="card"><div class="cardhead"><div><div class="cardtitle">Execution outbox</div><div class="cardsub">This page refreshes every 10 seconds. Each timeline is immutable audit evidence.</div></div></div><div class="cardbody execution-list">{{range .Executions}}<article class="execution-card"><div class="execution-summary"><div><span class="tiny">Repository path</span><div><strong>{{.Request.RepositoryPath}}</strong></div><div class="tiny code">Execution: {{.Request.ID}}</div></div><div><span class="tiny">Provider / mode</span><div>{{.Request.Provider}}</div><div class="tiny">{{.Request.Mode}}</div></div><div><span class="tiny">Branch</span><div>{{.Request.Branch}}</div><div class="tiny">Requested by {{.Request.RequestedBy}}</div></div><div><span class="tiny">Latest status</span>{{if .Latest}}<div><span class="badge {{statusClass .Latest.Status}}">{{.Latest.Status}}</span></div><div class="tiny">{{.Latest.CreatedAt}}</div>{{else}}<span class="badge off">unknown</span>{{end}}</div></div><div class="execution-timeline"><strong>Status history</strong>{{range .Events}}<div class="execution-event"><div><span class="badge {{statusClass .Status}}">{{.Status}}</span><div class="tiny">{{.CreatedAt}}</div></div><div><strong>{{.Actor}}</strong><div class="tiny code">{{.ID}}</div></div><div>{{.Message}}{{if .Evidence}}<div class="evidence">{{range $key, $value := .Evidence}}<span class="tiny code">{{$key}}={{$value}}</span>{{end}}</div>{{end}}</div></div>{{end}}</div></article>{{else}}<div class="empty">No approved GitOps executions have been queued.</div>{{end}}</div></section></div></main></div></body></html>`
 
 var gitOpsExecutionsPage = template.Must(template.New("gitops-executions").Funcs(template.FuncMap{
 	"statusClass": gitOpsExecutionStatusClass,
@@ -99,6 +100,7 @@ func registerGitOpsExecutionRoutes(mux *http.ServeMux, executions storage.GitOps
 			return
 		}
 		visible := make([]gitOpsExecutionView, 0, len(rows))
+		inProgress, openChanges, completed, failed, retries := 0, 0, 0, 0, 0
 		for _, execution := range rows {
 			preview, err := previews.Get(r.Context(), execution.PreviewID)
 			if err != nil || !canAccessGitOpsPreview(auth, r, preview, plans, requests, groupStore) {
@@ -110,9 +112,22 @@ func registerGitOpsExecutionRoutes(mux *http.ServeMux, executions storage.GitOps
 				return
 			}
 			view := gitOpsExecutionView{Request: execution, Events: events, Attempt: gitOpsExecutionAttempt(events) + 1}
+			if attempts := gitOpsExecutionAttempt(events); attempts > 1 {
+				retries += attempts - 1
+			}
 			if len(events) > 0 {
 				view.Latest = events[len(events)-1]
 				view.CanRetry = view.Latest.Status == lifecycle.GitOpsExecutionFailed && view.Attempt <= maxGitOpsExecutionAttempts
+				switch view.Latest.Status {
+				case lifecycle.GitOpsExecutionQueued, lifecycle.GitOpsExecutionClaimed, lifecycle.GitOpsExecutionExecuting:
+					inProgress++
+				case lifecycle.GitOpsChangeOpen:
+					openChanges++
+				case lifecycle.GitOpsExecutionSucceeded, lifecycle.GitOpsChangeMerged:
+					completed++
+				case lifecycle.GitOpsExecutionFailed, lifecycle.GitOpsChangeClosed:
+					failed++
+				}
 			}
 			visible = append(visible, view)
 		}
@@ -128,7 +143,7 @@ func registerGitOpsExecutionRoutes(mux *http.ServeMux, executions storage.GitOps
 			message = "Failed execution queued for an administrator-approved retry."
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := gitOpsExecutionsPage.Execute(w, gitOpsExecutionMonitorView{Page: "deployments", Executions: visible, Message: message, GitHubWritesEnabled: boolEnv("FLEETAMP_GITOPS_GITHUB_WRITES_ENABLED"), IsAdmin: auth == nil || currentRole(auth, r) == roleAdmin}); err != nil {
+		if err := gitOpsExecutionsPage.Execute(w, gitOpsExecutionMonitorView{Page: "deployments", Executions: visible, Message: message, GitHubWritesEnabled: boolEnv("FLEETAMP_GITOPS_GITHUB_WRITES_ENABLED"), IsAdmin: auth == nil || currentRole(auth, r) == roleAdmin, Total: len(visible), InProgress: inProgress, OpenChanges: openChanges, Completed: completed, Failed: failed, Retries: retries}); err != nil {
 			internalServerError(w, err)
 		}
 	})

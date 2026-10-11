@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"net"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -49,6 +51,15 @@ func NewConnection(v Connection, createdBy string) (*Connection, error) {
 	if v.Provider == AzureDevOps && v.Project == "" {
 		return nil, errors.New("Azure DevOps project is required")
 	}
+	if v.BaseURL != "" {
+		parsed, err := url.Parse(v.BaseURL)
+		if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, errors.New("base URL must be an absolute provider URL without credentials, query, or fragment")
+		}
+		if parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackProviderHost(parsed.Hostname())) {
+			return nil, errors.New("base URL must use HTTPS; HTTP is allowed only for loopback development")
+		}
+	}
 	switch v.Mode {
 	case ModeGitManaged, ModePullRequest, ModeDirectCommit, ModePrimarySync, ModeObserveOnly:
 	default:
@@ -82,6 +93,10 @@ func NewConnection(v Connection, createdBy string) (*Connection, error) {
 	v.CreatedBy = createdBy
 	v.CreatedAt = time.Now().UTC()
 	return &v, nil
+}
+
+func isLoopbackProviderHost(host string) bool {
+	return strings.EqualFold(host, "localhost") || (net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback())
 }
 
 func (v *Connection) ResolvePath(relative string) (string, error) {

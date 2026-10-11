@@ -87,6 +87,25 @@ func TestDescribeAuditAction(t *testing.T) {
 	}
 }
 
+func TestDescribeGitOpsAndIntegrationAuditActions(t *testing.T) {
+	tests := []struct{ path, form, action, resource, id string }{
+		{"/settings/integrations", "action=test_connection&connection_id=connection-1", "integration.validate", "integration_connection", "connection-1"},
+		{"/component-gitops-previews", "action=queue_execution&approval_id=approval-1", "gitops.queue_execution", "gitops_preview", "approval-1"},
+		{"/component-gitops-executions", "action=retry&execution_id=execution-1", "gitops.execution_retry", "gitops_execution", "execution-1"},
+	}
+	for _, test := range tests {
+		request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.form))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		action, resource, id := describeAuditAction(request)
+		if action != test.action || resource != test.resource || id != test.id {
+			t.Errorf("%s: got %q %q %q", test.path, action, resource, id)
+		}
+		if !auditCategoryMatches("gitops", action) {
+			t.Errorf("%s is missing from GitOps audit category", action)
+		}
+	}
+}
+
 func TestDeploymentAuditDetailsRecordsReviewerAndReason(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/groups/group-1", strings.NewReader(
 		"action=request_deployment&assigned_reviewer=owner-one&change_reason=Enable+the+validated+metrics+pipeline"))

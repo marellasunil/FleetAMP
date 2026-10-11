@@ -16,14 +16,15 @@ type integrationConnectionRow struct {
 }
 
 type integrationsView struct {
-	Page           string
-	Providers      []integrations.Provider
-	Connections    []integrationConnectionRow
-	Groups         []*groups.Group
-	Message, Error string
+	Page                                     string
+	Providers                                []integrations.Provider
+	Connections                              []integrationConnectionRow
+	Groups                                   []*groups.Group
+	Message, Error                           string
+	Total, Passed, Failed, Expired, Untested int
 }
 
-const integrationsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Integrations · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `.integration-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}@media(max-width:1050px){.integration-grid{grid-template-columns:1fr}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Administration / Integrations</div><div class="pagetitle">Git Integrations</div><div class="subtitle">Scope existing repositories for governed delivery.</div></div><span class="badge off">No provider API calls</span></header><div class="content">{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Register repository connection</div><div class="cardsub">Stores scope and a secret reference only; never a raw token.</div></div></div><div class="cardbody"><form method="post"><div class="form-grid"><label class="field">Name<input class="input" name="name" required></label><label class="field">Provider<select class="select" name="provider" required><option value="" selected disabled>Choose provider…</option>{{range .Providers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label class="field">Base URL<input class="input" name="base_url" placeholder="Optional for provider cloud"></label><label class="field">Organization / group<input class="input" name="organization" required></label><label class="field">Azure DevOps project<input class="input" name="project"></label><label class="field">Existing repository<input class="input" name="repository" required></label><label class="field">Branch<input class="input" name="branch" value="main" required></label><label class="field">Allowed root<input class="input" name="allowed_root" value="fleetamp/groups" required></label><label class="field">Mode<select class="select" name="mode"><option value="fleetamp-pull-request">FleetAMP pull request</option><option value="git-managed">Git managed</option><option value="observe-only">Observe only</option><option value="fleetamp-direct-commit">Direct commit</option><option value="fleetamp-primary-sync">FleetAMP primary sync</option></select></label><label class="field">Credential reference<input class="input" name="credential_ref" required placeholder="secret://github/production"></label><fieldset class="field full"><legend>Allowed FleetAMP groups</legend>{{range .Groups}}<label><input type="checkbox" name="group_ids" value="{{.ID}}"> {{.Name}}</label>{{else}}<span class="tiny">Create a group first.</span>{{end}}</fieldset><label class="field"><input type="checkbox" name="enabled" value="true" checked> Enabled</label></div>
+const integrationsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Integrations · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `.integration-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}@media(max-width:1050px){.integration-grid{grid-template-columns:1fr}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Administration / Integrations</div><div class="pagetitle">Git Integrations</div><div class="subtitle">Scope existing repositories for governed delivery.</div></div><span class="badge off">No provider API calls</span></header><div class="content">{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}<div class="metrics"><div class="metric"><div class="metriclabel">Connections</div><div class="metricvalue">{{.Total}}</div><div class="metricnote">Immutable repository scopes</div></div><div class="metric"><div class="metriclabel">Validated</div><div class="metricvalue green">{{.Passed}}</div><div class="metricnote">Passed and not expired</div></div><div class="metric"><div class="metriclabel">Needs attention</div><div class="metricvalue purple">{{.Failed}}</div><div class="metricnote">Latest validation failed</div></div><div class="metric"><div class="metriclabel">Expired / untested</div><div class="metricvalue">{{.Expired}} / {{.Untested}}</div><div class="metricnote">Must test before execution</div></div></div><section class="card"><div class="cardhead"><div><div class="cardtitle">Register repository connection</div><div class="cardsub">Stores scope and a secret reference only; never a raw token.</div></div></div><div class="cardbody"><form method="post"><div class="form-grid"><label class="field">Name<input class="input" name="name" required></label><label class="field">Provider<select class="select" name="provider" required><option value="" selected disabled>Choose provider…</option>{{range .Providers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label class="field">Base URL<input class="input" name="base_url" placeholder="Optional for provider cloud"></label><label class="field">Organization / group<input class="input" name="organization" required></label><label class="field">Azure DevOps project<input class="input" name="project"></label><label class="field">Existing repository<input class="input" name="repository" required></label><label class="field">Branch<input class="input" name="branch" value="main" required></label><label class="field">Allowed root<input class="input" name="allowed_root" value="fleetamp/groups" required></label><label class="field">Mode<select class="select" name="mode"><option value="fleetamp-pull-request">FleetAMP pull request</option><option value="git-managed">Git managed</option><option value="observe-only">Observe only</option><option value="fleetamp-direct-commit">Direct commit</option><option value="fleetamp-primary-sync">FleetAMP primary sync</option></select></label><label class="field">Credential reference<input class="input" name="credential_ref" required placeholder="secret://github/production"></label><fieldset class="field full"><legend>Allowed FleetAMP groups</legend>{{range .Groups}}<label><input type="checkbox" name="group_ids" value="{{.ID}}"> {{.Name}}</label>{{else}}<span class="tiny">Create a group first.</span>{{end}}</fieldset><label class="field"><input type="checkbox" name="enabled" value="true" checked> Enabled</label></div>
 <div class="provider-guidance" aria-live="polite">
 <article class="guidance-card guidance-github"><strong>GitHub connection requirements</strong><div class="tiny">Use an existing owner and repository. Store the credential externally and enter only its secret:// reference. Observe mode needs repository read access; pull-request workflows also need contents write and pull-request access.</div></article>
 <article class="guidance-card guidance-gitlab"><strong>GitLab connection requirements</strong><div class="tiny">Use an existing group or namespace and project repository. Store the access token externally and enter only its secret:// reference. Grant repository read access, plus write and merge-request access only when the selected mode requires it.</div></article>
@@ -138,6 +139,8 @@ func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog
 			return
 		}
 		connectionRows := make([]integrationConnectionRow, 0, len(rows))
+		passed, failed, expired, untested := 0, 0, 0, 0
+		now := time.Now().UTC()
 		for _, connection := range rows {
 			validation, validationErr := validations.Latest(r.Context(), connection.ID)
 			if validationErr != nil && validationErr != storage.ErrIntegrationValidationNotFound {
@@ -145,6 +148,16 @@ func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog
 				return
 			}
 			connectionRows = append(connectionRows, integrationConnectionRow{Connection: connection, Validation: validation})
+			switch {
+			case validation == nil:
+				untested++
+			case validation.Status == "failed":
+				failed++
+			case !validation.Usable(now):
+				expired++
+			default:
+				passed++
+			}
 		}
 		groupRows, e := groupStore.List(r.Context())
 		if e != nil {
@@ -158,7 +171,7 @@ func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog
 			message = "Connection test completed and immutable validation evidence was recorded."
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if e := integrationsPage.Execute(w, integrationsView{Page: "settings-integrations", Providers: catalog.List(), Connections: connectionRows, Groups: groupRows, Message: message, Error: errorMessage}); e != nil {
+		if e := integrationsPage.Execute(w, integrationsView{Page: "settings-integrations", Providers: catalog.List(), Connections: connectionRows, Groups: groupRows, Message: message, Error: errorMessage, Total: len(rows), Passed: passed, Failed: failed, Expired: expired, Untested: untested}); e != nil {
 			internalServerError(w, e)
 		}
 	})

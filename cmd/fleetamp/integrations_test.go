@@ -59,7 +59,7 @@ func TestIntegrationsPageShowsSafetyBoundary(t *testing.T) {
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), db.IntegrationConnections(), db.IntegrationValidations(), &integrations.ConnectionValidator{}, 24*time.Hour, db.Groups(), nil)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/settings/integrations", nil))
-	for _, want := range []string{"GitHub", "GitLab", "Azure DevOps", "Register repository connection", "Governed provider access", "secret reference only"} {
+	for _, want := range []string{"GitHub", "GitLab", "Azure DevOps", "Connections", "Validated", "Expired / untested", "Register repository connection", "Governed provider access", "secret reference only"} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Errorf("missing %q", want)
 		}

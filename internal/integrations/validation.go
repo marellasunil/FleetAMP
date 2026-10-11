@@ -58,8 +58,9 @@ type SecretResolver interface {
 }
 
 type ConnectionValidator struct {
-	Secrets SecretResolver
-	Client  *http.Client
+	Secrets      SecretResolver
+	Client       *http.Client
+	AllowedHosts []string
 }
 
 func (v *ConnectionValidator) Validate(ctx context.Context, connection *Connection) (map[string]string, error) {
@@ -68,6 +69,9 @@ func (v *ConnectionValidator) Validate(ctx context.Context, connection *Connecti
 	}
 	if v.Secrets == nil {
 		return nil, errors.New("credential resolver is unavailable")
+	}
+	if err := v.validateProviderHost(connection); err != nil {
+		return nil, err
 	}
 	token, err := v.Secrets.Resolve(ctx, connection.CredentialRef)
 	if err != nil {
@@ -87,6 +91,26 @@ func (v *ConnectionValidator) Validate(ctx context.Context, connection *Connecti
 	default:
 		return nil, errors.New("unsupported Git provider")
 	}
+}
+
+func (v *ConnectionValidator) validateProviderHost(connection *Connection) error {
+	if strings.TrimSpace(connection.BaseURL) == "" {
+		return nil
+	}
+	parsed, err := url.Parse(connection.BaseURL)
+	if err != nil || parsed.Hostname() == "" {
+		return errors.New("provider base URL is invalid")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if isLoopbackProviderHost(host) {
+		return nil
+	}
+	for _, allowed := range v.AllowedHosts {
+		if strings.EqualFold(strings.TrimSpace(allowed), host) {
+			return nil
+		}
+	}
+	return fmt.Errorf("self-hosted provider %q is not present in FLEETAMP_INTEGRATION_ALLOWED_HOSTS", host)
 }
 
 func validateGitHub(ctx context.Context, client *http.Client, c *Connection, token string) (map[string]string, error) {
