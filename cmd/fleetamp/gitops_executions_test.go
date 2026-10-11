@@ -60,7 +60,7 @@ func TestGitOpsExecutionMonitorRendersLatestStatusAndEvidence(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	for _, want := range []string{"GitOps execution monitor", "succeeded", "Dry-run provider validation succeeded", "adapter_mode=dry-run", "repository_write=false", "without writing to Git"} {
+	for _, want := range []string{"GitOps execution monitor", "Executions", "Completed", "Retries", "succeeded", "Dry-run provider validation succeeded", "adapter_mode=dry-run", "repository_write=false", "without writing to Git"} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Errorf("missing %q", want)
 		}
