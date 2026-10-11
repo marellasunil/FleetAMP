@@ -41,11 +41,17 @@ func (s *AgentStore) Upsert(ctx context.Context, agent *agents.ManagedAgent) err
 	defer s.mu.Unlock()
 	copy := cloneAgent(agent)
 	if previous, ok := s.agents[agent.InstanceUID]; ok {
+		if copy.DisplayName == "" {
+			copy.DisplayName = previous.DisplayName
+		}
 		if copy.FirstSeen.IsZero() {
 			copy.FirstSeen = previous.FirstSeen
 		}
 	} else if copy.FirstSeen.IsZero() {
 		copy.FirstSeen = copy.LastSeen
+	}
+	if copy.DisplayName != "" {
+		copy.Name = copy.DisplayName
 	}
 	s.agents[agent.InstanceUID] = copy
 	return nil

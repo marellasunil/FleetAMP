@@ -71,9 +71,12 @@ type ManagedAgent struct {
 	InstanceUID string    `json:"instance_uid"`
 	Type        AgentType `json:"type"`
 
-	Name     string `json:"name,omitempty"`
-	Hostname string `json:"hostname,omitempty"`
-	Version  string `json:"version,omitempty"`
+	Name string `json:"name,omitempty"`
+	// DisplayName is an optional FleetAMP-managed alias. It is deliberately
+	// separate from protocol identity and reported host/service metadata.
+	DisplayName string `json:"display_name,omitempty"`
+	Hostname    string `json:"hostname,omitempty"`
+	Version     string `json:"version,omitempty"`
 
 	Connected bool            `json:"connected"`
 	Healthy   bool            `json:"healthy"`

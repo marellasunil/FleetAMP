@@ -35,3 +35,26 @@ func TestAgentStoreUpsertGetListDelete(t *testing.T) {
 		t.Fatalf("expected ErrAgentNotFound, got %v", err)
 	}
 }
+
+func TestAgentStorePreservesDisplayNameAcrossProtocolUpdates(t *testing.T) {
+	ctx := context.Background()
+	store := NewAgentStore()
+	if err := store.Upsert(ctx, &agents.ManagedAgent{
+		InstanceUID: "agent-1", Name: "payments-prod-collector-01",
+		DisplayName: "payments-prod-collector-01",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(ctx, &agents.ManagedAgent{
+		InstanceUID: "agent-1", Name: "reported-hostname", Connected: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(ctx, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DisplayName != "payments-prod-collector-01" || got.Name != got.DisplayName {
+		t.Fatalf("display name was not preserved: %#v", got)
+	}
+}
