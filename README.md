@@ -12,6 +12,8 @@ Documentation: [fleetamp.marellasunil.com](https://fleetamp.marellasunil.com)
 
 Local Docker test with FleetAMP and an OpAMP-managed Collector: [Compose lab](deploy/compose/README.md). The lab builds the current checkout and requires a local Supervisor image; it is not part of the packaged release archives.
 
+Before publishing v0.3.0, run the [local release verification](docs/testing-v0.3.0.md) to test the Go quality gates, binary build, health/readiness endpoints, SQLite migration and restart persistence without enabling real Git writes.
+
 ## Vision
 
 FleetAMP aims to provide a vendor-neutral management layer for telemetry-agent fleets while keeping protocol, storage, source-control, CMDB, identity, and UI concerns isolated behind stable interfaces.
