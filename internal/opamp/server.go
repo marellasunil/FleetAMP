@@ -311,18 +311,23 @@ func managedAgentFromMessage(msg *protobufs.AgentToServer) *agents.ManagedAgent 
 // mergeAgent preserves previously known values when an OpAMP incremental message
 // omits fields such as health, metadata, or capabilities.
 func mergeAgent(current, previous *agents.ManagedAgent) {
-	if current.Name == "" {
+	// Incremental health/config messages frequently omit AgentDescription. The
+	// generated UID fallback is not newly reported identity and must not replace
+	// the name resolved from an earlier complete description.
+	descriptionMissing := len(current.Attributes) == 0
+	if descriptionMissing || current.Name == "" {
 		current.Name = previous.Name
 	}
-	if current.Hostname == "" {
+	if descriptionMissing || current.Hostname == "" {
 		current.Hostname = previous.Hostname
 	}
-	if current.Version == "" {
+	if descriptionMissing || current.Version == "" {
 		current.Version = previous.Version
 	}
-	if len(current.Attributes) == 0 {
+	if descriptionMissing {
 		current.Attributes = previous.Attributes
 	}
+	current.DisplayName = previous.DisplayName
 	if len(current.Capabilities) == 0 {
 		current.Capabilities = previous.Capabilities
 	}

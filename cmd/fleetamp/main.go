@@ -31,8 +31,10 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -58,6 +60,8 @@ type healthResponse struct {
 	Service string `json:"service"`
 	Time    string `json:"time"`
 }
+
+var agentDisplayNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // main assembles FleetAMP's stores, authentication, OpAMP adapter, HTTP pages/APIs, background workers, and graceful shutdown.
 func main() {
@@ -484,6 +488,50 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		http.Redirect(w, r, "/agents?deleted=1", http.StatusSeeOther)
 	})
 
+	// /agents/{uid}/display-name assigns an operator-friendly alias without
+	// changing the immutable OpAMP InstanceUID or reported stable identity.
+	mux.HandleFunc("POST /agents/{uid}/display-name", func(w http.ResponseWriter, r *http.Request) {
+		if currentRole(auth, r) != roleAdmin {
+			http.Error(w, "forbidden: only an Admin can rename a collector", http.StatusForbidden)
+			return
+		}
+		uid := strings.TrimSpace(r.PathValue("uid"))
+		agent, err := agentStore.Get(r.Context(), uid)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		displayName := strings.ToLower(strings.TrimSpace(r.FormValue("display_name")))
+		if len(displayName) < 3 || len(displayName) > 63 || !agentDisplayNamePattern.MatchString(displayName) {
+			http.Redirect(w, r, "/agents/"+uid+"?error="+url.QueryEscape("Display name must be 3-63 lowercase letters, numbers or hyphen-separated words."), http.StatusSeeOther)
+			return
+		}
+		items, err := agentStore.List(r.Context())
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		for _, candidate := range items {
+			if candidate.InstanceUID != uid && (strings.EqualFold(candidate.DisplayName, displayName) || strings.EqualFold(candidate.Name, displayName)) {
+				http.Redirect(w, r, "/agents/"+uid+"?error="+url.QueryEscape("Display name is already assigned to another collector."), http.StatusSeeOther)
+				return
+			}
+		}
+		previous := *agent
+		agent.DisplayName = displayName
+		agent.Name = displayName
+		if err := agentStore.Upsert(r.Context(), agent); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			_ = agentStore.Upsert(r.Context(), &previous)
+			internalServerError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/agents/"+uid+"?renamed=1", http.StatusSeeOther)
+	})
+
 	// /api/v1/agent-events returns lifecycle events inside a requested time range.
 	mux.HandleFunc("/api/v1/agent-events", func(w http.ResponseWriter, r *http.Request) {
 		since := timeRangeStart(r.URL.Query().Get("range"))
@@ -517,7 +565,8 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			RemoteConfigSupported: hasCapability(agent.Capabilities, "accepts_remote_config"),
 			TargetingMetadata:     groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent),
 			EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields,
-			Error: r.URL.Query().Get("error"),
+			Error: r.URL.Query().Get("error"), DisplayNameSaved: r.URL.Query().Get("renamed") == "1",
+			CanManageIdentity: currentRole(auth, r) == roleAdmin,
 		}
 		view.Deployments, _ = deploymentStore.ListByAgent(r.Context(), uid, 10)
 		if allGroups, groupErr := groupStore.List(r.Context()); groupErr == nil {
@@ -623,6 +672,8 @@ type agentDetailView struct {
 	EditorError           string
 	CanEditConfiguration  bool
 	CanAdminBreakGlass    bool
+	CanManageIdentity     bool
+	DisplayNameSaved      bool
 	Error                 string
 }
 
