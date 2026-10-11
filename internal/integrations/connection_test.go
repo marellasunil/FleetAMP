@@ -19,3 +19,13 @@ func TestConnectionRejectsRawSecretsAndPathEscape(t *testing.T) {
 		t.Fatal("path escape accepted")
 	}
 }
+
+func TestConnectionRejectsUnsafeProviderBaseURL(t *testing.T) {
+	base := Connection{Name: "prod", Provider: GitHub, Organization: "acme", Repository: "telemetry", Branch: "main", AllowedRoot: "fleetamp/groups", Mode: ModePullRequest, CredentialRef: "secret://github/prod", GroupIDs: []string{"payments"}, Enabled: true}
+	for _, unsafe := range []string{"http://git.example.com", "https://user:password@git.example.com", "https://git.example.com?token=secret", "https://git.example.com#fragment"} {
+		base.BaseURL = unsafe
+		if _, err := NewConnection(base, "admin"); err == nil {
+			t.Errorf("unsafe base URL accepted: %s", unsafe)
+		}
+	}
+}

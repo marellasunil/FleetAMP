@@ -52,3 +52,15 @@ func TestConnectionValidationExpires(t *testing.T) {
 		t.Fatal("unexpected validation expiry behavior")
 	}
 }
+
+func TestConnectionValidationRequiresExplicitSelfHostedAllowlist(t *testing.T) {
+	connection := &Connection{BaseURL: "https://git.example.com"}
+	validator := &ConnectionValidator{}
+	if err := validator.validateProviderHost(connection); err == nil {
+		t.Fatal("unlisted self-hosted provider accepted")
+	}
+	validator.AllowedHosts = []string{"git.example.com"}
+	if err := validator.validateProviderHost(connection); err != nil {
+		t.Fatal(err)
+	}
+}
