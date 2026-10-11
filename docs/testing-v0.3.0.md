@@ -1,5 +1,24 @@
 # FleetAMP v0.3.0 local release verification
 
+This is the automated release gate. It complements, but does not replace, the
+[manual v0.3.0 E2E checklist](e2e-v0.3.0.md).
+
+## Verification coverage
+
+| Check | Purpose |
+| --- | --- |
+| `git diff --check` | Reject whitespace errors |
+| `go test ./...` | Run unit and integration tests |
+| `go vet ./...` | Run Go static analysis |
+| `go test -race ./...` | Detect data races |
+| Versioned binary build | Verify the release candidate compiles reproducibly |
+| `/health` and `/ready` | Verify runtime health and readiness |
+| SQLite start and restart | Verify schema initialization and persistence |
+| Optional existing database | Verify an upgrade using a copied v0.2 database |
+| Optional Docker build | Verify the release container can be built |
+
+## Quick start
+
 Run the release gate from a clean release branch before pushing it:
 
 ```bash
@@ -23,6 +42,18 @@ Include the Docker build when Docker is available:
 ```bash
 bash scripts/verify-v0.3.0.sh --docker
 ```
+
+## Expected result
+
+The final line must report:
+
+```text
+[verify-v0.3.0] PASS: tests, vet, binary build, health, readiness, database migration and restart
+```
+
+The script uses a temporary data directory, binds only to loopback and forces
+the GitOps worker and GitHub writes off. It removes its temporary files when it
+finishes.
 
 ## Existing v0.2 database upgrade
 
@@ -60,3 +91,11 @@ FLEETAMP_VERIFY_OPAMP_ADDR=127.0.0.1:14323 \
 ```
 
 Only loopback addresses are accepted by the verification script.
+
+## Release sequence after verification
+
+1. Complete the [manual E2E checklist](e2e-v0.3.0.md).
+2. Fix release-blocking defects and rerun the affected checks.
+3. Rerun this full verifier from the final release commit.
+4. Open and merge the release PR.
+5. Tag `v0.3.0` and publish release archives and checksums.

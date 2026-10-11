@@ -8,11 +8,12 @@ FleetAMP is a lightweight, self-hosted, open-source fleet management control pla
 
 FleetAMP is an independent community project and is not an official OpenTelemetry or Grafana project.
 
-Documentation: [fleetamp.marellasunil.com](https://fleetamp.marellasunil.com)
+Documentation: [documentation index](docs/README.md) and
+[fleetamp.marellasunil.com](https://fleetamp.marellasunil.com).
 
-Local Docker test with FleetAMP and an OpAMP-managed Collector: [Compose lab](deploy/compose/README.md). The lab builds the current checkout and requires a local Supervisor image; it is not part of the packaged release archives.
-
-Before publishing v0.3.0, run the [local release verification](docs/testing-v0.3.0.md) to test the Go quality gates, binary build, health/readiness endpoints, SQLite migration and restart persistence without enabling real Git writes.
+For local evaluation, use the [Compose lab](deploy/compose/README.md). Before
+publishing v0.3.0, run the [automated release verification](docs/testing-v0.3.0.md)
+and complete the [v0.3.0 E2E checklist](docs/e2e-v0.3.0.md).
 
 ## Vision
 
@@ -206,7 +207,7 @@ systemd examples and `scripts/install-user.sh`; read
 
 ## Build from source (contributors)
 
-Building from source requires Go 1.25+.
+Building from source requires Go 1.26+.
 
 ```bash
 go run ./cmd/fleetamp
