@@ -228,7 +228,7 @@ func (d *Database) initialize(ctx context.Context) error {
 			targets TEXT NOT NULL, requested_by TEXT NOT NULL, assigned_reviewer TEXT NOT NULL,
 			reason TEXT NOT NULL, status TEXT NOT NULL, reviewed_by TEXT NOT NULL DEFAULT '',
 			review_comment TEXT NOT NULL DEFAULT '', reviewed_at TEXT, error TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL
+			execution_results TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_membership_changes_created ON membership_changes(created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS component_lifecycle_requests (
@@ -383,6 +383,9 @@ func (d *Database) initialize(ctx context.Context) error {
 		return err
 	}
 	if err := d.ensureDeploymentRollbackColumns(ctx); err != nil {
+		return err
+	}
+	if err := d.ensureMembershipExecutionResultsColumn(ctx); err != nil {
 		return err
 	}
 	if err := d.ensureAdministratorRoleColumn(ctx); err != nil {
@@ -560,6 +563,20 @@ func (d *Database) ensureGroupOwnerRole(ctx context.Context) error {
 		}
 	}
 	return tx.Commit()
+}
+
+func (d *Database) ensureMembershipExecutionResultsColumn(ctx context.Context) error {
+	present, err := sqliteColumnExists(ctx, d.db, "membership_changes", "execution_results")
+	if err != nil {
+		return err
+	}
+	if present {
+		return nil
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE membership_changes ADD COLUMN execution_results TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		return fmt.Errorf("add membership_changes.execution_results column: %w", err)
+	}
+	return nil
 }
 
 func (d *Database) ensureDeploymentRollbackColumns(ctx context.Context) error {

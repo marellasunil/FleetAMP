@@ -15,11 +15,18 @@ import (
 
 func TestMembershipPageExposesGovernedCollectorOperations(t *testing.T) {
 	var body bytes.Buffer
-	err := membershipPage.Execute(&body, membershipView{Group: &groups.Group{ID: "payments", Name: "Payments"}, CanManage: true})
+	err := membershipPage.Execute(&body, membershipView{
+		Group: &groups.Group{ID: "payments", Name: "Payments"},
+		Requests: []*configs.MembershipChange{{
+			Targets:          []configs.MembershipTarget{{AgentInstanceUID: "agent-1"}},
+			ExecutionResults: []configs.MembershipExecutionResult{{AgentInstanceUID: "agent-1", AgentName: "collector-1", Status: configs.MembershipTargetComplete}},
+		}},
+		CanManage: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Assign available Collectors", "Remove from this group", "Move to another group", "Restore pre-group configuration", "Destination configuration", "Impact preview", "membership-preview.js", "Membership history"} {
+	for _, text := range []string{"Assign available Collectors", "Remove from this group", "Move to another group", "Restore pre-group configuration", "Destination configuration", "Impact preview", "membership-preview.js", "Membership history", "View execution evidence"} {
 		if !strings.Contains(body.String(), text) {
 			t.Errorf("page missing %q", text)
 		}
@@ -58,7 +65,8 @@ func TestRollbackMembershipBatchRestoresMembershipAndConfiguration(t *testing.T)
 		return nil
 	}
 	cause := errors.New("second Collector failed")
-	err := rollbackMembershipBatch(ctx, &configs.MembershipChange{ID: "request-1"}, []*membershipExecutionCheckpoint{{
+	change := &configs.MembershipChange{ID: "request-1", ExecutionResults: []configs.MembershipExecutionResult{{AgentInstanceUID: "agent-1", AgentName: "collector-1", Status: configs.MembershipTargetComplete}}}
+	err := rollbackMembershipBatch(ctx, change, []*membershipExecutionCheckpoint{{
 		agent: changedAgent(t, agentStore, "agent-1"), original: original, previousConfigurationID: previous.ID, configurationChanged: true, membershipChanged: true,
 	}}, agentStore, configStore, deliver, t.TempDir(), cause)
 	if err == nil || !strings.Contains(err.Error(), "all previously changed Collectors were restored") {
@@ -73,6 +81,9 @@ func TestRollbackMembershipBatchRestoresMembershipAndConfiguration(t *testing.T)
 	}
 	if deliveredID != previous.ID || deliveredAction != configs.DeploymentActionRollback {
 		t.Fatalf("rollback delivery=%q action=%q", deliveredID, deliveredAction)
+	}
+	if result := change.ExecutionResults[0]; result.Status != configs.MembershipTargetRestored || result.RollbackConfigID != previous.ID || result.CompletedAt == nil {
+		t.Fatalf("rollback evidence=%#v", result)
 	}
 }
 

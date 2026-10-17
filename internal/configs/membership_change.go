@@ -11,18 +11,24 @@ import (
 type MembershipOperation string
 type RemovalPolicy string
 type MembershipStatus string
+type MembershipExecutionStatus string
 
 const (
-	MembershipAssign    MembershipOperation = "assign"
-	MembershipRemove    MembershipOperation = "remove"
-	MembershipMove      MembershipOperation = "move"
-	RemovalKeep         RemovalPolicy       = "keep_current"
-	RemovalRestore      RemovalPolicy       = "restore_pre_group"
-	MembershipPending   MembershipStatus    = "pending_approval"
-	MembershipExecuting MembershipStatus    = "executing"
-	MembershipCompleted MembershipStatus    = "completed"
-	MembershipRejected  MembershipStatus    = "rejected"
-	MembershipFailed    MembershipStatus    = "failed"
+	MembershipAssign         MembershipOperation       = "assign"
+	MembershipRemove         MembershipOperation       = "remove"
+	MembershipMove           MembershipOperation       = "move"
+	RemovalKeep              RemovalPolicy             = "keep_current"
+	RemovalRestore           RemovalPolicy             = "restore_pre_group"
+	MembershipPending        MembershipStatus          = "pending_approval"
+	MembershipExecuting      MembershipStatus          = "executing"
+	MembershipCompleted      MembershipStatus          = "completed"
+	MembershipRejected       MembershipStatus          = "rejected"
+	MembershipFailed         MembershipStatus          = "failed"
+	MembershipTargetPending  MembershipExecutionStatus = "not_started"
+	MembershipTargetComplete MembershipExecutionStatus = "completed"
+	MembershipTargetFailed   MembershipExecutionStatus = "failed"
+	MembershipTargetRestored MembershipExecutionStatus = "restored"
+	MembershipRollbackFailed MembershipExecutionStatus = "rollback_failed"
 )
 
 type MembershipTarget struct {
@@ -32,25 +38,36 @@ type MembershipTarget struct {
 	PreviousConfigurationID string            `json:"previous_configuration_id,omitempty"`
 }
 
+type MembershipExecutionResult struct {
+	AgentInstanceUID string                    `json:"agent_instance_uid"`
+	AgentName        string                    `json:"agent_name"`
+	Status           MembershipExecutionStatus `json:"status"`
+	ConfigurationID  string                    `json:"configuration_id,omitempty"`
+	RollbackConfigID string                    `json:"rollback_configuration_id,omitempty"`
+	Error            string                    `json:"error,omitempty"`
+	CompletedAt      *time.Time                `json:"completed_at,omitempty"`
+}
+
 type MembershipChange struct {
-	ID                    string              `json:"id"`
-	Operation             MembershipOperation `json:"operation"`
-	SourceGroupID         string              `json:"source_group_id,omitempty"`
-	SourceGroupName       string              `json:"source_group_name,omitempty"`
-	TargetGroupID         string              `json:"target_group_id,omitempty"`
-	TargetGroupName       string              `json:"target_group_name,omitempty"`
-	RemovalPolicy         RemovalPolicy       `json:"removal_policy,omitempty"`
-	TargetConfigurationID string              `json:"target_configuration_id,omitempty"`
-	Targets               []MembershipTarget  `json:"targets"`
-	RequestedBy           string              `json:"requested_by"`
-	AssignedReviewer      string              `json:"assigned_reviewer"`
-	Reason                string              `json:"reason"`
-	Status                MembershipStatus    `json:"status"`
-	ReviewedBy            string              `json:"reviewed_by,omitempty"`
-	ReviewComment         string              `json:"review_comment,omitempty"`
-	ReviewedAt            *time.Time          `json:"reviewed_at,omitempty"`
-	Error                 string              `json:"error,omitempty"`
-	CreatedAt             time.Time           `json:"created_at"`
+	ID                    string                      `json:"id"`
+	Operation             MembershipOperation         `json:"operation"`
+	SourceGroupID         string                      `json:"source_group_id,omitempty"`
+	SourceGroupName       string                      `json:"source_group_name,omitempty"`
+	TargetGroupID         string                      `json:"target_group_id,omitempty"`
+	TargetGroupName       string                      `json:"target_group_name,omitempty"`
+	RemovalPolicy         RemovalPolicy               `json:"removal_policy,omitempty"`
+	TargetConfigurationID string                      `json:"target_configuration_id,omitempty"`
+	Targets               []MembershipTarget          `json:"targets"`
+	ExecutionResults      []MembershipExecutionResult `json:"execution_results,omitempty"`
+	RequestedBy           string                      `json:"requested_by"`
+	AssignedReviewer      string                      `json:"assigned_reviewer"`
+	Reason                string                      `json:"reason"`
+	Status                MembershipStatus            `json:"status"`
+	ReviewedBy            string                      `json:"reviewed_by,omitempty"`
+	ReviewComment         string                      `json:"review_comment,omitempty"`
+	ReviewedAt            *time.Time                  `json:"reviewed_at,omitempty"`
+	Error                 string                      `json:"error,omitempty"`
+	CreatedAt             time.Time                   `json:"created_at"`
 }
 
 func NewMembershipChange(value MembershipChange) (*MembershipChange, error) {
