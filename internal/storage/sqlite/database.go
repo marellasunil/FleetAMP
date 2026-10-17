@@ -36,6 +36,11 @@ func Open(ctx context.Context, path string) (*Database, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
+	// SQLite PRAGMAs such as busy_timeout are connection-local. Keep one
+	// connection for this embedded write-heavy control-plane database so
+	// initialization settings also apply to OpAMP status updates.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	database := &Database{db: db}
 	if err := database.initialize(ctx); err != nil {
 		_ = db.Close()

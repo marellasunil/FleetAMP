@@ -9,7 +9,7 @@ capabilities:
   reports_available_components: true
 
 agent:
-  executable: /agent/otelcol-contrib
+  executable: /otelcol-contrib
   config_files:
     - /etc/otelcol/base.yaml
   description:
