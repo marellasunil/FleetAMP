@@ -100,6 +100,10 @@ type ManagedAgent struct {
 	// GroupFields are FleetAMP-owned overrides for flexible ownership identity.
 	GroupFields map[string]string `json:"group_fields,omitempty"`
 
+	// ExcludedGroupIDs prevents an explicitly removed Collector from being
+	// immediately reclaimed by the same dynamic membership rule.
+	ExcludedGroupIDs []string `json:"excluded_group_ids,omitempty"`
+
 	// ReportedGroupFields are group identity values reported by the agent through OpAMP.
 	ReportedGroupFields map[string]string `json:"reported_group_fields,omitempty"`
 

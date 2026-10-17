@@ -313,6 +313,7 @@ func executeMembershipChange(r *http.Request, value *configs.MembershipChange, g
 			return fmt.Errorf("%s no longer belongs to the approved source group", agent.Name)
 		}
 		oldFields := copyStringMap(agent.GroupFields)
+		oldExclusions := append([]string(nil), agent.ExcludedGroupIDs...)
 		if targetConfig != nil {
 			_, _, err = deliverConfigurationWithRollback(r.Context(), agent.InstanceUID, targetConfig, configs.DeploymentActionDeploy, snapshot.PreviousConfigurationID, value.ID, assignmentStore, deploymentStore, adapter)
 			if err != nil && !errors.Is(err, configs.ErrConfigurationCurrent) {
@@ -331,11 +332,16 @@ func executeMembershipChange(r *http.Request, value *configs.MembershipChange, g
 		}
 		if value.Operation == configs.MembershipRemove {
 			agent.GroupFields = map[string]string{}
+			if sourceGroup != nil && sourceGroup.MembershipRule != nil {
+				agent.ExcludedGroupIDs = appendUnique(agent.ExcludedGroupIDs, sourceGroup.ID)
+			}
 		} else {
 			agent.GroupFields = copyStringMap(targetGroup.Selector)
+			agent.ExcludedGroupIDs = removeString(agent.ExcludedGroupIDs, targetGroup.ID)
 		}
 		if err = agentStore.Upsert(r.Context(), agent); err != nil {
 			agent.GroupFields = oldFields
+			agent.ExcludedGroupIDs = oldExclusions
 			return err
 		}
 	}

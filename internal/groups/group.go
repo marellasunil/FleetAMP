@@ -15,14 +15,15 @@ import (
 )
 
 type Group struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description,omitempty"`
-	Selector    map[string]string `json:"selector"`
-	Owners      []string          `json:"owners,omitempty"`
-	Enabled     bool              `json:"enabled"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	Description    string            `json:"description,omitempty"`
+	Selector       map[string]string `json:"selector"`
+	MembershipRule *MembershipRule   `json:"membership_rule,omitempty"`
+	Owners         []string          `json:"owners,omitempty"`
+	Enabled        bool              `json:"enabled"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
 }
 
 // New validates input, assigns an identifier, and creates an enabled selector-based group.
@@ -46,16 +47,23 @@ func Matches(group *Group, agent *agents.ManagedAgent) bool {
 // MatchesIdentity checks assignment identity even when a group is disabled.
 // It is used for safety checks such as preventing deletion of assigned groups.
 func MatchesIdentity(group *Group, agent *agents.ManagedAgent) bool {
-	if group == nil || agent == nil || len(group.Selector) == 0 {
+	if group == nil || agent == nil {
 		return false
 	}
-	metadata := GroupIdentity(agent)
-	for key, expected := range group.Selector {
-		if metadata[key] != expected {
-			return false
+	if len(group.Selector) > 0 {
+		metadata := GroupIdentity(agent)
+		exact := true
+		for key, expected := range group.Selector {
+			if metadata[key] != expected {
+				exact = false
+				break
+			}
+		}
+		if exact {
+			return true
 		}
 	}
-	return true
+	return DynamicMatches(group, agent)
 }
 
 // GroupIdentity returns the controlled group identity used for membership.

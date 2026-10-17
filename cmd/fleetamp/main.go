@@ -201,8 +201,10 @@ func main() {
 					event.Agent.DisconnectedAt = &now
 				}
 				if previous != nil {
+					event.Agent.DisplayName = previous.DisplayName
 					event.Agent.Labels = copyStringMap(previous.Labels)
 					event.Agent.GroupFields = copyStringMap(previous.GroupFields)
+					event.Agent.ExcludedGroupIDs = append([]string(nil), previous.ExcludedGroupIDs...)
 				}
 				if previous != nil && !previous.FirstSeen.IsZero() {
 					event.Agent.FirstSeen = previous.FirstSeen
@@ -213,6 +215,13 @@ func main() {
 					slog.Error("failed to store agent", "component", "agents", "event", "store_failed", "agent_uid", event.Agent.InstanceUID, "error", err)
 				} else if err := saveAgentSnapshot(ctx, agentStore, dataDir); err != nil && ctx.Err() == nil {
 					slog.Error("failed to save agent snapshot", "component", "agents", "event", "snapshot_save_failed", "error", err)
+				} else if event.Type == "connected" || event.Type == "updated" {
+					group, reconcileErr := reconcileDynamicGroupMembership(ctx, event.Agent, groupStore, agentStore, configStore, groupRequestStore, assignmentStore, deploymentStore, adapter, dataDir)
+					if reconcileErr != nil && ctx.Err() == nil {
+						slog.Warn("dynamic group membership not applied", "component", "groups", "event", "dynamic_membership_failed", "agent_uid", event.Agent.InstanceUID, "error", reconcileErr)
+					} else if group != nil {
+						slog.Info("dynamic group membership applied", "component", "groups", "event", "dynamic_membership_applied", "agent_uid", event.Agent.InstanceUID, "group_id", group.ID, "group_name", group.Name)
+					}
 				}
 				if event.Type == "connected" || event.Type == "disconnected" {
 					_ = eventStore.Append(ctx, &events.AgentEvent{AgentInstanceUID: event.Agent.InstanceUID, AgentName: event.Agent.Name, Type: events.Type(event.Type), Timestamp: now})
