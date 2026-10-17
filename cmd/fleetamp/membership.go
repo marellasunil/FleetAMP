@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
@@ -289,6 +290,13 @@ func registerMembershipRoutes(mux *http.ServeMux, changes storage.MembershipChan
 					return
 				}
 				execErr := executeMembershipChange(r, value, groupStore, agentStore, configStore, assignmentStore, deploymentStore, adapter, dataDir)
+				if evidenceErr := changes.SaveExecutionResults(r.Context(), value.ID, value.ExecutionResults); evidenceErr != nil {
+					if execErr == nil {
+						execErr = fmt.Errorf("persist execution evidence: %w", evidenceErr)
+					} else {
+						execErr = errors.Join(execErr, fmt.Errorf("persist execution evidence: %w", evidenceErr))
+					}
+				}
 				if execErr != nil {
 					_ = changes.Update(r.Context(), value.ID, configs.MembershipExecuting, configs.MembershipFailed, "", "", execErr.Error())
 					http.Redirect(w, r, "/groups/"+group.ID+"/collectors?error="+urlQuery(execErr.Error()), http.StatusSeeOther)
@@ -360,6 +368,14 @@ func executeMembershipChange(r *http.Request, value *configs.MembershipChange, g
 }
 
 func executeMembershipBatch(ctx context.Context, value *configs.MembershipChange, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deliver membershipDeliveryFunc, dataDir string) error {
+	value.ExecutionResults = make([]configs.MembershipExecutionResult, len(value.Targets))
+	for index, target := range value.Targets {
+		value.ExecutionResults[index] = configs.MembershipExecutionResult{
+			AgentInstanceUID: target.AgentInstanceUID,
+			AgentName:        target.AgentName,
+			Status:           configs.MembershipTargetPending,
+		}
+	}
 	var targetGroup *groups.Group
 	var targetConfig *configs.Configuration
 	var err error
@@ -389,19 +405,24 @@ func executeMembershipBatch(ctx context.Context, value *configs.MembershipChange
 
 	// Resolve and validate every immutable target before changing any Collector.
 	checkpoints := make([]*membershipExecutionCheckpoint, 0, len(value.Targets))
-	for _, snapshot := range value.Targets {
+	for index, snapshot := range value.Targets {
 		agent, getErr := agentStore.Get(ctx, snapshot.AgentInstanceUID)
 		if getErr != nil {
+			markMembershipResult(value, index, configs.MembershipTargetFailed, "", getErr)
 			return getErr
 		}
 		if value.Operation == configs.MembershipAssign {
 			for _, candidate := range allGroups {
 				if groups.Matches(candidate, agent) {
-					return fmt.Errorf("%s is now assigned to %s; create a new proposal", agent.Name, candidate.Name)
+					conflictErr := fmt.Errorf("%s is now assigned to %s; create a new proposal", agent.Name, candidate.Name)
+					markMembershipResult(value, index, configs.MembershipTargetFailed, "", conflictErr)
+					return conflictErr
 				}
 			}
 		} else if sourceGroup == nil || !groups.MatchesIdentity(sourceGroup, agent) {
-			return fmt.Errorf("%s no longer belongs to the approved source group", agent.Name)
+			conflictErr := fmt.Errorf("%s no longer belongs to the approved source group", agent.Name)
+			markMembershipResult(value, index, configs.MembershipTargetFailed, "", conflictErr)
+			return conflictErr
 		}
 		original := *agent
 		original.GroupFields = copyStringMap(agent.GroupFields)
@@ -411,6 +432,7 @@ func executeMembershipBatch(ctx context.Context, value *configs.MembershipChange
 		if assignmentErr == nil {
 			checkpoint.previousConfigurationID = latest.ConfigurationID
 		} else if !errors.Is(assignmentErr, storage.ErrAssignmentNotFound) {
+			markMembershipResult(value, index, configs.MembershipTargetFailed, "", assignmentErr)
 			return assignmentErr
 		}
 		checkpoints = append(checkpoints, checkpoint)
@@ -423,13 +445,16 @@ func executeMembershipBatch(ctx context.Context, value *configs.MembershipChange
 		if value.Operation == configs.MembershipRemove && value.RemovalPolicy == configs.RemovalRestore && snapshot.PreviousConfigurationID != "" {
 			configuration, err = configStore.Get(ctx, snapshot.PreviousConfigurationID)
 			if err != nil {
+				markMembershipResult(value, index, configs.MembershipTargetFailed, "", err)
 				return rollbackMembershipBatch(ctx, value, checkpoints[:index], agentStore, configStore, deliver, dataDir, err)
 			}
 			action = configs.DeploymentActionRollback
 		}
 		if configuration != nil {
+			value.ExecutionResults[index].ConfigurationID = configuration.ID
 			deliveryErr := deliver(ctx, checkpoint.agent.InstanceUID, configuration, action, checkpoint.previousConfigurationID, value.ID)
 			if deliveryErr != nil && !errors.Is(deliveryErr, configs.ErrConfigurationCurrent) {
+				markMembershipResult(value, index, configs.MembershipTargetFailed, configuration.ID, deliveryErr)
 				return rollbackMembershipBatch(ctx, value, checkpoints[:index], agentStore, configStore, deliver, dataDir, fmt.Errorf("%s: %w", checkpoint.agent.Name, deliveryErr))
 			}
 			checkpoint.configurationChanged = deliveryErr == nil
@@ -444,9 +469,11 @@ func executeMembershipBatch(ctx context.Context, value *configs.MembershipChange
 			checkpoint.agent.ExcludedGroupIDs = removeString(checkpoint.agent.ExcludedGroupIDs, targetGroup.ID)
 		}
 		if err = agentStore.Upsert(ctx, checkpoint.agent); err != nil {
+			markMembershipResult(value, index, configs.MembershipTargetFailed, value.ExecutionResults[index].ConfigurationID, err)
 			return rollbackMembershipBatch(ctx, value, checkpoints[:index+1], agentStore, configStore, deliver, dataDir, err)
 		}
 		checkpoint.membershipChanged = true
+		markMembershipResult(value, index, configs.MembershipTargetComplete, value.ExecutionResults[index].ConfigurationID, nil)
 	}
 	if err = saveAgentSnapshot(ctx, agentStore, dataDir); err != nil {
 		return rollbackMembershipBatch(ctx, value, checkpoints, agentStore, configStore, deliver, dataDir, err)
@@ -458,26 +485,34 @@ func rollbackMembershipBatch(ctx context.Context, value *configs.MembershipChang
 	rollbackErrors := make([]error, 0)
 	for index := len(checkpoints) - 1; index >= 0; index-- {
 		checkpoint := checkpoints[index]
+		checkpointErrors := make([]error, 0)
 		if checkpoint.membershipChanged {
 			if err := agentStore.Upsert(ctx, checkpoint.original); err != nil {
-				rollbackErrors = append(rollbackErrors, fmt.Errorf("%s membership: %w", checkpoint.original.Name, err))
+				checkpointErrors = append(checkpointErrors, fmt.Errorf("membership: %w", err))
 			}
 		}
-		if !checkpoint.configurationChanged {
+		if checkpoint.configurationChanged {
+			if checkpoint.previousConfigurationID == "" {
+				checkpointErrors = append(checkpointErrors, errors.New("configuration: no previous configuration was recorded"))
+			} else {
+				previous, err := configStore.Get(ctx, checkpoint.previousConfigurationID)
+				if err != nil {
+					checkpointErrors = append(checkpointErrors, fmt.Errorf("configuration lookup: %w", err))
+				} else {
+					setMembershipRollbackConfiguration(value, checkpoint.original.InstanceUID, previous.ID)
+					if err = deliver(ctx, checkpoint.original.InstanceUID, previous, configs.DeploymentActionRollback, "", value.ID); err != nil && !errors.Is(err, configs.ErrConfigurationCurrent) {
+						checkpointErrors = append(checkpointErrors, fmt.Errorf("configuration: %w", err))
+					}
+				}
+			}
+		}
+		if len(checkpointErrors) == 0 {
+			markMembershipResultByAgent(value, checkpoint.original.InstanceUID, configs.MembershipTargetRestored, nil)
 			continue
 		}
-		if checkpoint.previousConfigurationID == "" {
-			rollbackErrors = append(rollbackErrors, fmt.Errorf("%s configuration: no previous configuration was recorded", checkpoint.original.Name))
-			continue
-		}
-		previous, err := configStore.Get(ctx, checkpoint.previousConfigurationID)
-		if err != nil {
-			rollbackErrors = append(rollbackErrors, fmt.Errorf("%s configuration lookup: %w", checkpoint.original.Name, err))
-			continue
-		}
-		if err = deliver(ctx, checkpoint.original.InstanceUID, previous, configs.DeploymentActionRollback, "", value.ID); err != nil && !errors.Is(err, configs.ErrConfigurationCurrent) {
-			rollbackErrors = append(rollbackErrors, fmt.Errorf("%s configuration: %w", checkpoint.original.Name, err))
-		}
+		joined := errors.Join(checkpointErrors...)
+		markMembershipResultByAgent(value, checkpoint.original.InstanceUID, configs.MembershipRollbackFailed, joined)
+		rollbackErrors = append(rollbackErrors, fmt.Errorf("%s: %w", checkpoint.original.Name, joined))
 	}
 	if err := saveAgentSnapshot(ctx, agentStore, dataDir); err != nil {
 		rollbackErrors = append(rollbackErrors, fmt.Errorf("persist restored membership snapshot: %w", err))
@@ -488,12 +523,48 @@ func rollbackMembershipBatch(ctx context.Context, value *configs.MembershipChang
 	return fmt.Errorf("%w; compensating rollback incomplete: %v", cause, errors.Join(rollbackErrors...))
 }
 
-const membershipHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Collector membership · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `.pick{display:grid;gap:8px}.pick label{display:flex;gap:9px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:8px}.membership-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.impact-preview{padding:11px;border:1px solid var(--line);border-radius:8px;background:#0a1626;color:var(--muted);font-size:12px}.impact-preview strong{display:block;color:var(--text);margin-bottom:4px}@media(max-width:950px){.membership-actions{grid-template-columns:1fr}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Groups / Collector membership</div><div class="pagetitle">{{.Group.Name}}</div><div class="subtitle">Governed assignment, removal and movement of Collectors.</div></div><a class="btn" href="/groups/{{.Group.ID}}">← Group</a></header><div class="content">{{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}
+func markMembershipResult(value *configs.MembershipChange, index int, status configs.MembershipExecutionStatus, configurationID string, resultErr error) {
+	if index < 0 || index >= len(value.ExecutionResults) {
+		return
+	}
+	result := &value.ExecutionResults[index]
+	result.Status = status
+	if configurationID != "" {
+		result.ConfigurationID = configurationID
+	}
+	if resultErr != nil {
+		result.Error = resultErr.Error()
+	} else {
+		result.Error = ""
+	}
+	now := time.Now().UTC()
+	result.CompletedAt = &now
+}
+
+func markMembershipResultByAgent(value *configs.MembershipChange, agentUID string, status configs.MembershipExecutionStatus, resultErr error) {
+	for index := range value.ExecutionResults {
+		if value.ExecutionResults[index].AgentInstanceUID == agentUID {
+			markMembershipResult(value, index, status, value.ExecutionResults[index].ConfigurationID, resultErr)
+			return
+		}
+	}
+}
+
+func setMembershipRollbackConfiguration(value *configs.MembershipChange, agentUID, configurationID string) {
+	for index := range value.ExecutionResults {
+		if value.ExecutionResults[index].AgentInstanceUID == agentUID {
+			value.ExecutionResults[index].RollbackConfigID = configurationID
+			return
+		}
+	}
+}
+
+const membershipHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Collector membership · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `.pick{display:grid;gap:8px}.pick label{display:flex;gap:9px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:8px}.membership-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.impact-preview{padding:11px;border:1px solid var(--line);border-radius:8px;background:#0a1626;color:var(--muted);font-size:12px}.impact-preview strong{display:block;color:var(--text);margin-bottom:4px}.execution-evidence{margin-top:7px}.execution-evidence summary{cursor:pointer;color:var(--purple)}.execution-result{padding:8px 0;border-top:1px solid var(--line)}.execution-result:first-of-type{margin-top:7px}@media(max-width:950px){.membership-actions{grid-template-columns:1fr}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Groups / Collector membership</div><div class="pagetitle">{{.Group.Name}}</div><div class="subtitle">Governed assignment, removal and movement of Collectors.</div></div><a class="btn" href="/groups/{{.Group.ID}}">← Group</a></header><div class="content">{{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Create membership proposal</div><div class="cardsub">Every configuration-affecting change requires approval.</div></div></div><div class="cardbody membership-actions">
 <form class="detailform" method="post" data-membership-form data-operation="assign" data-target-group="{{.Group.ID}}"><input type="hidden" name="action" value="request"><input type="hidden" name="operation" value="assign"><strong>Assign available Collectors</strong><div class="pick">{{range .Available}}<label><input type="checkbox" name="agent_uid" value="{{.InstanceUID}}"> {{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</label>{{else}}<span class="tiny">No unassigned Collectors.</span>{{end}}</div><label>Destination configuration<select class="select" name="target_configuration_id" data-configuration-select><option value="">Keep current configuration</option>{{range .ConfigurationOptions}}{{if eq .GroupID $.Group.ID}}<option value="{{.ID}}" data-group="{{.GroupID}}">{{.Name}} · {{.Version}}</option>{{end}}{{end}}</select></label><div class="impact-preview" data-impact-preview><strong>Impact preview</strong>Select Collectors to preview this assignment.</div><label>Reviewer<select class="select" name="assigned_reviewer" required>{{range .Reviewers}}<option>{{.Username}}</option>{{end}}</select></label><label>Reason<textarea class="input" name="reason" required></textarea></label><button class="btn primary">Request assignment</button></form>
 <form class="detailform" method="post" data-membership-form data-operation="remove" data-target-group=""><input type="hidden" name="action" value="request"><input type="hidden" name="operation" value="remove"><strong>Remove from this group</strong><div class="pick">{{range .Members}}<label><input type="checkbox" name="agent_uid" value="{{.InstanceUID}}"> {{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</label>{{else}}<span class="tiny">No members.</span>{{end}}</div><label>Configuration after removal<select class="select" name="removal_policy"><option value="keep_current">Keep current configuration</option><option value="restore_pre_group">Restore pre-group configuration</option></select></label><div class="impact-preview" data-impact-preview><strong>Impact preview</strong>Select Collectors and a removal policy to preview the result.</div><label>Reviewer<select class="select" name="assigned_reviewer" required>{{range .Reviewers}}<option>{{.Username}}</option>{{end}}</select></label><label>Reason<textarea class="input" name="reason" required></textarea></label><button class="btn">Request removal</button></form>
 <form class="detailform" method="post" data-membership-form data-operation="move"><input type="hidden" name="action" value="request"><input type="hidden" name="operation" value="move"><strong>Move to another group</strong><div class="pick">{{range .Members}}<label><input type="checkbox" name="agent_uid" value="{{.InstanceUID}}"> {{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</label>{{else}}<span class="tiny">No members.</span>{{end}}</div><label>Target group<select class="select" name="target_group_id" required data-target-group>{{range .OtherGroups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label>Destination configuration<select class="select" name="target_configuration_id" data-configuration-select><option value="">Keep current configuration</option>{{range .ConfigurationOptions}}<option value="{{.ID}}" data-group="{{.GroupID}}">{{.Name}} · {{.Version}}</option>{{end}}</select></label><div class="impact-preview" data-impact-preview><strong>Impact preview</strong>Select Collectors and a target group to preview this move.</div><label>Reviewer<select class="select" name="assigned_reviewer" required>{{range .Reviewers}}<option>{{.Username}}</option>{{end}}</select></label><label>Reason<textarea class="input" name="reason" required></textarea></label><button class="btn">Request move</button></form>
-</div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Membership history</div><div class="cardsub">Immutable target snapshots and governed decisions.</div></div></div>{{if .Requests}}<div style="overflow:auto"><table><thead><tr><th>Operation</th><th>Scope</th><th>Collectors</th><th>Requester / reviewer</th><th>Status</th><th>Action</th></tr></thead><tbody>{{range .Requests}}<tr><td>{{.Operation}}</td><td>{{if .SourceGroupName}}{{.SourceGroupName}}{{end}}{{if .TargetGroupName}} → {{.TargetGroupName}}{{end}}</td><td>{{len .Targets}}</td><td>{{.RequestedBy}}<div class="tiny">{{.AssignedReviewer}}</div></td><td><span class="badge {{if eq .Status "completed"}}ok{{else}}warn{{end}}">{{.Status}}</span>{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</td><td>{{if eq .Status "pending_approval"}}<form method="post"><input type="hidden" name="request_id" value="{{.ID}}"><button class="btn primary" name="action" value="approve">Approve</button><button class="btn" name="action" value="reject">Reject</button></form>{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No membership proposals yet.</div>{{end}}</section></div></main></div><script src="/assets/membership-preview.js" defer></script></body></html>`
+</div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Membership history</div><div class="cardsub">Immutable target snapshots and governed decisions.</div></div></div>{{if .Requests}}<div style="overflow:auto"><table><thead><tr><th>Operation</th><th>Scope</th><th>Collectors</th><th>Requester / reviewer</th><th>Status</th><th>Action</th></tr></thead><tbody>{{range .Requests}}<tr><td>{{.Operation}}</td><td>{{if .SourceGroupName}}{{.SourceGroupName}}{{end}}{{if .TargetGroupName}} → {{.TargetGroupName}}{{end}}</td><td>{{len .Targets}}{{if .ExecutionResults}}<details class="execution-evidence"><summary>View execution evidence</summary>{{range .ExecutionResults}}<div class="execution-result"><strong>{{.AgentName}}</strong> <span class="badge {{if eq .Status "completed"}}ok{{else if eq .Status "restored"}}warn{{else if eq .Status "not_started"}}off{{else}}bad{{end}}">{{.Status}}</span>{{if .ConfigurationID}}<div class="tiny code">Configuration: {{.ConfigurationID}}</div>{{end}}{{if .RollbackConfigID}}<div class="tiny code">Restored: {{.RollbackConfigID}}</div>{{end}}{{if .CompletedAt}}<div class="tiny">{{.CompletedAt}}</div>{{end}}{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</div>{{end}}</details>{{end}}</td><td>{{.RequestedBy}}<div class="tiny">{{.AssignedReviewer}}</div></td><td><span class="badge {{if eq .Status "completed"}}ok{{else}}warn{{end}}">{{.Status}}</span>{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</td><td>{{if eq .Status "pending_approval"}}<form method="post"><input type="hidden" name="request_id" value="{{.ID}}"><button class="btn primary" name="action" value="approve">Approve</button><button class="btn" name="action" value="reject">Reject</button></form>{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No membership proposals yet.</div>{{end}}</section></div></main></div><script src="/assets/membership-preview.js" defer></script></body></html>`
 
 const membershipPreviewJS = `(() => {
   document.querySelectorAll("[data-membership-form]").forEach((form) => {

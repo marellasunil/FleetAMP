@@ -16,4 +16,5 @@ type MembershipChangeStore interface {
 	Get(context.Context, string) (*configs.MembershipChange, error)
 	List(context.Context, int) ([]*configs.MembershipChange, error)
 	Update(context.Context, string, configs.MembershipStatus, configs.MembershipStatus, string, string, string) error
+	SaveExecutionResults(context.Context, string, []configs.MembershipExecutionResult) error
 }
