@@ -284,4 +284,7 @@ func TestSessionNavigationHidesUnauthorizedPages(t *testing.T) {
 			t.Fatalf("session navigation is missing %q", want)
 		}
 	}
+	if !strings.Contains(controlPlaneCSS, "[hidden]{display:none!important}") {
+		t.Fatal("control-plane CSS must not override hidden navigation elements")
+	}
 }
