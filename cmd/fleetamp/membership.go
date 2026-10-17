@@ -19,16 +19,24 @@ import (
 )
 
 type membershipView struct {
-	Page        string
-	Group       *groups.Group
-	Members     []*agents.ManagedAgent
-	Available   []*agents.ManagedAgent
-	OtherGroups []*groups.Group
-	Reviewers   []reviewerOption
-	Requests    []*configs.MembershipChange
-	Message     string
-	Error       string
-	CanManage   bool
+	Page                 string
+	Group                *groups.Group
+	Members              []*agents.ManagedAgent
+	Available            []*agents.ManagedAgent
+	OtherGroups          []*groups.Group
+	ConfigurationOptions []membershipConfigurationOption
+	Reviewers            []reviewerOption
+	Requests             []*configs.MembershipChange
+	Message              string
+	Error                string
+	CanManage            bool
+}
+
+type membershipConfigurationOption struct {
+	GroupID string
+	ID      string
+	Name    string
+	Version string
 }
 
 func latestApprovedGroupConfiguration(ctx context.Context, configsStore storage.ConfigurationStore, requests storage.GroupDeploymentRequestStore, groupID string) (*configs.Configuration, error) {
@@ -42,6 +50,45 @@ func latestApprovedGroupConfiguration(ctx context.Context, configsStore storage.
 		}
 	}
 	return nil, nil
+}
+
+func approvedMembershipConfigurationOptions(ctx context.Context, configsStore storage.ConfigurationStore, requests storage.GroupDeploymentRequestStore, groupIDs []string) ([]membershipConfigurationOption, error) {
+	seen := map[string]bool{}
+	options := make([]membershipConfigurationOption, 0)
+	for _, groupID := range groupIDs {
+		items, err := requests.ListByGroup(ctx, groupID, 100)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if item.Status != configs.GroupDeploymentCompleted || seen[item.ConfigurationID] {
+				continue
+			}
+			configuration, err := configsStore.Get(ctx, item.ConfigurationID)
+			if err != nil {
+				return nil, err
+			}
+			if configuration.GroupID != groupID {
+				continue
+			}
+			seen[item.ConfigurationID] = true
+			options = append(options, membershipConfigurationOption{GroupID: groupID, ID: configuration.ID, Name: configuration.Name, Version: configuration.Version})
+		}
+	}
+	return options, nil
+}
+
+func approvedMembershipConfiguration(ctx context.Context, configsStore storage.ConfigurationStore, requests storage.GroupDeploymentRequestStore, groupID, configurationID string) (*configs.Configuration, error) {
+	options, err := approvedMembershipConfigurationOptions(ctx, configsStore, requests, []string{groupID})
+	if err != nil {
+		return nil, err
+	}
+	for _, option := range options {
+		if option.ID == configurationID {
+			return configsStore.Get(ctx, configurationID)
+		}
+	}
+	return nil, fmt.Errorf("selected configuration is not an approved completed version for the target group")
 }
 
 func unassignedAgents(r *http.Request, agentStore *memory.AgentStore, groupStore storage.GroupStore) ([]*agents.ManagedAgent, error) {
@@ -85,6 +132,10 @@ func membershipBaseline(agentUID string, history []*configs.MembershipChange) st
 }
 
 func registerMembershipRoutes(mux *http.ServeMux, changes storage.MembershipChangeStore, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, deploymentRequests storage.GroupDeploymentRequestStore, adapter *fleetopamp.Adapter, auth *authManager, dataDir string) {
+	mux.HandleFunc("GET /assets/membership-preview.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		_, _ = w.Write([]byte(membershipPreviewJS))
+	})
 	mux.HandleFunc("/groups/{id}/collectors", func(w http.ResponseWriter, r *http.Request) {
 		group, err := groupStore.Get(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -170,13 +221,23 @@ func registerMembershipRoutes(mux *http.ServeMux, changes storage.MembershipChan
 				}
 				targetConfigID := ""
 				if operation != configs.MembershipRemove {
-					c, lookupErr := latestApprovedGroupConfiguration(r.Context(), configStore, deploymentRequests, targetGroup.ID)
-					if lookupErr != nil {
-						internalServerError(w, lookupErr)
-						return
-					}
-					if c != nil {
-						targetConfigID = c.ID
+					selectedConfigurationID := strings.TrimSpace(r.FormValue("target_configuration_id"))
+					if selectedConfigurationID != "" {
+						configuration, lookupErr := approvedMembershipConfiguration(r.Context(), configStore, deploymentRequests, targetGroup.ID, selectedConfigurationID)
+						if lookupErr != nil {
+							http.Error(w, lookupErr.Error(), http.StatusConflict)
+							return
+						}
+						targetConfigID = configuration.ID
+					} else {
+						configuration, lookupErr := latestApprovedGroupConfiguration(r.Context(), configStore, deploymentRequests, targetGroup.ID)
+						if lookupErr != nil {
+							internalServerError(w, lookupErr)
+							return
+						}
+						if configuration != nil {
+							targetConfigID = configuration.ID
+						}
 					}
 				}
 				proposal := configs.MembershipChange{Operation: operation, RemovalPolicy: configs.RemovalPolicy(r.FormValue("removal_policy")), TargetConfigurationID: targetConfigID, Targets: targets, RequestedBy: currentUsername(auth, r), AssignedReviewer: reviewer, Reason: strings.TrimSpace(r.FormValue("reason"))}
@@ -255,6 +316,15 @@ func registerMembershipRoutes(mux *http.ServeMux, changes storage.MembershipChan
 				others = append(others, candidate)
 			}
 		}
+		groupIDs := []string{group.ID}
+		for _, candidate := range others {
+			groupIDs = append(groupIDs, candidate.ID)
+		}
+		configurationOptions, err := approvedMembershipConfigurationOptions(r.Context(), configStore, deploymentRequests, groupIDs)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
 		requests, _ := changes.List(r.Context(), 100)
 		var scoped []*configs.MembershipChange
 		for _, item := range requests {
@@ -263,7 +333,7 @@ func registerMembershipRoutes(mux *http.ServeMux, changes storage.MembershipChan
 			}
 		}
 		reviewers, _ := eligibleDeploymentReviewers(r.Context(), auth, group, currentUsername(auth, r), currentRole(auth, r))
-		view := membershipView{Page: "groups", Group: group, Members: members, Available: available, OtherGroups: others, Reviewers: reviewers, Requests: scoped, Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error"), CanManage: canManage}
+		view := membershipView{Page: "groups", Group: group, Members: members, Available: available, OtherGroups: others, ConfigurationOptions: configurationOptions, Reviewers: reviewers, Requests: scoped, Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error"), CanManage: canManage}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = membershipPage.Execute(w, view)
 	})
@@ -348,11 +418,44 @@ func executeMembershipChange(r *http.Request, value *configs.MembershipChange, g
 	return saveAgentSnapshot(r.Context(), agentStore, dataDir)
 }
 
-const membershipHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Collector membership · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `.pick{display:grid;gap:8px}.pick label{display:flex;gap:9px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:8px}.membership-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}@media(max-width:950px){.membership-actions{grid-template-columns:1fr}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Groups / Collector membership</div><div class="pagetitle">{{.Group.Name}}</div><div class="subtitle">Governed assignment, removal and movement of Collectors.</div></div><a class="btn" href="/groups/{{.Group.ID}}">← Group</a></header><div class="content">{{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}
+const membershipHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Collector membership · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `.pick{display:grid;gap:8px}.pick label{display:flex;gap:9px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:8px}.membership-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.impact-preview{padding:11px;border:1px solid var(--line);border-radius:8px;background:#0a1626;color:var(--muted);font-size:12px}.impact-preview strong{display:block;color:var(--text);margin-bottom:4px}@media(max-width:950px){.membership-actions{grid-template-columns:1fr}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Groups / Collector membership</div><div class="pagetitle">{{.Group.Name}}</div><div class="subtitle">Governed assignment, removal and movement of Collectors.</div></div><a class="btn" href="/groups/{{.Group.ID}}">← Group</a></header><div class="content">{{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Create membership proposal</div><div class="cardsub">Every configuration-affecting change requires approval.</div></div></div><div class="cardbody membership-actions">
-<form class="detailform" method="post"><input type="hidden" name="action" value="request"><input type="hidden" name="operation" value="assign"><strong>Assign available Collectors</strong><div class="pick">{{range .Available}}<label><input type="checkbox" name="agent_uid" value="{{.InstanceUID}}"> {{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</label>{{else}}<span class="tiny">No unassigned Collectors.</span>{{end}}</div><label>Reviewer<select class="select" name="assigned_reviewer" required>{{range .Reviewers}}<option>{{.Username}}</option>{{end}}</select></label><label>Reason<textarea class="input" name="reason" required></textarea></label><button class="btn primary">Request assignment</button></form>
-<form class="detailform" method="post"><input type="hidden" name="action" value="request"><input type="hidden" name="operation" value="remove"><strong>Remove from this group</strong><div class="pick">{{range .Members}}<label><input type="checkbox" name="agent_uid" value="{{.InstanceUID}}"> {{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</label>{{else}}<span class="tiny">No members.</span>{{end}}</div><label>Configuration after removal<select class="select" name="removal_policy"><option value="keep_current">Keep current configuration</option><option value="restore_pre_group">Restore pre-group configuration</option></select></label><label>Reviewer<select class="select" name="assigned_reviewer" required>{{range .Reviewers}}<option>{{.Username}}</option>{{end}}</select></label><label>Reason<textarea class="input" name="reason" required></textarea></label><button class="btn">Request removal</button></form>
-<form class="detailform" method="post"><input type="hidden" name="action" value="request"><input type="hidden" name="operation" value="move"><strong>Move to another group</strong><div class="pick">{{range .Members}}<label><input type="checkbox" name="agent_uid" value="{{.InstanceUID}}"> {{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</label>{{else}}<span class="tiny">No members.</span>{{end}}</div><label>Target group<select class="select" name="target_group_id" required>{{range .OtherGroups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label>Reviewer<select class="select" name="assigned_reviewer" required>{{range .Reviewers}}<option>{{.Username}}</option>{{end}}</select></label><label>Reason<textarea class="input" name="reason" required></textarea></label><button class="btn">Request move</button></form>
-</div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Membership history</div><div class="cardsub">Immutable target snapshots and governed decisions.</div></div></div>{{if .Requests}}<div style="overflow:auto"><table><thead><tr><th>Operation</th><th>Scope</th><th>Collectors</th><th>Requester / reviewer</th><th>Status</th><th>Action</th></tr></thead><tbody>{{range .Requests}}<tr><td>{{.Operation}}</td><td>{{if .SourceGroupName}}{{.SourceGroupName}}{{end}}{{if .TargetGroupName}} → {{.TargetGroupName}}{{end}}</td><td>{{len .Targets}}</td><td>{{.RequestedBy}}<div class="tiny">{{.AssignedReviewer}}</div></td><td><span class="badge {{if eq .Status "completed"}}ok{{else}}warn{{end}}">{{.Status}}</span>{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</td><td>{{if eq .Status "pending_approval"}}<form method="post"><input type="hidden" name="request_id" value="{{.ID}}"><button class="btn primary" name="action" value="approve">Approve</button><button class="btn" name="action" value="reject">Reject</button></form>{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No membership proposals yet.</div>{{end}}</section></div></main></div></body></html>`
+<form class="detailform" method="post" data-membership-form data-operation="assign" data-target-group="{{.Group.ID}}"><input type="hidden" name="action" value="request"><input type="hidden" name="operation" value="assign"><strong>Assign available Collectors</strong><div class="pick">{{range .Available}}<label><input type="checkbox" name="agent_uid" value="{{.InstanceUID}}"> {{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</label>{{else}}<span class="tiny">No unassigned Collectors.</span>{{end}}</div><label>Destination configuration<select class="select" name="target_configuration_id" data-configuration-select><option value="">Keep current configuration</option>{{range .ConfigurationOptions}}{{if eq .GroupID $.Group.ID}}<option value="{{.ID}}" data-group="{{.GroupID}}">{{.Name}} · {{.Version}}</option>{{end}}{{end}}</select></label><div class="impact-preview" data-impact-preview><strong>Impact preview</strong>Select Collectors to preview this assignment.</div><label>Reviewer<select class="select" name="assigned_reviewer" required>{{range .Reviewers}}<option>{{.Username}}</option>{{end}}</select></label><label>Reason<textarea class="input" name="reason" required></textarea></label><button class="btn primary">Request assignment</button></form>
+<form class="detailform" method="post" data-membership-form data-operation="remove" data-target-group=""><input type="hidden" name="action" value="request"><input type="hidden" name="operation" value="remove"><strong>Remove from this group</strong><div class="pick">{{range .Members}}<label><input type="checkbox" name="agent_uid" value="{{.InstanceUID}}"> {{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</label>{{else}}<span class="tiny">No members.</span>{{end}}</div><label>Configuration after removal<select class="select" name="removal_policy"><option value="keep_current">Keep current configuration</option><option value="restore_pre_group">Restore pre-group configuration</option></select></label><div class="impact-preview" data-impact-preview><strong>Impact preview</strong>Select Collectors and a removal policy to preview the result.</div><label>Reviewer<select class="select" name="assigned_reviewer" required>{{range .Reviewers}}<option>{{.Username}}</option>{{end}}</select></label><label>Reason<textarea class="input" name="reason" required></textarea></label><button class="btn">Request removal</button></form>
+<form class="detailform" method="post" data-membership-form data-operation="move"><input type="hidden" name="action" value="request"><input type="hidden" name="operation" value="move"><strong>Move to another group</strong><div class="pick">{{range .Members}}<label><input type="checkbox" name="agent_uid" value="{{.InstanceUID}}"> {{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</label>{{else}}<span class="tiny">No members.</span>{{end}}</div><label>Target group<select class="select" name="target_group_id" required data-target-group>{{range .OtherGroups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label>Destination configuration<select class="select" name="target_configuration_id" data-configuration-select><option value="">Keep current configuration</option>{{range .ConfigurationOptions}}<option value="{{.ID}}" data-group="{{.GroupID}}">{{.Name}} · {{.Version}}</option>{{end}}</select></label><div class="impact-preview" data-impact-preview><strong>Impact preview</strong>Select Collectors and a target group to preview this move.</div><label>Reviewer<select class="select" name="assigned_reviewer" required>{{range .Reviewers}}<option>{{.Username}}</option>{{end}}</select></label><label>Reason<textarea class="input" name="reason" required></textarea></label><button class="btn">Request move</button></form>
+</div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Membership history</div><div class="cardsub">Immutable target snapshots and governed decisions.</div></div></div>{{if .Requests}}<div style="overflow:auto"><table><thead><tr><th>Operation</th><th>Scope</th><th>Collectors</th><th>Requester / reviewer</th><th>Status</th><th>Action</th></tr></thead><tbody>{{range .Requests}}<tr><td>{{.Operation}}</td><td>{{if .SourceGroupName}}{{.SourceGroupName}}{{end}}{{if .TargetGroupName}} → {{.TargetGroupName}}{{end}}</td><td>{{len .Targets}}</td><td>{{.RequestedBy}}<div class="tiny">{{.AssignedReviewer}}</div></td><td><span class="badge {{if eq .Status "completed"}}ok{{else}}warn{{end}}">{{.Status}}</span>{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</td><td>{{if eq .Status "pending_approval"}}<form method="post"><input type="hidden" name="request_id" value="{{.ID}}"><button class="btn primary" name="action" value="approve">Approve</button><button class="btn" name="action" value="reject">Reject</button></form>{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No membership proposals yet.</div>{{end}}</section></div></main></div><script src="/assets/membership-preview.js" defer></script></body></html>`
+
+const membershipPreviewJS = `(() => {
+  document.querySelectorAll("[data-membership-form]").forEach((form) => {
+    const operation = form.dataset.operation;
+    const targetGroup = form.querySelector("[data-target-group]");
+    const configuration = form.querySelector("[data-configuration-select]");
+    const preview = form.querySelector("[data-impact-preview]");
+    const removalPolicy = form.querySelector("[name=removal_policy]");
+    const updateConfigurations = () => {
+      if (!configuration || !targetGroup) return;
+      const groupID = targetGroup.value;
+      Array.from(configuration.options).forEach((option, index) => {
+        option.hidden = index > 0 && option.dataset.group !== groupID;
+      });
+      if (configuration.selectedOptions[0] && configuration.selectedOptions[0].hidden) configuration.value = "";
+    };
+    const updatePreview = () => {
+      const selected = Array.from(form.querySelectorAll("[name=agent_uid]:checked"));
+      const names = selected.map((input) => input.closest("label").textContent.trim()).join(", ");
+      const configurationLabel = configuration && configuration.value ? configuration.selectedOptions[0].textContent.trim() : "keep current configuration";
+      const targetLabel = targetGroup && targetGroup.value ? targetGroup.selectedOptions[0].textContent.trim() : form.dataset.targetGroup;
+      let detail = selected.length + " Collector(s)";
+      if (operation === "move") detail += " will move to " + targetLabel + " and " + configurationLabel + ".";
+      if (operation === "assign") detail += " will join this group and " + configurationLabel + ".";
+      if (operation === "remove") detail += removalPolicy && removalPolicy.value === "restore_pre_group" ? " will leave this group and restore their pre-group configuration." : " will leave this group and keep their current configuration.";
+      preview.innerHTML = "<strong>Impact preview</strong>";
+      preview.append(document.createTextNode(selected.length ? detail + " Selected: " + names : "Select Collectors to preview this change."));
+    };
+    form.addEventListener("change", () => { updateConfigurations(); updatePreview(); });
+    updateConfigurations();
+    updatePreview();
+  });
+})();`
 
 var membershipPage = template.Must(template.New("membership").Parse(membershipHTML))
