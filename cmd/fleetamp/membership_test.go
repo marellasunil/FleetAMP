@@ -14,7 +14,7 @@ func TestMembershipPageExposesGovernedCollectorOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Assign available Collectors", "Remove from this group", "Move to another group", "Restore pre-group configuration", "Membership history"} {
+	for _, text := range []string{"Assign available Collectors", "Remove from this group", "Move to another group", "Restore pre-group configuration", "Destination configuration", "Impact preview", "membership-preview.js", "Membership history"} {
 		if !strings.Contains(body.String(), text) {
 			t.Errorf("page missing %q", text)
 		}
