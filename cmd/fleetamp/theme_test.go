@@ -32,8 +32,9 @@ func TestThemeAssetAndControlsAreRendered(t *testing.T) {
 	}
 	html := page.String()
 	for _, want := range []string{
-		"id=\"theme-toggle\"",
+		".profile-menu{",
 		"src=\"/assets/theme.js\"",
+		"src=\"/assets/session.js\"",
 		":root[data-theme=\"light\"]",
 		"--theme-bg:#0c0c0e",
 		"--theme-bg:#f5f5f6",
@@ -51,7 +52,7 @@ func TestThemeAssetAndControlsAreRendered(t *testing.T) {
 		"configuration pipeline": configurationDetailHTML,
 	}
 	for name, markup := range pages {
-		for _, want := range []string{"id=\"theme-toggle\"", "/assets/theme.js", ":root[data-theme=\"light\"]", "--theme-bg:#0c0c0e"} {
+		for _, want := range []string{".profile-menu", "/assets/theme.js", "/assets/session.js", ":root[data-theme=\"light\"]", "--theme-bg:#0c0c0e"} {
 			if !strings.Contains(markup, want) {
 				t.Errorf("%s page does not contain %q", name, want)
 			}

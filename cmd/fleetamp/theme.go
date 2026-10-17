@@ -62,7 +62,7 @@ pre{background:var(--theme-code);border-color:var(--theme-border);color:var(--th
 const themeJS = `(() => {
   const storageKey = "fleetamp-theme";
   const root = document.documentElement;
-  const button = document.getElementById("theme-toggle");
+  const buttons = () => document.querySelectorAll(".theme-toggle");
   const saved = localStorage.getItem(storageKey);
   const initial = saved === "light" || saved === "dark" ? saved : "dark";
 
@@ -70,18 +70,19 @@ const themeJS = `(() => {
     root.dataset.theme = theme;
     root.style.colorScheme = theme;
     if (persist) localStorage.setItem(storageKey, theme);
-    if (button) {
-      const next = theme === "dark" ? "light" : "dark";
-      button.textContent = next === "light" ? "☀ Light theme" : "☾ Dark theme";
+    const next = theme === "dark" ? "light" : "dark";
+    buttons().forEach((button) => {
+      const label = button.querySelector("span");
+      if (label) label.textContent = next === "light" ? "Light theme" : "Dark theme";
+      else button.textContent = next === "light" ? "☀ Light theme" : "☾ Dark theme";
       button.setAttribute("aria-label", "Switch to " + next + " theme");
       button.setAttribute("aria-pressed", String(theme === "dark"));
-    }
+    });
   };
 
   apply(initial, false);
-  if (button) {
-    button.addEventListener("click", () => {
-      apply(root.dataset.theme === "dark" ? "light" : "dark", true);
-    });
-  }
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".theme-toggle")) return;
+    apply(root.dataset.theme === "dark" ? "light" : "dark", true);
+  });
 })();`

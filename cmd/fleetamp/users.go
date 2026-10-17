@@ -86,6 +86,34 @@ const sessionJS = `(() => {
   fetch("/api/v1/session", {credentials:"same-origin", headers:{Accept:"application/json"}})
     .then((response) => response.ok ? response.json() : Promise.reject())
     .then((session) => {
+      const top = document.querySelector(".top");
+      if (top && !document.getElementById("profile-menu")) {
+        let actions = top.querySelector(".topactions");
+        if (!actions) {
+          actions = document.createElement("div");
+          actions.className = "topactions";
+          top.appendChild(actions);
+        }
+        const menu = document.createElement("details");
+        menu.id = "profile-menu";
+        menu.className = "profile-menu";
+        const initial = (session.username || "?").trim().charAt(0).toUpperCase();
+        menu.innerHTML =
+          '<summary aria-label="Open profile menu"><span class="profile-avatar"></span><span class="profile-summary"><strong></strong><small></small></span><span aria-hidden="true">⌄</span></summary>' +
+          '<div class="profile-popover"><div class="profile-popover-head"><strong></strong><div class="tiny"></div></div>' +
+          '<a href="/account">● <span>My Profile</span></a>' +
+          '<button class="theme-toggle" type="button" aria-label="Switch color theme">◐ <span>Change theme</span></button>' +
+          '<form method="post" action="/logout"><button class="profile-danger" type="submit">↪ <span>Sign out</span></button></form></div>';
+        menu.querySelector(".profile-avatar").textContent = initial;
+        menu.querySelector(".profile-summary strong").textContent = session.username;
+        menu.querySelector(".profile-summary small").textContent = session.role;
+        menu.querySelector(".profile-popover-head strong").textContent = session.username;
+        menu.querySelector(".profile-popover-head .tiny").textContent = session.role;
+        actions.appendChild(menu);
+        document.addEventListener("click", (event) => {
+          if (menu.open && !menu.contains(event.target)) menu.removeAttribute("open");
+        });
+      }
       const identity = document.getElementById("current-user");
       if (identity) {
 		const label = identity.querySelector("span:last-child");
@@ -206,9 +234,21 @@ type accountPageData struct {
 	Groups                                                []*groups.Group
 	LastLoginAt                                           *time.Time
 	ForcePasswordChange                                   bool
+	ActiveSessions                                        int
 }
 
-const accountPageHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>My account · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / My account</div><div class="pagetitle">{{.Username}}</div><div class="subtitle">Review your access and manage personal security and display preferences.</div></div></header><div class="content">{{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}{{if .ForcePasswordChange}}<div class="configerror">You must change your temporary password before continuing.</div>{{end}}<div class="detailgrid"><section class="card"><div class="cardhead"><div><div class="cardtitle">Access</div><div class="cardsub">Your effective FleetAMP scope</div></div></div><div class="cardbody"><div class="kv"><span>Role</span><strong>{{.Role}}</strong><span>Email</span><span>{{if .Email}}{{.Email}}{{else}}Not configured{{end}}</span><span>Last login</span><span>{{if .LastLoginAt}}{{.LastLoginAt}}{{else}}Current session is your first recorded login{{end}}</span><span>Groups</span><span>{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a> {{else}}{{if eq .Role "admin"}}All groups (Admin){{else}}No groups assigned{{end}}{{end}}</span></div></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Preferences</div><div class="cardsub">Used when FleetAMP displays local dates and times</div></div></div><div class="cardbody"><form class="detailform" method="post" action="/account"><input type="hidden" name="action" value="timezone"><label>Timezone<input class="input" name="timezone" value="{{.Timezone}}" placeholder="Europe/Amsterdam" required></label><button class="btn primary" type="submit">Save timezone</button></form></div></section><section class="card wide"><div class="cardhead"><div><div class="cardtitle">Change password</div><div class="cardsub">Verify your current password. Changing it signs out all active sessions.</div></div></div><div class="cardbody"><form class="detailform" method="post" action="/account"><input type="hidden" name="action" value="password"><label>Current password<input class="input" type="password" name="current_password" required autocomplete="current-password"></label><label>New password<input class="input" type="password" name="password" required minlength="16" autocomplete="new-password"></label><label>Confirm password<input class="input" type="password" name="confirm_password" required minlength="16" autocomplete="new-password"></label><button class="btn primary" type="submit">Change my password</button></form></div></section></div></div></main></div></body></html>`
+const accountPageHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>My Profile · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `
+.profile-hero{display:flex;align-items:center;gap:16px}.profile-hero .profile-avatar{width:54px;height:54px;font-size:22px}.profile-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.profile-section.wide{grid-column:1/-1}.profile-form{display:grid;gap:12px}.preference-actions{display:flex;gap:9px;flex-wrap:wrap}.status-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 0;border-bottom:1px solid var(--line)}.status-row:last-child{border-bottom:0}@media(max-width:900px){.profile-sections{grid-template-columns:1fr}.profile-section.wide{grid-column:auto}}
+</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div class="profile-hero"><span class="profile-avatar">{{slice .Username 0 1}}</span><div><div class="crumb">FleetAMP / My Profile</div><div class="pagetitle">{{.Username}}</div><div class="subtitle">Your identity, access, security, preferences, notifications and account activity.</div></div></div></header><div class="content">
+{{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}{{if .Error}}<div class="configerror" role="alert">{{.Error}}</div>{{end}}{{if .ForcePasswordChange}}<div class="configerror">You must change your temporary password before continuing.</div>{{end}}
+<div class="profile-sections">
+<section class="card profile-section"><div class="cardhead"><div><div class="cardtitle">Profile</div><div class="cardsub">Your FleetAMP identity</div></div></div><div class="cardbody"><form class="profile-form" method="post" action="/account"><input type="hidden" name="action" value="profile"><label>Display name<input class="input" value="{{.Username}}" disabled><span class="tiny">Display name currently follows the immutable username.</span></label><label>Username<input class="input" value="{{.Username}}" disabled></label><label>Email<input class="input" type="email" name="email" value="{{.Email}}" placeholder="you@example.com"></label><button class="btn primary" type="submit">Save profile</button></form></div></section>
+<section class="card profile-section"><div class="cardhead"><div><div class="cardtitle">Access &amp; Membership</div><div class="cardsub">Your effective role and ownership domains</div></div></div><div class="cardbody"><div class="kv"><span>Platform role</span><strong>{{.Role}}</strong><span>Groups</span><span>{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a> {{else}}{{if eq .Role "admin"}}All groups (Platform Admin){{else}}No groups assigned{{end}}{{end}}</span></div><p class="tiny">Access changes are managed by a Platform Admin and take effect in a new session.</p></div></section>
+<section class="card profile-section wide"><div class="cardhead"><div><div class="cardtitle">Security</div><div class="cardsub">Credentials and signed-in sessions</div></div></div><div class="cardbody"><div class="status-row"><span>Active sessions</span><strong>{{.ActiveSessions}}</strong></div><div class="status-row"><span>MFA</span><span class="badge off">Not yet supported</span></div><form class="detailform" method="post" action="/account" style="margin-top:16px"><input type="hidden" name="action" value="password"><label>Current password<input class="input" type="password" name="current_password" required autocomplete="current-password"></label><label>New password<input class="input" type="password" name="password" required minlength="16" autocomplete="new-password"></label><label>Confirm password<input class="input" type="password" name="confirm_password" required minlength="16" autocomplete="new-password"></label><button class="btn primary" type="submit">Change password and sign out all sessions</button></form></div></section>
+<section class="card profile-section"><div class="cardhead"><div><div class="cardtitle">Preferences</div><div class="cardsub">Personal display settings</div></div></div><div class="cardbody"><form class="profile-form" method="post" action="/account"><input type="hidden" name="action" value="timezone"><label>Timezone<input class="input" name="timezone" value="{{.Timezone}}" placeholder="Europe/Amsterdam" required></label><button class="btn primary" type="submit">Save timezone</button></form><div class="preference-actions" style="margin-top:14px"><button class="btn theme-toggle" type="button">◐ Change theme</button></div><div class="status-row"><span>Date/time format</span><span class="tiny">Locale default</span></div><div class="status-row"><span>Default landing page</span><span class="tiny">Role default</span></div></div></section>
+<section class="card profile-section"><div class="cardhead"><div><div class="cardtitle">Notifications</div><div class="cardsub">Delivery preferences</div></div></div><div class="cardbody"><div class="status-row"><span>Deployment approvals</span><span class="badge off">Not configured</span></div><div class="status-row"><span>Drift alerts</span><span class="badge off">Not configured</span></div><div class="status-row"><span>Collector health</span><span class="badge off">Not configured</span></div><p class="tiny">Notification channels will become configurable when email or webhook delivery is enabled.</p></div></section>
+<section class="card profile-section wide"><div class="cardhead"><div><div class="cardtitle">Activity</div><div class="cardsub">Recent account security information</div></div></div><div class="cardbody"><div class="kv"><span>Last successful login</span><span>{{if .LastLoginAt}}{{.LastLoginAt}}{{else}}Current session is your first recorded login{{end}}</span><span>Current identity</span><span class="code">{{.Username}}</span><span>Session state</span><span class="badge ok">Active</span></div><p class="tiny">Administrative actions remain available in the Audit Log according to your permissions.</p></div></section>
+</div></div></main></div></body></html>`
 
 var accountPage = template.Must(template.New("account").Parse(accountPageHTML))
 
@@ -510,6 +550,19 @@ func (a *authManager) handleCurrentSession(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (a *authManager) activeSessionCount(username string) int {
+	now := a.now()
+	count := 0
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, session := range a.sessions {
+		if strings.EqualFold(session.Username, username) && now.Before(session.Expires) {
+			count++
+		}
+	}
+	return count
+}
+
 func (a *authManager) handleAccount(w http.ResponseWriter, r *http.Request) {
 	username, ok := a.sessionUsername(r)
 	if !ok {
@@ -524,6 +577,18 @@ func (a *authManager) handleAccount(w http.ResponseWriter, r *http.Request) {
 		var err error
 		action := r.FormValue("action")
 		switch action {
+		case "profile":
+			email := strings.TrimSpace(r.FormValue("email"))
+			if email != "" {
+				address, parseErr := mail.ParseAddress(email)
+				if parseErr != nil || !strings.EqualFold(address.Address, email) {
+					err = fmt.Errorf("email address is invalid")
+				} else {
+					err = a.store.UpdateEmail(r.Context(), username, email)
+				}
+			} else {
+				err = a.store.UpdateEmail(r.Context(), username, "")
+			}
 		case "timezone":
 			zone := strings.TrimSpace(r.FormValue("timezone"))
 			if _, loadErr := time.LoadLocation(zone); loadErr != nil {
@@ -565,7 +630,7 @@ func (a *authManager) handleAccount(w http.ResponseWriter, r *http.Request) {
 		internalServerError(w, err)
 		return
 	}
-	view := accountPageData{Page: "account", Username: user.Username, Email: user.Email, Role: user.Role, Timezone: user.Timezone, LastLoginAt: user.LastLoginAt, Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error"), ForcePasswordChange: user.MustChangePassword || r.URL.Query().Get("force") == "1"}
+	view := accountPageData{Page: "account", Username: user.Username, Email: user.Email, Role: user.Role, Timezone: user.Timezone, LastLoginAt: user.LastLoginAt, Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error"), ForcePasswordChange: user.MustChangePassword || r.URL.Query().Get("force") == "1", ActiveSessions: a.activeSessionCount(username)}
 	for _, id := range user.GroupIDs {
 		if group, groupErr := a.groupStore.Get(r.Context(), id); groupErr == nil {
 			view.Groups = append(view.Groups, group)
