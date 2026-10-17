@@ -69,6 +69,20 @@ type usersPageData struct {
 }
 
 const sessionJS = `(() => {
+  const pageURL = new URL(window.location.href);
+  const accessDenied = pageURL.searchParams.get("access_denied");
+  if (accessDenied) {
+    const toast = document.createElement("div");
+    toast.className = "access-toast";
+    toast.setAttribute("role", "alert");
+    toast.innerHTML = "<strong>Access denied</strong><span></span><button type=\"button\" aria-label=\"Dismiss\">×</button>";
+    toast.querySelector("span").textContent = accessDenied;
+    toast.querySelector("button").addEventListener("click", () => toast.remove());
+    document.body.appendChild(toast);
+    pageURL.searchParams.delete("access_denied");
+    window.history.replaceState({}, "", pageURL.pathname + pageURL.search + pageURL.hash);
+    window.setTimeout(() => toast.remove(), 7000);
+  }
   fetch("/api/v1/session", {credentials:"same-origin", headers:{Accept:"application/json"}})
     .then((response) => response.ok ? response.json() : Promise.reject())
     .then((session) => {

@@ -314,6 +314,38 @@ func TestSecurityMiddlewareEnforcesSessionRole(t *testing.T) {
 	}
 }
 
+func TestBrowserAuthorizationDenialRedirectsWithMessage(t *testing.T) {
+	manager := testAuthManager(&memoryAdministratorStore{}, strings.Repeat("p", 32), "bootstrap")
+	handler := securityMiddleware(securityConfig{MaxBodyBytes: defaultMaxRequestBodyBytes}, manager,
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	token, err := manager.createSessionForRole("group-owner", roleGroupOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/deployments", nil)
+	request.Header.Set("Accept", "text/html,application/xhtml+xml")
+	request.AddCookie(&http.Cookie{Name: manager.cookieName(), Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("browser denial status=%d", response.Code)
+	}
+	location := response.Header().Get("Location")
+	if !strings.HasPrefix(location, "/agents?access_denied=") {
+		t.Fatalf("browser denial location=%q", location)
+	}
+}
+
+func TestAPIAuthorizationDenialRemainsForbidden(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin-only", nil)
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+	writeAuthorizationDenied(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("API denial status=%d", response.Code)
+	}
+}
+
 func TestValidRequestOriginAllowsNullOnlyForSameSiteLoopback(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "http://localhost:8080/setup", nil)
 	request.Host = "localhost:8080"
