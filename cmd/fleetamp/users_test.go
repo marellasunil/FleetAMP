@@ -279,9 +279,15 @@ func TestSessionNavigationHidesUnauthorizedPages(t *testing.T) {
 		"viewer: [\"/agents\", \"/groups\", \"/otel-components\", \"/deployments\"",
 		"document.querySelectorAll(\".admin-settings-link\")",
 		"label.hidden = !hasVisibleLink",
+		`pageURL.searchParams.get("access_denied")`,
+		`toast.className = "access-toast"`,
+		`pageURL.searchParams.delete("access_denied")`,
 	} {
 		if !strings.Contains(sessionJS, want) {
 			t.Fatalf("session navigation is missing %q", want)
 		}
+	}
+	if !strings.Contains(controlPlaneCSS, "[hidden]{display:none!important}") {
+		t.Fatal("control-plane CSS must not override hidden navigation elements")
 	}
 }

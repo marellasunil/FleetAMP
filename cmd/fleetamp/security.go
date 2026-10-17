@@ -215,7 +215,7 @@ func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, a
 	if principalRole == roleGroupOwner && !groupOwnerRoute(r.URL.Path) {
 		slog.Warn("group owner route denied", "component", "auth", "event", "authorization_denied",
 			"username", username, "role", principalRole, "method", r.Method, "path", r.URL.Path)
-		http.Error(w, "forbidden", http.StatusForbidden)
+		writeAuthorizationDenied(w, r)
 		return false
 	}
 	if roleAllows(principalRole, required) {
@@ -224,8 +224,17 @@ func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, a
 	slog.Warn("authorization denied", "component", "auth", "event", "authorization_denied",
 		"username", username, "role", principalRole, "required_permission", required,
 		"method", r.Method, "path", r.URL.Path)
-	http.Error(w, "forbidden", http.StatusForbidden)
+	writeAuthorizationDenied(w, r)
 	return false
+}
+
+func writeAuthorizationDenied(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") && strings.Contains(r.Header.Get("Accept"), "text/html") {
+		destination := "/agents?access_denied=" + url.QueryEscape("Your role does not permit access to this page.")
+		http.Redirect(w, r, destination, http.StatusSeeOther)
+		return
+	}
+	http.Error(w, "forbidden", http.StatusForbidden)
 }
 
 func groupOwnerRoute(path string) bool {
