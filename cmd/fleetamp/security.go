@@ -229,7 +229,10 @@ func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, a
 }
 
 func groupOwnerRoute(path string) bool {
-	return path == "/account" || path == "/groups" || strings.HasPrefix(path, "/groups/") ||
+	return path == "/account" ||
+		path == "/agents" || strings.HasPrefix(path, "/agents/") ||
+		path == "/api/v1/agents" ||
+		path == "/groups" || strings.HasPrefix(path, "/groups/") ||
 		path == "/blueprints" ||
 		path == "/approvals" || strings.HasPrefix(path, "/approvals/") ||
 		(strings.HasPrefix(path, "/agents/") && strings.HasSuffix(path, "/delete")) ||

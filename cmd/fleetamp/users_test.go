@@ -271,3 +271,17 @@ func TestGroupOwnershipFollowsPerGroupRole(t *testing.T) {
 		t.Fatal("viewer membership incorrectly granted group ownership")
 	}
 }
+
+func TestSessionNavigationHidesUnauthorizedPages(t *testing.T) {
+	for _, want := range []string{
+		"group_owner: [\"/agents\", \"/groups\", \"/approvals\", \"/blueprints\"]",
+		"operator: [\"/agents\", \"/groups\", \"/otel-components\", \"/deployments\"",
+		"viewer: [\"/agents\", \"/groups\", \"/otel-components\", \"/deployments\"",
+		"document.querySelectorAll(\".admin-settings-link\")",
+		"label.hidden = !hasVisibleLink",
+	} {
+		if !strings.Contains(sessionJS, want) {
+			t.Fatalf("session navigation is missing %q", want)
+		}
+	}
+}
