@@ -631,3 +631,27 @@ func TestConfigurationSectionPolicyPersistence(t *testing.T) {
 	}
 	t.Fatal("exporter policy is missing")
 }
+
+// Regression: all callers must share the configured SQLite connection,
+// otherwise connection-local busy_timeout and foreign_keys may be absent.
+func TestSQLiteConnectionPoolIsSingleConnection(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "pool.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if got := db.db.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("max open connections = %d, want 1", got)
+	}
+	var busyTimeout, foreignKeys int
+	if err := db.db.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.db.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+		t.Fatal(err)
+	}
+	if busyTimeout != 5000 || foreignKeys != 1 {
+		t.Fatalf("busy_timeout=%d foreign_keys=%d", busyTimeout, foreignKeys)
+	}
+}
