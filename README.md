@@ -159,6 +159,13 @@ Fleet, Groups & Labels, administration, and Audit Log. See the
 [scalable console guide](docs/scalable-console.md) for the navigation model and
 current compatibility boundaries.
 
+Groups can select currently unassigned Collectors during creation and can use a
+controlled wildcard or regular-expression rule for rebuilt and short-lived
+Collectors. Later assignments, removals and moves use immutable target
+snapshots, reviewer approval, destination-configuration validation,
+compensating rollback and per-Collector execution evidence. See
+[governed Collector membership](docs/collector-membership.md).
+
 v0.3 also introduces governed component lifecycle and GitOps foundations:
 immutable install/upgrade/restart/remove proposals, target compatibility
 snapshots, group-scoped repository connections, exact-preview approval, an

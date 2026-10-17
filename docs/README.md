@@ -21,6 +21,7 @@ and contributor verification. Start with the section that matches your task.
 | Choose an instrumentation approach and generate governed configuration | [Guides and Blueprints](blueprints.md) |
 | Import an existing Collector configuration | [Configuration migration](migration.md) |
 | Store group-scoped secret references safely | [Group secrets](group-secrets.md) |
+| Assign, move and remove Collectors through governed groups | [Governed Collector membership](collector-membership.md) |
 | Configure and operate governed repository delivery | [Governed GitOps delivery](gitops.md) |
 | Verify the source, binary, database migration and optional image | [Local release verification](testing-v0.3.0.md) |
 | Validate the complete UI and governance journeys | [v0.3.0 E2E checklist](e2e-v0.3.0.md) |

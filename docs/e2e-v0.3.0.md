@@ -23,7 +23,8 @@ tagging the release.
 | FleetAMP is ready | `curl --fail http://127.0.0.1:8080/ready` |
 | Administrator account exists | Sign in and open Administration |
 | Test ownership group exists | Open **Groups & Labels** |
-| Test agent is assigned | Open the group and confirm its target inventory |
+| At least three test Collectors exist | Keep two unassigned and one assigned for membership scenarios |
+| Approved group configurations exist | Prepare source and destination versions for move/restore tests |
 | Test Git repository exists | Use an empty or dedicated non-production repository |
 
 ## 3. Record the test run
@@ -63,6 +64,47 @@ rules, and group-scoped authorization prevents access outside assigned groups.
 
 Expected result: the immutable version, approval, target snapshot, deployment,
 effective state, drift and audit entries refer to the same governed change.
+
+### 4.3 Governed Collector membership
+
+Use at least three test Collectors and two enabled groups.
+
+1. Open **Groups & Labels** and create a group.
+2. Select two currently unassigned Collectors during creation.
+3. Confirm a Collector already assigned elsewhere is not offered.
+4. Create a second group with a controlled wildcard or regex rule.
+5. Reconnect an otherwise unassigned Collector whose reported identity matches.
+6. Confirm it automatically joins the expected group.
+7. Explicitly remove it and confirm it remains excluded after reconnecting.
+8. Open **Manage Collector membership** on the first group.
+9. Create an assignment proposal that keeps the current configuration.
+10. Create a move proposal that selects an approved destination-group
+    configuration.
+11. Confirm the impact preview shows the operation, target count, destination
+    and configuration policy.
+12. Approve each proposal as the assigned reviewer.
+13. Expand **View execution evidence** in Membership History.
+
+Expected result: only authorized and currently eligible Collectors can be
+selected; destination configurations belong to the destination group; completed
+targets contain configuration and completion evidence.
+
+#### Controlled batch failure and recovery
+
+1. Create a proposal containing multiple disposable test Collectors.
+2. Introduce a controlled failure for a later target after at least one earlier
+   target can complete.
+3. Approve and execute the request.
+4. Inspect the request error and each Collector result.
+5. Verify earlier changed targets report `restored` when compensation succeeds.
+6. Verify the failing target reports `failed` or `rollback_failed`.
+7. Verify targets not reached by execution report `not_started`.
+8. Confirm original membership and previous configurations were restored where
+   evidence reports `restored`.
+
+Expected result: FleetAMP does not hide partial execution. It attempts
+compensating rollback in reverse order and records any incomplete restoration
+for operator action.
 
 ## 5. Migration workflow
 
@@ -165,6 +207,10 @@ identify actor, action, resource and outcome without credentials.
 | Scenario | Expected behavior |
 | --- | --- |
 | Invalid Collector YAML | Validation fails and no version is saved |
+| Collector already belongs to an enabled group | Assignment proposal is rejected as stale |
+| Destination configuration belongs to another group | Membership proposal is rejected |
+| Later target fails in a membership batch | Earlier targets are restored or expose rollback failure evidence |
+| Dynamic rule overlaps an enabled group | Group creation or update is rejected |
 | Disabled or unauthorized connection | Preview preparation fails |
 | Missing, failed or expired connection validation | Execution cannot be queued |
 | Repository path traversal attempt | Path resolution rejects it |
