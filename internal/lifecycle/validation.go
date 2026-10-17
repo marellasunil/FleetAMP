@@ -32,16 +32,17 @@ type Finding struct {
 }
 
 type TargetSnapshot struct {
-	InstanceUID string             `json:"instance_uid"`
-	Name        string             `json:"name"`
-	Type        agents.AgentType   `json:"type"`
-	Version     string             `json:"version,omitempty"`
-	Runtime     agents.RuntimeType `json:"runtime"`
-	Cluster     string             `json:"cluster,omitempty"`
-	Namespace   string             `json:"namespace,omitempty"`
-	Connected   bool               `json:"connected"`
-	Healthy     bool               `json:"healthy"`
-	Labels      map[string]string  `json:"labels,omitempty"`
+	InstanceUID         string                     `json:"instance_uid"`
+	Name                string                     `json:"name"`
+	Type                agents.AgentType           `json:"type"`
+	Version             string                     `json:"version,omitempty"`
+	Runtime             agents.RuntimeType         `json:"runtime"`
+	ManagementAuthority agents.ManagementAuthority `json:"management_authority"`
+	Cluster             string                     `json:"cluster,omitempty"`
+	Namespace           string                     `json:"namespace,omitempty"`
+	Connected           bool                       `json:"connected"`
+	Healthy             bool                       `json:"healthy"`
+	Labels              map[string]string          `json:"labels,omitempty"`
 }
 
 type Validation struct {
@@ -103,7 +104,7 @@ func ValidateRequest(request *Request, group *groups.Group, inventory []*agents.
 			continue
 		}
 		target := TargetSnapshot{InstanceUID: agent.InstanceUID, Name: agent.Name, Type: agent.Type, Version: agent.Version,
-			Runtime: agent.Deployment.Runtime, Cluster: agent.Deployment.Cluster, Namespace: agent.Deployment.Namespace,
+			Runtime: agent.Deployment.Runtime, ManagementAuthority: agents.EffectiveManagementAuthority(agent), Cluster: agent.Deployment.Cluster, Namespace: agent.Deployment.Namespace,
 			Connected: agent.Connected, Healthy: agent.Healthy, Labels: cloneStrings(groups.EffectiveLabels(agent))}
 		validation.Targets = append(validation.Targets, target)
 		validation.Findings = append(validation.Findings, validateTarget(request.Spec, agent)...)
@@ -144,6 +145,12 @@ func validateTarget(spec Spec, agent *agents.ManagedAgent) []Finding {
 	if wantsKubernetes && agent.Deployment.Runtime != agents.RuntimeKubernetes { add("runtime_component_mismatch", "blocking", "Kubernetes component requests require Kubernetes targets.") }
 	if spec.ComponentType == runtimes.OTelCollector && agent.Deployment.Runtime == agents.RuntimeKubernetes { add("runtime_component_mismatch", "blocking", "Use the Kubernetes Collector component type for Kubernetes targets.") }
 	if spec.ComponentType == runtimes.OTelOperator { add("operator_inventory", "blocking", "Operator inventory is not yet reported through the built-in management provider.") }
+	authority := agents.EffectiveManagementAuthority(agent)
+	if spec.DeploymentMethod != "manual-package" && authority != agents.AuthorityLifecycleManaged {
+		add("lifecycle_authority", "blocking", "Target has not explicitly granted FleetAMP lifecycle-managed authority.")
+	} else if spec.DeploymentMethod == "manual-package" && authority == agents.AuthorityObserveOnly {
+		add("management_authority", "advisory", "Target is observe-only; FleetAMP can record evidence but cannot change its process or configuration.")
+	}
 	switch spec.DeploymentMethod {
 	case "gitops", "kubernetes-api":
 		if agent.Deployment.Runtime != agents.RuntimeKubernetes { add("delivery_runtime_mismatch", "blocking", "Selected delivery method requires a Kubernetes target.") }

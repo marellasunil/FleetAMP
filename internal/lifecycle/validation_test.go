@@ -14,6 +14,7 @@ func TestValidateRequestSnapshotsResolvedTargets(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	group := &groups.Group{ID: "payments", Name: "Payments", Enabled: true, Selector: map[string]string{"team": "payments"}}
 	inventory := []*agents.ManagedAgent{{InstanceUID: "collector-a", Name: "collector-a", Type: agents.AgentTypeOTelCollector, Version: "0.148.0",
+		ManagementAuthority: agents.AuthorityLifecycleManaged,
 		Connected: true, Healthy: true, Deployment: agents.DeploymentContext{Runtime: agents.RuntimeKubernetes, Cluster: "prod", Namespace: "observability"},
 		GroupFields: map[string]string{"team": "payments"}, Labels: map[string]string{"environment": "production"}, Capabilities: []string{"reports_health"}},
 		{InstanceUID: "collector-b", Type: agents.AgentTypeOTelCollector, Version: "0.148.0", Deployment: agents.DeploymentContext{Runtime: agents.RuntimeKubernetes},
@@ -25,6 +26,32 @@ func TestValidateRequestSnapshotsResolvedTargets(t *testing.T) {
 	}
 	inventory[0].Labels["environment"] = "changed"
 	if validation.Targets[0].Labels["environment"] != "production" { t.Fatal("validation target snapshot changed with live inventory") }
+}
+
+func TestValidateRequestRequiresExplicitLifecycleAuthority(t *testing.T) {
+	request, err := NewRequest(Spec{Operation: Restart, ComponentType: runtimes.OTelCollector, GroupID: "payments",
+		DeploymentMethod: "systemd", CurrentVersion: "0.149.0", Reason: "recover stalled service"}, "operator")
+	if err != nil { t.Fatal(err) }
+	group := &groups.Group{ID: "payments", Name: "Payments", Enabled: true, Selector: map[string]string{"team": "payments"}}
+	agent := &agents.ManagedAgent{InstanceUID: "collector-a", Type: agents.AgentTypeOTelCollector, Version: "0.149.0",
+		Connected: true, Healthy: true, Deployment: agents.DeploymentContext{Runtime: agents.RuntimeVM},
+		GroupFields: map[string]string{"team": "payments"}, Capabilities: []string{"reports_health"}}
+	validation, err := ValidateRequest(request, group, []*agents.ManagedAgent{agent}, "admin")
+	if err != nil { t.Fatal(err) }
+	if validation.Status != ValidationBlocked || !hasFinding(validation.Findings, "lifecycle_authority") {
+		t.Fatalf("observe-only target was not blocked: %#v", validation)
+	}
+	agent.ManagementAuthority = agents.AuthorityLifecycleManaged
+	validation, err = ValidateRequest(request, group, []*agents.ManagedAgent{agent}, "admin")
+	if err != nil { t.Fatal(err) }
+	if validation.Status != ValidationCompatible || hasFinding(validation.Findings, "lifecycle_authority") {
+		t.Fatalf("explicitly managed target was blocked: %#v", validation)
+	}
+}
+
+func hasFinding(findings []Finding, code string) bool {
+	for _, finding := range findings { if finding.Code == code { return true } }
+	return false
 }
 
 func TestValidateRequestBlocksVersionAndRuntimeMismatch(t *testing.T) {

@@ -15,6 +15,28 @@ package agents
 
 import "time"
 
+// ManagementAuthority records the explicit boundary between FleetAMP and the
+// platform that owns a Collector process. The zero value is intentionally
+// treated as observe_only so upgraded installations fail closed.
+type ManagementAuthority string
+
+const (
+	AuthorityObserveOnly          ManagementAuthority = "observe_only"
+	AuthorityConfigurationManaged ManagementAuthority = "configuration_managed"
+	AuthorityLifecycleManaged     ManagementAuthority = "lifecycle_managed"
+)
+
+func (a ManagementAuthority) Valid() bool {
+	return a == AuthorityObserveOnly || a == AuthorityConfigurationManaged || a == AuthorityLifecycleManaged
+}
+
+func EffectiveManagementAuthority(agent *ManagedAgent) ManagementAuthority {
+	if agent != nil && agent.ManagementAuthority.Valid() {
+		return agent.ManagementAuthority
+	}
+	return AuthorityObserveOnly
+}
+
 // AgentType identifies the kind of telemetry agent managed by FleetAMP.
 type AgentType string
 
@@ -86,6 +108,13 @@ type ManagedAgent struct {
 
 	DisconnectedAt *time.Time `json:"disconnected_at,omitempty"`
 	RetiredAt      *time.Time `json:"retired_at,omitempty"`
+
+	// ManagementAuthority must be explicitly promoted before FleetAMP may
+	// execute package or service lifecycle operations. Group membership grants
+	// target ownership, but never implicitly grants process lifecycle authority.
+	ManagementAuthority ManagementAuthority `json:"management_authority,omitempty"`
+	AuthorityUpdatedBy  string              `json:"authority_updated_by,omitempty"`
+	AuthorityUpdatedAt  *time.Time           `json:"authority_updated_at,omitempty"`
 
 	// Deployment describes where the agent runs. FleetAMP manages the
 	// telemetry-agent control plane; the underlying runtime remains responsible
