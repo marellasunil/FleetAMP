@@ -302,7 +302,7 @@ func TestProfilePageAndMenuExposeAccountCapabilities(t *testing.T) {
 			t.Fatalf("profile page missing %q", expected)
 		}
 	}
-	for _, expected := range []string{`id = "profile-menu"`, `href="/account"`, "Sign out", "Change theme"} {
+	for _, expected := range []string{`menu.id = "profile-menu"`, `href="/account"`, "Sign out", "Change theme"} {
 		if !strings.Contains(sessionJS, expected) {
 			t.Fatalf("profile menu script missing %q", expected)
 		}
