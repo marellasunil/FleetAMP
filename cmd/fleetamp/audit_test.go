@@ -87,6 +87,15 @@ func TestDescribeAuditAction(t *testing.T) {
 	}
 }
 
+func TestDescribeMembershipAuditAction(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/groups/group-1/collectors", strings.NewReader("action=approve&request_id=change-1"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	action, resource, id := describeAuditAction(request)
+	if action != "membership.approve" || resource != "membership_change" || id != "change-1" {
+		t.Fatalf("descriptor=%q %q %q", action, resource, id)
+	}
+}
+
 func TestDescribeGitOpsAndIntegrationAuditActions(t *testing.T) {
 	tests := []struct{ path, form, action, resource, id string }{
 		{"/settings/integrations", "action=test_connection&connection_id=connection-1", "integration.validate", "integration_connection", "connection-1"},
