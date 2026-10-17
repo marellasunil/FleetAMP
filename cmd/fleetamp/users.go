@@ -77,12 +77,28 @@ const sessionJS = `(() => {
 		const label = identity.querySelector("span:last-child");
 		if (label) label.textContent = session.username + " · " + session.role;
       }
+      const allowedNavigation = {
+        group_owner: ["/agents", "/groups", "/approvals", "/blueprints"],
+        operator: ["/agents", "/groups", "/otel-components", "/deployments", "/instrumentation", "/blueprints", "/migration", "/addons", "/mcp"],
+        viewer: ["/agents", "/groups", "/otel-components", "/deployments", "/instrumentation", "/blueprints", "/migration", "/addons", "/mcp"]
+      };
+      document.querySelectorAll("nav a.navitem").forEach((link) => {
+        if (session.role === "admin") return;
+        const pathname = new URL(link.href, window.location.origin).pathname;
+        link.hidden = !(allowedNavigation[session.role] || []).some((prefix) => pathname === prefix || pathname.startsWith(prefix + "/"));
+      });
       document.querySelectorAll(".admin-settings-link").forEach((settings) => {
         if (session.role !== "admin") settings.hidden = true;
       });
-      if (session.role === "group_owner") {
-        document.querySelectorAll('nav a:not([href^="/groups"])').forEach((link) => { link.hidden = true; });
-      }
+      document.querySelectorAll("nav .navlabel").forEach((label) => {
+        let sibling = label.nextElementSibling;
+        let hasVisibleLink = false;
+        while (sibling && !sibling.classList.contains("navlabel")) {
+          if (sibling.matches("a.navitem") && !sibling.hidden) hasVisibleLink = true;
+          sibling = sibling.nextElementSibling;
+        }
+        label.hidden = !hasVisibleLink;
+      });
     })
     .catch(() => {});
 })();`
