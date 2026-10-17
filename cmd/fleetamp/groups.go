@@ -28,11 +28,12 @@ import (
 )
 
 type groupRequest struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description,omitempty"`
-	Selector    map[string]string `json:"selector"`
-	Owners      []string          `json:"owners,omitempty"`
-	Enabled     *bool             `json:"enabled,omitempty"`
+	Name           string                 `json:"name"`
+	Description    string                 `json:"description,omitempty"`
+	Selector       map[string]string      `json:"selector"`
+	MembershipRule *groups.MembershipRule `json:"membership_rule,omitempty"`
+	Owners         []string               `json:"owners,omitempty"`
+	Enabled        *bool                  `json:"enabled,omitempty"`
 }
 
 type groupSelectorPreviewRequest struct {
@@ -60,11 +61,18 @@ type labelCatalogItem struct {
 	GroupCount int
 }
 
+type unassignedCollectorItem struct {
+	Agent    *agents.ManagedAgent
+	Conflict string
+}
+
 type groupsView struct {
 	Page       string
 	Tab        string
 	Items      []groupListItem
 	Labels     []labelCatalogItem
+	Available  []unassignedCollectorItem
+	Query      string
 	Pagination paginationView
 }
 type groupPreviewAgent struct {
@@ -307,7 +315,9 @@ func validateConfigurationForApproval(ctx context.Context, validator *configs.Va
 		return errors.New("configuration is required")
 	}
 	content, err := configurationContentForValidation(ctx, configuration.GroupID, configuration.Content)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	validation := validator.Validate(ctx, content)
 	if validation.Valid {
 		return nil
@@ -533,14 +543,24 @@ func configurationsForGroup(items []*configs.Configuration, groupID string) []*c
 }
 
 func preferredGroupConfiguration(available []*configs.Configuration, history []*configs.Deployment, requestedID string) *configs.Configuration {
-	if len(available) == 0 { return nil }
+	if len(available) == 0 {
+		return nil
+	}
 	if requestedID != "" {
-		for _, candidate := range available { if candidate.ID == requestedID { return candidate } }
+		for _, candidate := range available {
+			if candidate.ID == requestedID {
+				return candidate
+			}
+		}
 	}
 	for _, deployment := range history {
-		if deployment.Status != configs.DeliveryApplied { continue }
+		if deployment.Status != configs.DeliveryApplied {
+			continue
+		}
 		for _, candidate := range available {
-			if candidate.ID == deployment.ConfigurationID { return candidate }
+			if candidate.ID == deployment.ConfigurationID {
+				return candidate
+			}
 		}
 	}
 	return available[0]
@@ -738,6 +758,10 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
+			if err := validateDynamicRuleConflicts(r.Context(), group, groupStore, agentStore); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			if err := groupStore.Create(r.Context(), group); err != nil {
 				http.Error(w, err.Error(), 409)
 				return
@@ -822,7 +846,11 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			group.Name, group.Description, group.Selector, group.UpdatedAt = name, strings.TrimSpace(req.Description), selector, time.Now().UTC()
+			if err := groups.ValidateMembershipRule(req.MembershipRule); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			group.Name, group.Description, group.Selector, group.MembershipRule, group.UpdatedAt = name, strings.TrimSpace(req.Description), selector, req.MembershipRule, time.Now().UTC()
 			if currentRole(auth, r) == roleAdmin && req.Owners != nil {
 				group.Owners = normalizeOwners(req.Owners)
 			}
@@ -830,6 +858,10 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 				group.Enabled = *req.Enabled
 			}
 			if err := validateGroupOverlap(r.Context(), groupStore, group, group.ID); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := validateDynamicRuleConflicts(r.Context(), group, groupStore, agentStore); err != nil {
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
@@ -858,7 +890,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 	})
 
-	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, validator, adapter, sectionPolicyStore, auth, notifier)
+	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, validator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 }
 
 // newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
@@ -867,6 +899,9 @@ func newValidatedGroup(req groupRequest) (*groups.Group, error) {
 	req.Description = strings.TrimSpace(req.Description)
 	req.Selector = cleanSelector(req.Selector)
 	if err := validateGroupSelector(req.Selector); err != nil {
+		return nil, err
+	}
+	if err := groups.ValidateMembershipRule(req.MembershipRule); err != nil {
 		return nil, err
 	}
 	if req.Name == "" {
@@ -880,6 +915,7 @@ func newValidatedGroup(req groupRequest) (*groups.Group, error) {
 		return nil, err
 	}
 	group.ID = groupIDFromName(req.Name)
+	group.MembershipRule = req.MembershipRule
 	return group, nil
 }
 
@@ -1046,7 +1082,7 @@ func groupLabelCatalog(items []*groups.Group) []labelCatalogItem {
 }
 
 // registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
-func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier) {
+func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
 	// /groups displays all groups and accepts creation form submissions.
 	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/groups" {
@@ -1059,7 +1095,12 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			group, err := newValidatedGroup(groupRequest{Name: r.FormValue("name"), Description: r.FormValue("description"), Selector: selector})
+			rule, err := membershipRuleFromForm(r)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			group, err := newValidatedGroup(groupRequest{Name: r.FormValue("name"), Description: r.FormValue("description"), Selector: selector, MembershipRule: rule})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -1068,7 +1109,16 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
+			if err := validateDynamicRuleConflicts(r.Context(), group, groupStore, agentStore); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			if err := groupStore.Create(r.Context(), group); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := assignCollectorsDuringGroupCreation(r.Context(), group, r.Form["agent_uid"], groupStore, agentStore, dataDir); err != nil {
+				_ = groupStore.Delete(r.Context(), group.ID)
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
@@ -1084,20 +1134,29 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			internalServerError(w, err)
 			return
 		}
+		allGroups := groupsList
 		groupsList = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), groupsList)
 		tab := r.URL.Query().Get("tab")
 		switch tab {
-		case "groups", "labels", "selectors":
+		case "all", "create", "unassigned", "labels":
 		default:
-			tab = "groups"
+			tab = "all"
 		}
-		view := groupsView{Page: "groups", Tab: tab, Items: make([]groupListItem, 0, len(groupsList)), Labels: groupLabelCatalog(groupsList)}
+		available, availableErr := buildUnassignedCollectorItems(r.Context(), agentStore, allGroups)
+		if availableErr != nil {
+			internalServerError(w, availableErr)
+			return
+		}
+		view := groupsView{Page: "groups", Tab: tab, Items: make([]groupListItem, 0, len(groupsList)), Labels: groupLabelCatalog(groupsList), Available: available, Query: strings.TrimSpace(r.URL.Query().Get("q"))}
 		allConfigurations, configurationErr := configStore.List(r.Context())
 		if configurationErr != nil {
 			internalServerError(w, configurationErr)
 			return
 		}
 		for _, group := range groupsList {
+			if !groupMatchesQuery(group, view.Query) {
+				continue
+			}
 			members, memberErr := membersForGroupIdentity(r.Context(), group, agentStore)
 			if memberErr != nil {
 				internalServerError(w, memberErr)

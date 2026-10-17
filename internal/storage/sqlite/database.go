@@ -174,7 +174,7 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_deployments_agent_hash ON deployments(agent_instance_uid, configuration_hash, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS groups (
             id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '',
-            selector TEXT NOT NULL, owners TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            selector TEXT NOT NULL, membership_rule TEXT NOT NULL DEFAULT 'null', owners TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name)`,
 		`CREATE TABLE IF NOT EXISTS group_secrets (
@@ -371,6 +371,9 @@ func (d *Database) initialize(ctx context.Context) error {
 		return err
 	}
 	if err := d.ensureGroupOwnersColumn(ctx); err != nil {
+		return err
+	}
+	if err := d.ensureGroupMembershipRuleColumn(ctx); err != nil {
 		return err
 	}
 	if err := d.ensureApprovalReviewColumns(ctx); err != nil {
@@ -673,6 +676,20 @@ func (d *Database) ensureGroupOwnersColumn(ctx context.Context) error {
 	}
 	if _, err := d.db.ExecContext(ctx, `ALTER TABLE groups ADD COLUMN owners TEXT NOT NULL DEFAULT '[]'`); err != nil {
 		return fmt.Errorf("add groups.owners column: %w", err)
+	}
+	return nil
+}
+
+func (d *Database) ensureGroupMembershipRuleColumn(ctx context.Context) error {
+	present, err := sqliteColumnExists(ctx, d.db, "groups", "membership_rule")
+	if err != nil {
+		return err
+	}
+	if present {
+		return nil
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE groups ADD COLUMN membership_rule TEXT NOT NULL DEFAULT 'null'`); err != nil {
+		return fmt.Errorf("add groups.membership_rule column: %w", err)
 	}
 	return nil
 }
