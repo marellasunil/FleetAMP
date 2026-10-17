@@ -32,7 +32,7 @@ func TestThemeAssetAndControlsAreRendered(t *testing.T) {
 	}
 	html := page.String()
 	for _, want := range []string{
-		"class=\"profile-menu\"",
+		".profile-menu{",
 		"src=\"/assets/theme.js\"",
 		"src=\"/assets/session.js\"",
 		":root[data-theme=\"light\"]",
