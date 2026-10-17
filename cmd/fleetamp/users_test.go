@@ -291,3 +291,20 @@ func TestSessionNavigationHidesUnauthorizedPages(t *testing.T) {
 		t.Fatal("control-plane CSS must not override hidden navigation elements")
 	}
 }
+
+
+func TestProfilePageAndMenuExposeAccountCapabilities(t *testing.T) {
+	for _, expected := range []string{
+		"My Profile", "Access &amp; Membership", "Security", "Preferences",
+		"Notifications", "Activity", "Active sessions", "MFA",
+	} {
+		if !strings.Contains(accountPageHTML, expected) {
+			t.Fatalf("profile page missing %q", expected)
+		}
+	}
+	for _, expected := range []string{`id = "profile-menu"`, `href="/account"`, "Sign out", "Change theme"} {
+		if !strings.Contains(sessionJS, expected) {
+			t.Fatalf("profile menu script missing %q", expected)
+		}
+	}
+}
