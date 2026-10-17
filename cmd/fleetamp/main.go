@@ -122,6 +122,7 @@ func main() {
 	groupStore := database.Groups()
 	auth.groupStore = groupStore
 	groupRequestStore := database.GroupDeploymentRequests()
+	membershipChangeStore := database.MembershipChanges()
 	destinationProfileStore := database.DestinationProfiles()
 	sectionPolicyStore := database.SectionPolicies()
 	driftPolicyStore := database.DriftPolicy()
@@ -257,6 +258,7 @@ func main() {
 	registerDriftPolicyRoutes(mux, driftPolicyStore, auth)
 	registerAuditRoutes(mux, auditStore)
 	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
+	registerMembershipRoutes(mux, membershipChangeStore, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, adapter, auth, dataDir)
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
 	registerComponentLifecycleApprovalRoutes(mux, componentLifecycleApprovalStore, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleExecutionStore, groupStore, auth)
 	registerGitOpsPreviewRoutes(mux, componentLifecycleExecutionStore, componentLifecycleRequestStore, componentGitOpsPreviewStore, gitOpsPreviewApprovalStore, gitOpsExecutionStore, integrationConnectionStore, integrationValidationStore, groupStore, auth)

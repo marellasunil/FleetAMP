@@ -274,6 +274,9 @@ func describeAuditAction(r *http.Request) (string, string, string) {
 		}
 		return "user." + action, "user", firstNonEmpty(r.FormValue("username"), resourceID)
 	}
+	if strings.HasPrefix(r.URL.Path, "/groups/") && strings.HasSuffix(r.URL.Path, "/collectors") && action != "" {
+		return "membership." + action, "membership_change", firstNonEmpty(r.FormValue("request_id"), resourceID)
+	}
 	if strings.HasPrefix(r.URL.Path, "/groups/") && action != "" {
 		if action == "request_deployment" || action == "approve_deployment" || action == "reject_deployment" || action == "send_back_deployment" || action == "cancel_deployment" {
 			return "deployment." + action, "group", resourceID

@@ -64,6 +64,10 @@ func (d *Database) GroupDeploymentRequests() *GroupDeploymentRequestStore {
 	return &GroupDeploymentRequestStore{db: d.db}
 }
 
+func (d *Database) MembershipChanges() *MembershipChangeStore {
+	return &MembershipChangeStore{db: d.db}
+}
+
 // DestinationProfiles returns administrator-controlled exporter destinations.
 func (d *Database) DestinationProfiles() *DestinationProfileStore {
 	return &DestinationProfileStore{db: d.db}
@@ -211,6 +215,17 @@ func (d *Database) initialize(ctx context.Context) error {
             FOREIGN KEY(configuration_id) REFERENCES configurations(id)
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_group_deployment_requests_group_created ON group_deployment_requests(group_id, created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS membership_changes (
+			id TEXT PRIMARY KEY, operation TEXT NOT NULL,
+			source_group_id TEXT NOT NULL DEFAULT '', source_group_name TEXT NOT NULL DEFAULT '',
+			target_group_id TEXT NOT NULL DEFAULT '', target_group_name TEXT NOT NULL DEFAULT '',
+			removal_policy TEXT NOT NULL DEFAULT '', target_configuration_id TEXT NOT NULL DEFAULT '',
+			targets TEXT NOT NULL, requested_by TEXT NOT NULL, assigned_reviewer TEXT NOT NULL,
+			reason TEXT NOT NULL, status TEXT NOT NULL, reviewed_by TEXT NOT NULL DEFAULT '',
+			review_comment TEXT NOT NULL DEFAULT '', reviewed_at TEXT, error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_membership_changes_created ON membership_changes(created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS component_lifecycle_requests (
 			id TEXT PRIMARY KEY, operation TEXT NOT NULL, component_type TEXT NOT NULL,
 			group_id TEXT NOT NULL, label_selector TEXT NOT NULL DEFAULT '',
