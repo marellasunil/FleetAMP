@@ -341,37 +341,58 @@ func registerMembershipRoutes(mux *http.ServeMux, changes storage.MembershipChan
 
 func urlQuery(value string) string { return url.QueryEscape(value) }
 
+type membershipExecutionCheckpoint struct {
+	agent                   *agents.ManagedAgent
+	original                *agents.ManagedAgent
+	previousConfigurationID string
+	configurationChanged    bool
+	membershipChanged       bool
+}
+
+type membershipDeliveryFunc func(context.Context, string, *configs.Configuration, configs.DeploymentAction, string, string) error
+
 func executeMembershipChange(r *http.Request, value *configs.MembershipChange, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter, dataDir string) error {
+	deliver := func(ctx context.Context, agentUID string, configuration *configs.Configuration, action configs.DeploymentAction, previousConfigurationID, approvalRequestID string) error {
+		_, _, err := deliverConfigurationWithRollback(ctx, agentUID, configuration, action, previousConfigurationID, approvalRequestID, assignmentStore, deploymentStore, adapter)
+		return err
+	}
+	return executeMembershipBatch(r.Context(), value, groupStore, agentStore, configStore, assignmentStore, deliver, dataDir)
+}
+
+func executeMembershipBatch(ctx context.Context, value *configs.MembershipChange, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deliver membershipDeliveryFunc, dataDir string) error {
 	var targetGroup *groups.Group
 	var targetConfig *configs.Configuration
 	var err error
 	if value.Operation != configs.MembershipRemove {
-		targetGroup, err = groupStore.Get(r.Context(), value.TargetGroupID)
+		targetGroup, err = groupStore.Get(ctx, value.TargetGroupID)
 		if err != nil {
 			return err
 		}
 		if value.TargetConfigurationID != "" {
-			targetConfig, err = configStore.Get(r.Context(), value.TargetConfigurationID)
+			targetConfig, err = configStore.Get(ctx, value.TargetConfigurationID)
 			if err != nil {
 				return err
 			}
 		}
 	}
-	allGroups, err := groupStore.List(r.Context())
+	allGroups, err := groupStore.List(ctx)
 	if err != nil {
 		return err
 	}
 	var sourceGroup *groups.Group
 	if value.SourceGroupID != "" {
-		sourceGroup, err = groupStore.Get(r.Context(), value.SourceGroupID)
+		sourceGroup, err = groupStore.Get(ctx, value.SourceGroupID)
 		if err != nil {
 			return err
 		}
 	}
+
+	// Resolve and validate every immutable target before changing any Collector.
+	checkpoints := make([]*membershipExecutionCheckpoint, 0, len(value.Targets))
 	for _, snapshot := range value.Targets {
-		agent, err := agentStore.Get(r.Context(), snapshot.AgentInstanceUID)
-		if err != nil {
-			return err
+		agent, getErr := agentStore.Get(ctx, snapshot.AgentInstanceUID)
+		if getErr != nil {
+			return getErr
 		}
 		if value.Operation == configs.MembershipAssign {
 			for _, candidate := range allGroups {
@@ -382,40 +403,89 @@ func executeMembershipChange(r *http.Request, value *configs.MembershipChange, g
 		} else if sourceGroup == nil || !groups.MatchesIdentity(sourceGroup, agent) {
 			return fmt.Errorf("%s no longer belongs to the approved source group", agent.Name)
 		}
-		oldFields := copyStringMap(agent.GroupFields)
-		oldExclusions := append([]string(nil), agent.ExcludedGroupIDs...)
-		if targetConfig != nil {
-			_, _, err = deliverConfigurationWithRollback(r.Context(), agent.InstanceUID, targetConfig, configs.DeploymentActionDeploy, snapshot.PreviousConfigurationID, value.ID, assignmentStore, deploymentStore, adapter)
-			if err != nil && !errors.Is(err, configs.ErrConfigurationCurrent) {
-				return fmt.Errorf("%s: %w", agent.Name, err)
-			}
+		original := *agent
+		original.GroupFields = copyStringMap(agent.GroupFields)
+		original.ExcludedGroupIDs = append([]string(nil), agent.ExcludedGroupIDs...)
+		checkpoint := &membershipExecutionCheckpoint{agent: agent, original: &original}
+		latest, assignmentErr := latestAssignmentForAgent(ctx, assignmentStore, agent.InstanceUID)
+		if assignmentErr == nil {
+			checkpoint.previousConfigurationID = latest.ConfigurationID
+		} else if !errors.Is(assignmentErr, storage.ErrAssignmentNotFound) {
+			return assignmentErr
 		}
+		checkpoints = append(checkpoints, checkpoint)
+	}
+
+	for index, checkpoint := range checkpoints {
+		snapshot := value.Targets[index]
+		configuration := targetConfig
+		action := configs.DeploymentActionDeploy
 		if value.Operation == configs.MembershipRemove && value.RemovalPolicy == configs.RemovalRestore && snapshot.PreviousConfigurationID != "" {
-			previous, e := configStore.Get(r.Context(), snapshot.PreviousConfigurationID)
-			if e != nil {
-				return e
+			configuration, err = configStore.Get(ctx, snapshot.PreviousConfigurationID)
+			if err != nil {
+				return rollbackMembershipBatch(ctx, value, checkpoints[:index], agentStore, configStore, deliver, dataDir, err)
 			}
-			_, _, e = deliverConfigurationWithRollback(r.Context(), agent.InstanceUID, previous, configs.DeploymentActionRollback, "", value.ID, assignmentStore, deploymentStore, adapter)
-			if e != nil && !errors.Is(e, configs.ErrConfigurationCurrent) {
-				return e
+			action = configs.DeploymentActionRollback
+		}
+		if configuration != nil {
+			deliveryErr := deliver(ctx, checkpoint.agent.InstanceUID, configuration, action, checkpoint.previousConfigurationID, value.ID)
+			if deliveryErr != nil && !errors.Is(deliveryErr, configs.ErrConfigurationCurrent) {
+				return rollbackMembershipBatch(ctx, value, checkpoints[:index], agentStore, configStore, deliver, dataDir, fmt.Errorf("%s: %w", checkpoint.agent.Name, deliveryErr))
 			}
+			checkpoint.configurationChanged = deliveryErr == nil
 		}
 		if value.Operation == configs.MembershipRemove {
-			agent.GroupFields = map[string]string{}
+			checkpoint.agent.GroupFields = map[string]string{}
 			if sourceGroup != nil && sourceGroup.MembershipRule != nil {
-				agent.ExcludedGroupIDs = appendUnique(agent.ExcludedGroupIDs, sourceGroup.ID)
+				checkpoint.agent.ExcludedGroupIDs = appendUnique(checkpoint.agent.ExcludedGroupIDs, sourceGroup.ID)
 			}
 		} else {
-			agent.GroupFields = copyStringMap(targetGroup.Selector)
-			agent.ExcludedGroupIDs = removeString(agent.ExcludedGroupIDs, targetGroup.ID)
+			checkpoint.agent.GroupFields = copyStringMap(targetGroup.Selector)
+			checkpoint.agent.ExcludedGroupIDs = removeString(checkpoint.agent.ExcludedGroupIDs, targetGroup.ID)
 		}
-		if err = agentStore.Upsert(r.Context(), agent); err != nil {
-			agent.GroupFields = oldFields
-			agent.ExcludedGroupIDs = oldExclusions
-			return err
+		if err = agentStore.Upsert(ctx, checkpoint.agent); err != nil {
+			return rollbackMembershipBatch(ctx, value, checkpoints[:index+1], agentStore, configStore, deliver, dataDir, err)
+		}
+		checkpoint.membershipChanged = true
+	}
+	if err = saveAgentSnapshot(ctx, agentStore, dataDir); err != nil {
+		return rollbackMembershipBatch(ctx, value, checkpoints, agentStore, configStore, deliver, dataDir, err)
+	}
+	return nil
+}
+
+func rollbackMembershipBatch(ctx context.Context, value *configs.MembershipChange, checkpoints []*membershipExecutionCheckpoint, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, deliver membershipDeliveryFunc, dataDir string, cause error) error {
+	rollbackErrors := make([]error, 0)
+	for index := len(checkpoints) - 1; index >= 0; index-- {
+		checkpoint := checkpoints[index]
+		if checkpoint.membershipChanged {
+			if err := agentStore.Upsert(ctx, checkpoint.original); err != nil {
+				rollbackErrors = append(rollbackErrors, fmt.Errorf("%s membership: %w", checkpoint.original.Name, err))
+			}
+		}
+		if !checkpoint.configurationChanged {
+			continue
+		}
+		if checkpoint.previousConfigurationID == "" {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("%s configuration: no previous configuration was recorded", checkpoint.original.Name))
+			continue
+		}
+		previous, err := configStore.Get(ctx, checkpoint.previousConfigurationID)
+		if err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("%s configuration lookup: %w", checkpoint.original.Name, err))
+			continue
+		}
+		if err = deliver(ctx, checkpoint.original.InstanceUID, previous, configs.DeploymentActionRollback, "", value.ID); err != nil && !errors.Is(err, configs.ErrConfigurationCurrent) {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("%s configuration: %w", checkpoint.original.Name, err))
 		}
 	}
-	return saveAgentSnapshot(r.Context(), agentStore, dataDir)
+	if err := saveAgentSnapshot(ctx, agentStore, dataDir); err != nil {
+		rollbackErrors = append(rollbackErrors, fmt.Errorf("persist restored membership snapshot: %w", err))
+	}
+	if len(rollbackErrors) == 0 {
+		return fmt.Errorf("%w; all previously changed Collectors were restored", cause)
+	}
+	return fmt.Errorf("%w; compensating rollback incomplete: %v", cause, errors.Join(rollbackErrors...))
 }
 
 const membershipHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Collector membership · FleetAMP</title><style>` + controlPlaneCSS + detailCSS + `.pick{display:grid;gap:8px}.pick label{display:flex;gap:9px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:8px}.membership-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.impact-preview{padding:11px;border:1px solid var(--line);border-radius:8px;background:#0a1626;color:var(--muted);font-size:12px}.impact-preview strong{display:block;color:var(--text);margin-bottom:4px}@media(max-width:950px){.membership-actions{grid-template-columns:1fr}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">FleetAMP / Groups / Collector membership</div><div class="pagetitle">{{.Group.Name}}</div><div class="subtitle">Governed assignment, removal and movement of Collectors.</div></div><a class="btn" href="/groups/{{.Group.ID}}">← Group</a></header><div class="content">{{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}
