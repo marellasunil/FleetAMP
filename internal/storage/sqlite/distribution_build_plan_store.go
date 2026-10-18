@@ -45,3 +45,14 @@ func (s *DistributionBuildPlanStore) List(ctx context.Context, limit int) ([]*di
 	}
 	return out, rows.Err()
 }
+
+func (s *DistributionBuildPlanStore) Get(ctx context.Context, id string) (*distributions.BuildPlan, error) {
+	p := &distributions.BuildPlan{}
+	var requested string
+	err := s.db.QueryRowContext(ctx, `SELECT id,distribution_id,manifest,plan_hash,status,requested_by,requested_at FROM distribution_build_plans WHERE id=?`, id).Scan(&p.ID,&p.DistributionID,&p.ManifestJSON,&p.PlanHash,&p.Status,&p.RequestedBy,&requested)
+	if err == sql.ErrNoRows { return nil, fmt.Errorf("build plan %q not found", id) }
+	if err != nil { return nil, err }
+	if err := json.Unmarshal([]byte(p.ManifestJSON), &p.Manifest); err != nil { return nil, err }
+	p.RequestedAt, _ = time.Parse(time.RFC3339Nano, requested)
+	return p, nil
+}
