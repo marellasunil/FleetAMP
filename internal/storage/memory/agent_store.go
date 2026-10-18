@@ -47,6 +47,11 @@ func (s *AgentStore) Upsert(ctx context.Context, agent *agents.ManagedAgent) err
 		if copy.FirstSeen.IsZero() {
 			copy.FirstSeen = previous.FirstSeen
 		}
+		if !copy.ManagementAuthority.Valid() {
+			copy.ManagementAuthority = previous.ManagementAuthority
+			copy.AuthorityUpdatedBy = previous.AuthorityUpdatedBy
+			copy.AuthorityUpdatedAt = previous.AuthorityUpdatedAt
+		}
 	} else if copy.FirstSeen.IsZero() {
 		copy.FirstSeen = copy.LastSeen
 	}

@@ -202,6 +202,9 @@ func main() {
 				}
 				if previous != nil {
 					event.Agent.DisplayName = previous.DisplayName
+					event.Agent.ManagementAuthority = previous.ManagementAuthority
+					event.Agent.AuthorityUpdatedBy = previous.AuthorityUpdatedBy
+					event.Agent.AuthorityUpdatedAt = previous.AuthorityUpdatedAt
 					event.Agent.Labels = copyStringMap(previous.Labels)
 					event.Agent.GroupFields = copyStringMap(previous.GroupFields)
 					event.Agent.ExcludedGroupIDs = append([]string(nil), previous.ExcludedGroupIDs...)
@@ -543,6 +546,46 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 		http.Redirect(w, r, "/agents/"+uid+"?renamed=1", http.StatusSeeOther)
 	})
 
+	// Lifecycle authority is an independent, explicit trust decision. Assigning
+	// a Collector to a group does not grant FleetAMP permission to restart,
+	// upgrade, install, or remove the underlying process.
+	mux.HandleFunc("POST /agents/{uid}/management-authority", func(w http.ResponseWriter, r *http.Request) {
+		if currentRole(auth, r) != roleAdmin {
+			http.Error(w, "forbidden: only an Admin can change Collector management authority", http.StatusForbidden)
+			return
+		}
+		uid := strings.TrimSpace(r.PathValue("uid"))
+		agent, err := agentStore.Get(r.Context(), uid)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		authority := agents.ManagementAuthority(strings.TrimSpace(r.FormValue("management_authority")))
+		if !authority.Valid() {
+			http.Redirect(w, r, "/agents/"+uid+"?error="+url.QueryEscape("Select a valid management authority."), http.StatusSeeOther)
+			return
+		}
+		if authority == agents.AuthorityLifecycleManaged && strings.TrimSpace(r.FormValue("confirm_lifecycle")) != "yes" {
+			http.Redirect(w, r, "/agents/"+uid+"?error="+url.QueryEscape("Confirm that FleetAMP is the authoritative lifecycle manager."), http.StatusSeeOther)
+			return
+		}
+		previous := *agent
+		now := time.Now().UTC()
+		agent.ManagementAuthority = authority
+		agent.AuthorityUpdatedBy = currentUsername(auth, r)
+		agent.AuthorityUpdatedAt = &now
+		if err := agentStore.Upsert(r.Context(), agent); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			_ = agentStore.Upsert(r.Context(), &previous)
+			internalServerError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/agents/"+uid+"?authority_saved=1", http.StatusSeeOther)
+	})
+
 	// /api/v1/agent-events returns lifecycle events inside a requested time range.
 	mux.HandleFunc("/api/v1/agent-events", func(w http.ResponseWriter, r *http.Request) {
 		since := timeRangeStart(r.URL.Query().Get("range"))
@@ -577,6 +620,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			TargetingMetadata:     groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent),
 			EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields,
 			Error: r.URL.Query().Get("error"), DisplayNameSaved: r.URL.Query().Get("renamed") == "1",
+			AuthoritySaved: r.URL.Query().Get("authority_saved") == "1",
 			CanManageIdentity: currentRole(auth, r) == roleAdmin,
 		}
 		view.Deployments, _ = deploymentStore.ListByAgent(r.Context(), uid, 10)
@@ -685,6 +729,7 @@ type agentDetailView struct {
 	CanAdminBreakGlass    bool
 	CanManageIdentity     bool
 	DisplayNameSaved      bool
+	AuthoritySaved        bool
 	Error                 string
 }
 

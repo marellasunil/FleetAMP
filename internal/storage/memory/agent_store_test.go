@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/storage"
@@ -56,5 +57,19 @@ func TestAgentStorePreservesDisplayNameAcrossProtocolUpdates(t *testing.T) {
 	}
 	if got.DisplayName != "payments-prod-collector-01" || got.Name != got.DisplayName {
 		t.Fatalf("display name was not preserved: %#v", got)
+	}
+}
+
+func TestAgentStorePreservesManagementAuthorityAcrossProtocolUpdates(t *testing.T) {
+	ctx := context.Background()
+	store := NewAgentStore()
+	now := time.Now().UTC()
+	if err := store.Upsert(ctx, &agents.ManagedAgent{InstanceUID: "agent-1", ManagementAuthority: agents.AuthorityLifecycleManaged,
+		AuthorityUpdatedBy: "admin", AuthorityUpdatedAt: &now}); err != nil { t.Fatal(err) }
+	if err := store.Upsert(ctx, &agents.ManagedAgent{InstanceUID: "agent-1", Name: "reported-hostname", Connected: true}); err != nil { t.Fatal(err) }
+	got, err := store.Get(ctx, "agent-1")
+	if err != nil { t.Fatal(err) }
+	if got.ManagementAuthority != agents.AuthorityLifecycleManaged || got.AuthorityUpdatedBy != "admin" || got.AuthorityUpdatedAt == nil {
+		t.Fatalf("management authority was not preserved: %#v", got)
 	}
 }

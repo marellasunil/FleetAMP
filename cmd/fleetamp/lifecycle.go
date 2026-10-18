@@ -253,6 +253,9 @@ func inheritManagedMetadataByStableID(ctx context.Context, store *memory.AgentSt
 	incoming.GroupFields = copyStringMap(match.GroupFields)
 	incoming.Labels = copyStringMap(match.Labels)
 	incoming.DisplayName = match.DisplayName
+	incoming.ManagementAuthority = match.ManagementAuthority
+	incoming.AuthorityUpdatedBy = match.AuthorityUpdatedBy
+	incoming.AuthorityUpdatedAt = match.AuthorityUpdatedAt
 	if incoming.DisplayName != "" {
 		incoming.Name = incoming.DisplayName
 	}
