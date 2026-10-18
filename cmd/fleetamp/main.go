@@ -145,6 +145,7 @@ func main() {
 	distributionBuildApprovalStore := database.DistributionBuildApprovals()
 	distributionBuildExecutionStore := database.DistributionBuildExecutions()
 	distributionBuildPreflightStore := database.DistributionBuildPreflights()
+	distributionBuildWorkerResultStore := database.DistributionBuildWorkerResults()
 	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("FLEETAMP_INTEGRATION_ALLOWED_HOSTS")}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
@@ -169,6 +170,12 @@ func main() {
 		gitOpsWorker := &gitops.Worker{ID: workerID, Executions: gitOpsExecutionStore, Previews: componentGitOpsPreviewStore, Adapters: gitOpsAdapters, LeaseTTL: durationEnvOrDefault("FLEETAMP_GITOPS_LEASE_TTL", 30*time.Second)}
 		go gitOpsWorker.Run(ctx, durationEnvOrDefault("FLEETAMP_GITOPS_WORKER_INTERVAL", 5*time.Second))
 		slog.Info("GitOps worker enabled", "component", "gitops_worker", "worker_id", workerID)
+	}
+	if boolEnv("FLEETAMP_DISTRIBUTION_BUILD_WORKER_ENABLED") {
+		workerID := envOrDefault("FLEETAMP_DISTRIBUTION_BUILD_WORKER_ID", "fleetamp-build-dry-run")
+		worker := &distributionBuildWorker{ID: workerID, Executions: distributionBuildExecutionStore, Preflights: distributionBuildPreflightStore, Results: distributionBuildWorkerResultStore}
+		go worker.run(ctx, durationEnvOrDefault("FLEETAMP_DISTRIBUTION_BUILD_WORKER_INTERVAL", 5*time.Second))
+		slog.Info("Collector distribution dry-run worker enabled", "component", "distribution_build_worker", "worker_id", workerID, "adapter", "dry-run")
 	}
 
 	go func() {
@@ -289,7 +296,7 @@ func main() {
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
 	registerDistributionRoutes(mux, distributionStore, configValidator, auth)
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionPreviewStore, groupStore, configValidator, auth)
-	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, auth)
+	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
