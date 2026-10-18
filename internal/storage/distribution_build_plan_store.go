@@ -8,4 +8,5 @@ import (
 type DistributionBuildPlanStore interface {
 	Create(context.Context, *distributions.BuildPlan) error
 	List(context.Context, int) ([]*distributions.BuildPlan, error)
+	Get(context.Context, string) (*distributions.BuildPlan, error)
 }

@@ -44,3 +44,12 @@ func (s *DistributionBuildPlanStore) List(_ context.Context, limit int) ([]*dist
 	}
 	return out, nil
 }
+
+func (s *DistributionBuildPlanStore) Get(_ context.Context, id string) (*distributions.BuildPlan, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, ok := s.items[id]
+	if !ok { return nil, fmt.Errorf("build plan %q not found", id) }
+	copy := *item
+	return &copy, nil
+}
