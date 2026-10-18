@@ -147,6 +147,9 @@ func (d *Database) DistributionBuildPreflights() *DistributionBuildPreflightStor
 func (d *Database) DistributionBuildWorkerResults() *DistributionBuildWorkerResultStore {
 	return &DistributionBuildWorkerResultStore{db: d.db}
 }
+func (d *Database) DistributionBuildSources() *DistributionBuildSourceStore {
+	return &DistributionBuildSourceStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -218,6 +221,17 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_build_worker_results_completed ON distribution_build_worker_results(completed_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_worker_results_no_update BEFORE UPDATE ON distribution_build_worker_results BEGIN SELECT RAISE(ABORT,'Distribution build worker results are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_worker_results_no_delete BEFORE DELETE ON distribution_build_worker_results BEGIN SELECT RAISE(ABORT,'Distribution build worker results are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_build_sources (
+			id TEXT PRIMARY KEY, execution_id TEXT NOT NULL UNIQUE, worker_result_id TEXT NOT NULL UNIQUE,
+			build_plan_hash TEXT NOT NULL, repository TEXT NOT NULL, source_ref TEXT NOT NULL,
+			archive_url TEXT NOT NULL, status TEXT NOT NULL CHECK(status = 'source-resolved'),
+			evidence_hash TEXT NOT NULL UNIQUE, resolved_by TEXT NOT NULL, resolved_at TEXT NOT NULL,
+			FOREIGN KEY(execution_id) REFERENCES distribution_build_executions(id),
+			FOREIGN KEY(worker_result_id) REFERENCES distribution_build_worker_results(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_build_sources_resolved ON distribution_build_sources(resolved_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_sources_no_update BEFORE UPDATE ON distribution_build_sources BEGIN SELECT RAISE(ABORT,'Distribution build sources are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_sources_no_delete BEFORE DELETE ON distribution_build_sources BEGIN SELECT RAISE(ABORT,'Distribution build sources are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
