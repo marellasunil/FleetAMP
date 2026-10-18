@@ -128,6 +128,9 @@ func requiredPermission(r *http.Request) permission {
 	if r.URL.Path == "/approvals" || strings.HasPrefix(r.URL.Path, "/approvals/") {
 		return permissionApprove
 	}
+	if r.Method == http.MethodPost && r.URL.Path == "/collector-distributions" {
+		return permissionAdmin
+	}
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/configurations" {
 		// Raw complete-document creation bypasses per-section baselines, so it
 		// remains Admin-only. Operators use the policy-enforced agent editor.
@@ -243,6 +246,7 @@ func groupOwnerRoute(path string) bool {
 		path == "/api/v1/agents" ||
 		path == "/groups" || strings.HasPrefix(path, "/groups/") ||
 		path == "/ownership-lifecycle" ||
+		path == "/collector-distributions" ||
 		path == "/blueprints" ||
 		path == "/approvals" || strings.HasPrefix(path, "/approvals/") ||
 		(strings.HasPrefix(path, "/agents/") && strings.HasSuffix(path, "/delete")) ||

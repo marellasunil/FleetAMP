@@ -139,6 +139,7 @@ func main() {
 	gitOpsExecutionStore := database.GitOpsExecutions()
 	integrationConnectionStore := database.IntegrationConnections()
 	integrationValidationStore := database.IntegrationValidations()
+	distributionStore := database.Distributions()
 	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("FLEETAMP_INTEGRATION_ALLOWED_HOSTS")}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
@@ -281,6 +282,7 @@ func main() {
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
+	registerDistributionRoutes(mux, distributionStore, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
