@@ -207,7 +207,7 @@ func TestRolePermissionMatrix(t *testing.T) {
 }
 
 func TestGroupOwnerRouteScope(t *testing.T) {
-	allowed := []string{"/agents", "/agents/agent-1", "/api/v1/agents", "/groups", "/groups/group-1", "/ownership-lifecycle", "/approvals", "/approvals/request-1", "/api/v1/groups", "/api/v1/groups/group-1/members", "/api/v1/configurations/sections/compose", "/api/v1/session", "/assets/session.js", "/logout"}
+	allowed := []string{"/agents", "/agents/agent-1", "/api/v1/agents", "/groups", "/groups/group-1", "/collector-distributions", "/ownership-lifecycle", "/approvals", "/approvals/request-1", "/api/v1/groups", "/api/v1/groups/group-1/members", "/api/v1/configurations/sections/compose", "/api/v1/session", "/assets/session.js", "/logout"}
 	for _, path := range allowed {
 		if !groupOwnerRoute(path) {
 			t.Errorf("expected group-owner route %q to be allowed", path)
