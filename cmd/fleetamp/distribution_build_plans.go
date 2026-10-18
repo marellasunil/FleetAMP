@@ -17,6 +17,7 @@ type distributionBuildPlanView struct {
 	ApprovalByPlan       map[string]*distributions.BuildApproval
 	ExecutionByPlan      map[string]*distributions.BuildExecution
 	PreflightByExecution map[string]*distributions.BuildPreflight
+	ResultByExecution    map[string]*distributions.BuildWorkerResult
 	Username             string
 	Message, Error       string
 }
@@ -25,7 +26,7 @@ const distributionBuildPlanHTML = `<!doctype html><html><head><meta charset="utf
 
 var distributionBuildPlanPage = template.Must(template.New("distribution-build-plans").Parse(distributionBuildPlanHTML))
 
-func registerDistributionBuildPlanRoutes(mux *http.ServeMux, distributionStore storage.DistributionStore, planStore storage.DistributionBuildPlanStore, approvalStore storage.DistributionBuildApprovalStore, executionStore storage.DistributionBuildExecutionStore, preflightStore storage.DistributionBuildPreflightStore, auth *authManager) {
+func registerDistributionBuildPlanRoutes(mux *http.ServeMux, distributionStore storage.DistributionStore, planStore storage.DistributionBuildPlanStore, approvalStore storage.DistributionBuildApprovalStore, executionStore storage.DistributionBuildExecutionStore, preflightStore storage.DistributionBuildPreflightStore, resultStore storage.DistributionBuildWorkerResultStore, auth *authManager) {
 	mux.HandleFunc("/collector-distributions/build-plans", func(w http.ResponseWriter, r *http.Request) {
 		if auth != nil && currentRole(auth, r) != roleAdmin {
 			http.Error(w, "administrator access required", http.StatusForbidden)
@@ -95,7 +96,7 @@ func registerDistributionBuildPlanRoutes(mux *http.ServeMux, distributionStore s
 				}
 			}
 			if err != nil {
-				renderDistributionBuildPlans(w, r, distributionStore, planStore, approvalStore, executionStore, preflightStore, auth, "", err.Error())
+				renderDistributionBuildPlans(w, r, distributionStore, planStore, approvalStore, executionStore, preflightStore, resultStore, auth, "", err.Error())
 				return
 			}
 			http.Redirect(w, r, "/collector-distributions/build-plans?message="+url.QueryEscape(message), http.StatusSeeOther)
@@ -105,10 +106,10 @@ func registerDistributionBuildPlanRoutes(mux *http.ServeMux, distributionStore s
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		renderDistributionBuildPlans(w, r, distributionStore, planStore, approvalStore, executionStore, preflightStore, auth, r.URL.Query().Get("message"), "")
+		renderDistributionBuildPlans(w, r, distributionStore, planStore, approvalStore, executionStore, preflightStore, resultStore, auth, r.URL.Query().Get("message"), "")
 	})
 }
-func renderDistributionBuildPlans(w http.ResponseWriter, r *http.Request, distributionStore storage.DistributionStore, planStore storage.DistributionBuildPlanStore, approvalStore storage.DistributionBuildApprovalStore, executionStore storage.DistributionBuildExecutionStore, preflightStore storage.DistributionBuildPreflightStore, auth *authManager, message, pageError string) {
+func renderDistributionBuildPlans(w http.ResponseWriter, r *http.Request, distributionStore storage.DistributionStore, planStore storage.DistributionBuildPlanStore, approvalStore storage.DistributionBuildApprovalStore, executionStore storage.DistributionBuildExecutionStore, preflightStore storage.DistributionBuildPreflightStore, resultStore storage.DistributionBuildWorkerResultStore, auth *authManager, message, pageError string) {
 	items, err := distributionStore.List(r.Context())
 	if err != nil {
 		internalServerError(w, err)
@@ -146,8 +147,17 @@ func renderDistributionBuildPlans(w http.ResponseWriter, r *http.Request, distri
 	for _, receipt := range preflights {
 		preflightByExecution[receipt.ExecutionID] = receipt
 	}
+	results, err := resultStore.List(r.Context(), 100)
+	if err != nil {
+		internalServerError(w, err)
+		return
+	}
+	resultByExecution := map[string]*distributions.BuildWorkerResult{}
+	for _, result := range results {
+		resultByExecution[result.ExecutionID] = result
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := distributionBuildPlanPage.Execute(w, distributionBuildPlanView{Page: "collector-distributions", Distributions: items, Plans: plans, ApprovalByPlan: byPlan, ExecutionByPlan: executionByPlan, PreflightByExecution: preflightByExecution, Username: currentUsername(auth, r), Message: message, Error: pageError}); err != nil {
+	if err := distributionBuildPlanPage.Execute(w, distributionBuildPlanView{Page: "collector-distributions", Distributions: items, Plans: plans, ApprovalByPlan: byPlan, ExecutionByPlan: executionByPlan, PreflightByExecution: preflightByExecution, ResultByExecution: resultByExecution, Username: currentUsername(auth, r), Message: message, Error: pageError}); err != nil {
 		internalServerError(w, err)
 	}
 }

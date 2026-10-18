@@ -144,6 +144,9 @@ func (d *Database) DistributionBuildExecutions() *DistributionBuildExecutionStor
 func (d *Database) DistributionBuildPreflights() *DistributionBuildPreflightStore {
 	return &DistributionBuildPreflightStore{db: d.db}
 }
+func (d *Database) DistributionBuildWorkerResults() *DistributionBuildWorkerResultStore {
+	return &DistributionBuildWorkerResultStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -204,6 +207,17 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_build_preflights_checked ON distribution_build_preflights(checked_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_preflights_no_update BEFORE UPDATE ON distribution_build_preflights BEGIN SELECT RAISE(ABORT,'Distribution build preflights are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_preflights_no_delete BEFORE DELETE ON distribution_build_preflights BEGIN SELECT RAISE(ABORT,'Distribution build preflights are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_build_worker_results (
+			id TEXT PRIMARY KEY, execution_id TEXT NOT NULL UNIQUE, preflight_id TEXT NOT NULL UNIQUE,
+			build_plan_hash TEXT NOT NULL, manifest_hash TEXT NOT NULL, worker_id TEXT NOT NULL,
+			adapter TEXT NOT NULL CHECK(adapter = 'dry-run'), status TEXT NOT NULL CHECK(status = 'dry-run-complete'),
+			evidence_hash TEXT NOT NULL UNIQUE, completed_at TEXT NOT NULL,
+			FOREIGN KEY(execution_id) REFERENCES distribution_build_executions(id),
+			FOREIGN KEY(preflight_id) REFERENCES distribution_build_preflights(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_build_worker_results_completed ON distribution_build_worker_results(completed_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_worker_results_no_update BEFORE UPDATE ON distribution_build_worker_results BEGIN SELECT RAISE(ABORT,'Distribution build worker results are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_worker_results_no_delete BEFORE DELETE ON distribution_build_worker_results BEGIN SELECT RAISE(ABORT,'Distribution build worker results are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
