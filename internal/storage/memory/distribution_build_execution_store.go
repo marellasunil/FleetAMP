@@ -49,3 +49,14 @@ func (s *DistributionBuildExecutionStore) List(_ context.Context, limit int) ([]
 	}
 	return out, nil
 }
+
+func (s *DistributionBuildExecutionStore) Get(_ context.Context, id string) (*distributions.BuildExecution, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, ok := s.items[id]
+	if !ok {
+		return nil, fmt.Errorf("build execution %q not found", id)
+	}
+	copy := *item
+	return &copy, nil
+}
