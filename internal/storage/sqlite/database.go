@@ -141,6 +141,9 @@ func (d *Database) DistributionBuildApprovals() *DistributionBuildApprovalStore 
 func (d *Database) DistributionBuildExecutions() *DistributionBuildExecutionStore {
 	return &DistributionBuildExecutionStore{db: d.db}
 }
+func (d *Database) DistributionBuildPreflights() *DistributionBuildPreflightStore {
+	return &DistributionBuildPreflightStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -191,6 +194,16 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_build_executions_queued ON distribution_build_executions(queued_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_executions_no_update BEFORE UPDATE ON distribution_build_executions BEGIN SELECT RAISE(ABORT,'Distribution build executions are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_executions_no_delete BEFORE DELETE ON distribution_build_executions BEGIN SELECT RAISE(ABORT,'Distribution build executions are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_build_preflights (
+			id TEXT PRIMARY KEY, execution_id TEXT NOT NULL UNIQUE, build_plan_id TEXT NOT NULL,
+			build_plan_hash TEXT NOT NULL, manifest_hash TEXT NOT NULL,
+			status TEXT NOT NULL CHECK(status = 'ready-for-worker'), checked_by TEXT NOT NULL, checked_at TEXT NOT NULL,
+			FOREIGN KEY(execution_id) REFERENCES distribution_build_executions(id),
+			FOREIGN KEY(build_plan_id) REFERENCES distribution_build_plans(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_build_preflights_checked ON distribution_build_preflights(checked_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_preflights_no_update BEFORE UPDATE ON distribution_build_preflights BEGIN SELECT RAISE(ABORT,'Distribution build preflights are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_preflights_no_delete BEFORE DELETE ON distribution_build_preflights BEGIN SELECT RAISE(ABORT,'Distribution build preflights are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,

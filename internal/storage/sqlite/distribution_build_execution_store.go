@@ -44,3 +44,18 @@ func (s *DistributionBuildExecutionStore) List(ctx context.Context, limit int) (
 	}
 	return out, rows.Err()
 }
+
+func (s *DistributionBuildExecutionStore) Get(ctx context.Context, id string) (*distributions.BuildExecution, error) {
+	execution := &distributions.BuildExecution{}
+	var reviewedAt, queuedAt string
+	err := s.db.QueryRowContext(ctx, `SELECT id,build_plan_id,build_plan_hash,approval_id,approval_reviewed_by,approval_reviewed_at,manifest,executor,status,queued_by,queued_at FROM distribution_build_executions WHERE id=?`, id).Scan(&execution.ID, &execution.BuildPlanID, &execution.BuildPlanHash, &execution.ApprovalID, &execution.ApprovalReviewedBy, &reviewedAt, &execution.ManifestJSON, &execution.Executor, &execution.Status, &execution.QueuedBy, &queuedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("build execution %q not found", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	execution.ApprovalReviewedAt, _ = time.Parse(time.RFC3339Nano, reviewedAt)
+	execution.QueuedAt, _ = time.Parse(time.RFC3339Nano, queuedAt)
+	return execution, nil
+}
