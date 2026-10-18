@@ -22,7 +22,7 @@ func TestDistributionBuildPlanCreatesImmutablePlanWithoutExecution(t *testing.T)
 	}
 	planStore := memory.NewDistributionBuildPlanStore()
 	mux := http.NewServeMux()
-	registerDistributionBuildPlanRoutes(mux, distributionStore, planStore, memory.NewDistributionBuildApprovalStore(), nil)
+	registerDistributionBuildPlanRoutes(mux, distributionStore, planStore, memory.NewDistributionBuildApprovalStore(), memory.NewDistributionBuildExecutionStore(), nil)
 	form := url.Values{"distribution_id": {d.ID}, "outputs": {"oci-image"}, "destination_ref": {"oci://registry.example/platform/collector:0.140.0"}, "credential_ref": {"secret://registry/platform"}}
 	request := httptest.NewRequest(http.MethodPost, "/collector-distributions/build-plans", strings.NewReader(form.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")

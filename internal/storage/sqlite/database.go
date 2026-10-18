@@ -129,9 +129,18 @@ func (d *Database) IntegrationValidations() *IntegrationValidationStore {
 	return &IntegrationValidationStore{db: d.db}
 }
 func (d *Database) Distributions() *DistributionStore { return &DistributionStore{db: d.db} }
-func (d *Database) DistributionPreviews() *DistributionPreviewStore { return &DistributionPreviewStore{db: d.db} }
-func (d *Database) DistributionBuildPlans() *DistributionBuildPlanStore { return &DistributionBuildPlanStore{db: d.db} }
-func (d *Database) DistributionBuildApprovals() *DistributionBuildApprovalStore { return &DistributionBuildApprovalStore{db: d.db} }
+func (d *Database) DistributionPreviews() *DistributionPreviewStore {
+	return &DistributionPreviewStore{db: d.db}
+}
+func (d *Database) DistributionBuildPlans() *DistributionBuildPlanStore {
+	return &DistributionBuildPlanStore{db: d.db}
+}
+func (d *Database) DistributionBuildApprovals() *DistributionBuildApprovalStore {
+	return &DistributionBuildApprovalStore{db: d.db}
+}
+func (d *Database) DistributionBuildExecutions() *DistributionBuildExecutionStore {
+	return &DistributionBuildExecutionStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -171,6 +180,17 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_build_approvals_reviewed ON distribution_build_approvals(reviewed_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_approvals_no_update BEFORE UPDATE ON distribution_build_approvals BEGIN SELECT RAISE(ABORT,'Distribution build approvals are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_approvals_no_delete BEFORE DELETE ON distribution_build_approvals BEGIN SELECT RAISE(ABORT,'Distribution build approvals are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_build_executions (
+			id TEXT PRIMARY KEY, build_plan_id TEXT NOT NULL UNIQUE, build_plan_hash TEXT NOT NULL,
+			approval_id TEXT NOT NULL UNIQUE, approval_reviewed_by TEXT NOT NULL, approval_reviewed_at TEXT NOT NULL,
+			manifest TEXT NOT NULL, executor TEXT NOT NULL CHECK(executor = 'disabled'),
+			status TEXT NOT NULL CHECK(status = 'queued'), queued_by TEXT NOT NULL, queued_at TEXT NOT NULL,
+			FOREIGN KEY(build_plan_id) REFERENCES distribution_build_plans(id),
+			FOREIGN KEY(approval_id) REFERENCES distribution_build_approvals(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_build_executions_queued ON distribution_build_executions(queued_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_executions_no_update BEFORE UPDATE ON distribution_build_executions BEGIN SELECT RAISE(ABORT,'Distribution build executions are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_executions_no_delete BEFORE DELETE ON distribution_build_executions BEGIN SELECT RAISE(ABORT,'Distribution build executions are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
