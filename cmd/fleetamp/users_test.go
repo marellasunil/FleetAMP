@@ -274,9 +274,10 @@ func TestGroupOwnershipFollowsPerGroupRole(t *testing.T) {
 
 func TestSessionNavigationHidesUnauthorizedPages(t *testing.T) {
 	for _, want := range []string{
-		"group_owner: [\"/agents\", \"/groups\", \"/approvals\", \"/blueprints\"]",
+		"group_owner: [\"/agents\", \"/groups\", \"/ownership-lifecycle\", \"/approvals\", \"/blueprints\"]",
 		"operator: [\"/agents\", \"/groups\", \"/otel-components\", \"/deployments\"",
 		"viewer: [\"/agents\", \"/groups\", \"/otel-components\", \"/deployments\"",
+		`\\\"/ownership-lifecycle\\\"`,
 		"document.querySelectorAll(\".admin-settings-link\")",
 		"label.hidden = !hasVisibleLink",
 		`pageURL.searchParams.get("access_denied")`,
