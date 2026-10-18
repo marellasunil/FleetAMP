@@ -142,7 +142,7 @@ func (d *Database) initialize(ctx context.Context) error {
 			source_repository TEXT NOT NULL, source_ref TEXT NOT NULL,
 			artifact_uri TEXT NOT NULL DEFAULT '', artifact_sha256 TEXT NOT NULL DEFAULT '',
 			components TEXT NOT NULL, locked_sections TEXT NOT NULL,
-			editable_sections TEXT NOT NULL, spec_hash TEXT NOT NULL UNIQUE,
+			editable_sections TEXT NOT NULL, baseline_config TEXT NOT NULL DEFAULT '', spec_hash TEXT NOT NULL UNIQUE,
 			published_by TEXT NOT NULL, published_at TEXT NOT NULL,
 			UNIQUE(name,collector_version)
 		)`,
@@ -439,10 +439,27 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureGitOpsPreviewConnectionColumn(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureDistributionBaselineColumn(ctx); err != nil {
+		return err
+	}
 	if err := d.migrateAdministratorToUsers(ctx); err != nil {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureDistributionBaselineColumn(ctx context.Context) error {
+	present, err := sqliteColumnExists(ctx, d.db, "collector_distributions", "baseline_config")
+	if err != nil {
+		return err
+	}
+	if present {
+		return nil
+	}
+	if _, err := d.db.ExecContext(ctx, `ALTER TABLE collector_distributions ADD COLUMN baseline_config TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add collector_distributions.baseline_config column: %w", err)
+	}
+	return nil
 }
 
 func (d *Database) ensureGitOpsPreviewConnectionColumn(ctx context.Context) error {
