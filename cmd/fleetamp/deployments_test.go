@@ -100,6 +100,7 @@ func TestDeploymentsPageCreatesImmutableValidationSnapshot(t *testing.T) {
 	if err := requests.Create(ctx, request); err != nil { t.Fatal(err) }
 	agentsStore := memory.NewAgentStore()
 	if err := agentsStore.Upsert(ctx, &agents.ManagedAgent{InstanceUID: "collector-a", Type: agents.AgentTypeOTelCollector, Version: "0.148.0",
+		ManagementAuthority: agents.AuthorityLifecycleManaged,
 		Connected: true, Healthy: true, Deployment: agents.DeploymentContext{Runtime: agents.RuntimeKubernetes}, GroupFields: map[string]string{"team": "payments"},
 		Labels: map[string]string{"environment": "production"}, Capabilities: []string{"reports_health"}}); err != nil { t.Fatal(err) }
 	validations := memory.NewComponentLifecycleValidationStore()
