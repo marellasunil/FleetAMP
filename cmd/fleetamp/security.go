@@ -246,7 +246,7 @@ func groupOwnerRoute(path string) bool {
 		path == "/api/v1/agents" ||
 		path == "/groups" || strings.HasPrefix(path, "/groups/") ||
 		path == "/ownership-lifecycle" ||
-		path == "/collector-distributions" ||
+		path == "/collector-distributions" || strings.HasPrefix(path, "/collector-distributions/") ||
 		path == "/blueprints" ||
 		path == "/approvals" || strings.HasPrefix(path, "/approvals/") ||
 		(strings.HasPrefix(path, "/agents/") && strings.HasSuffix(path, "/delete")) ||
