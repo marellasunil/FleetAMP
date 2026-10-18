@@ -129,6 +129,7 @@ func (d *Database) IntegrationValidations() *IntegrationValidationStore {
 	return &IntegrationValidationStore{db: d.db}
 }
 func (d *Database) Distributions() *DistributionStore { return &DistributionStore{db: d.db} }
+func (d *Database) DistributionPreviews() *DistributionPreviewStore { return &DistributionPreviewStore{db: d.db} }
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -150,6 +151,17 @@ func (d *Database) initialize(ctx context.Context) error {
 			BEFORE UPDATE ON collector_distributions BEGIN SELECT RAISE(ABORT,'Collector distributions are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS collector_distributions_no_delete
 			BEFORE DELETE ON collector_distributions BEGIN SELECT RAISE(ABORT,'Collector distributions are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
+			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
+			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
+			composed_config TEXT NOT NULL, content_hash TEXT NOT NULL,
+			validation_evidence TEXT NOT NULL, prepared_by TEXT NOT NULL, created_at TEXT NOT NULL,
+			FOREIGN KEY(distribution_id) REFERENCES collector_distributions(id),
+			FOREIGN KEY(group_id) REFERENCES groups(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_previews_created ON distribution_deployment_previews(created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_previews_no_update BEFORE UPDATE ON distribution_deployment_previews BEGIN SELECT RAISE(ABORT,'distribution previews are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_previews_no_delete BEFORE DELETE ON distribution_deployment_previews BEGIN SELECT RAISE(ABORT,'distribution previews are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS configurations (
 			id TEXT PRIMARY KEY, group_id TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, version TEXT NOT NULL,
             content TEXT NOT NULL, content_type TEXT NOT NULL, hash TEXT NOT NULL,
