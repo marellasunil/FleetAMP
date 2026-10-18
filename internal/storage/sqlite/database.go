@@ -131,6 +131,7 @@ func (d *Database) IntegrationValidations() *IntegrationValidationStore {
 func (d *Database) Distributions() *DistributionStore { return &DistributionStore{db: d.db} }
 func (d *Database) DistributionPreviews() *DistributionPreviewStore { return &DistributionPreviewStore{db: d.db} }
 func (d *Database) DistributionBuildPlans() *DistributionBuildPlanStore { return &DistributionBuildPlanStore{db: d.db} }
+func (d *Database) DistributionBuildApprovals() *DistributionBuildApprovalStore { return &DistributionBuildApprovalStore{db: d.db} }
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -161,6 +162,15 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_build_plans_requested ON distribution_build_plans(requested_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_plans_no_update BEFORE UPDATE ON distribution_build_plans BEGIN SELECT RAISE(ABORT,'Distribution build plans are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_plans_no_delete BEFORE DELETE ON distribution_build_plans BEGIN SELECT RAISE(ABORT,'Distribution build plans are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_build_approvals (
+			id TEXT PRIMARY KEY, build_plan_id TEXT NOT NULL UNIQUE, build_plan_hash TEXT NOT NULL,
+			decision TEXT NOT NULL CHECK(decision IN ('approved','rejected')), reason TEXT NOT NULL,
+			reviewed_by TEXT NOT NULL, reviewed_at TEXT NOT NULL,
+			FOREIGN KEY(build_plan_id) REFERENCES distribution_build_plans(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_build_approvals_reviewed ON distribution_build_approvals(reviewed_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_approvals_no_update BEFORE UPDATE ON distribution_build_approvals BEGIN SELECT RAISE(ABORT,'Distribution build approvals are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_approvals_no_delete BEFORE DELETE ON distribution_build_approvals BEGIN SELECT RAISE(ABORT,'Distribution build approvals are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
