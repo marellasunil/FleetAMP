@@ -143,6 +143,7 @@ func main() {
 	distributionPreviewStore := database.DistributionPreviews()
 	distributionBuildPlanStore := database.DistributionBuildPlans()
 	distributionBuildApprovalStore := database.DistributionBuildApprovals()
+	distributionBuildExecutionStore := database.DistributionBuildExecutions()
 	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("FLEETAMP_INTEGRATION_ALLOWED_HOSTS")}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
@@ -287,7 +288,7 @@ func main() {
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
 	registerDistributionRoutes(mux, distributionStore, configValidator, auth)
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionPreviewStore, groupStore, configValidator, auth)
-	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, auth)
+	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
@@ -628,7 +629,7 @@ func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, conf
 			TargetingMetadata:     groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent),
 			EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields,
 			Error: r.URL.Query().Get("error"), DisplayNameSaved: r.URL.Query().Get("renamed") == "1",
-			AuthoritySaved: r.URL.Query().Get("authority_saved") == "1",
+			AuthoritySaved:    r.URL.Query().Get("authority_saved") == "1",
 			CanManageIdentity: currentRole(auth, r) == roleAdmin,
 		}
 		view.Deployments, _ = deploymentStore.ListByAgent(r.Context(), uid, 10)
