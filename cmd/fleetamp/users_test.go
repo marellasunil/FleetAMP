@@ -274,7 +274,7 @@ func TestGroupOwnershipFollowsPerGroupRole(t *testing.T) {
 
 func TestSessionNavigationHidesUnauthorizedPages(t *testing.T) {
 	for _, want := range []string{
-		"group_owner: [\"/agents\", \"/groups\", \"/ownership-lifecycle\", \"/approvals\", \"/blueprints\"]",
+		"group_owner: [\"/agents\", \"/groups\", \"/collector-distributions\", \"/ownership-lifecycle\", \"/approvals\", \"/blueprints\"]",
 		"operator: [\"/agents\", \"/groups\", \"/otel-components\", \"/deployments\"",
 		"viewer: [\"/agents\", \"/groups\", \"/otel-components\", \"/deployments\"",
 		`\\\"/ownership-lifecycle\\\"`,
