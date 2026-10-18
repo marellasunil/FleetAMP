@@ -14,6 +14,7 @@ type distributionBuildWorker struct {
 	Executions storage.DistributionBuildExecutionStore
 	Preflights storage.DistributionBuildPreflightStore
 	Results    storage.DistributionBuildWorkerResultStore
+	Sources    storage.DistributionBuildSourceStore
 }
 
 func (w *distributionBuildWorker) runOnce(ctx context.Context) error {
@@ -44,8 +45,35 @@ func (w *distributionBuildWorker) runOnce(ctx context.Context) error {
 		if err := w.Results.Create(ctx, result); err != nil {
 			return err
 		}
+		results = append(results, result)
 		completed[preflight.ExecutionID] = true
 		slog.Info("Collector build dry-run completed", "component", "distribution_build_worker", "event", "dry_run_completed", "execution_id", execution.ID, "worker_id", w.ID, "evidence_hash", result.EvidenceHash)
+	}
+	sources, err := w.Sources.List(ctx, 1000)
+	if err != nil {
+		return err
+	}
+	resolved := map[string]bool{}
+	for _, source := range sources {
+		resolved[source.ExecutionID] = true
+	}
+	for _, result := range results {
+		if resolved[result.ExecutionID] {
+			continue
+		}
+		execution, err := w.Executions.Get(ctx, result.ExecutionID)
+		if err != nil {
+			return err
+		}
+		source, err := distributions.NewBuildSourceResolution(execution, result, w.ID, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := w.Sources.Create(ctx, source); err != nil {
+			return err
+		}
+		resolved[result.ExecutionID] = true
+		slog.Info("official Collector source resolved", "component", "distribution_build_worker", "event", "source_resolved", "execution_id", execution.ID, "source_ref", source.SourceRef, "archive_url", source.ArchiveURL)
 	}
 	return nil
 }
