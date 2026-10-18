@@ -128,6 +128,7 @@ func (d *Database) IntegrationConnections() *IntegrationConnectionStore {
 func (d *Database) IntegrationValidations() *IntegrationValidationStore {
 	return &IntegrationValidationStore{db: d.db}
 }
+func (d *Database) Distributions() *DistributionStore { return &DistributionStore{db: d.db} }
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -135,6 +136,20 @@ func (d *Database) initialize(ctx context.Context) error {
 		`PRAGMA foreign_keys = ON`,
 		`PRAGMA busy_timeout = 5000`,
 		`PRAGMA journal_mode = WAL`,
+		`CREATE TABLE IF NOT EXISTS collector_distributions (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, collector_version TEXT NOT NULL,
+			source_repository TEXT NOT NULL, source_ref TEXT NOT NULL,
+			artifact_uri TEXT NOT NULL DEFAULT '', artifact_sha256 TEXT NOT NULL DEFAULT '',
+			components TEXT NOT NULL, locked_sections TEXT NOT NULL,
+			editable_sections TEXT NOT NULL, spec_hash TEXT NOT NULL UNIQUE,
+			published_by TEXT NOT NULL, published_at TEXT NOT NULL,
+			UNIQUE(name,collector_version)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_collector_distributions_published ON collector_distributions(published_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS collector_distributions_no_update
+			BEFORE UPDATE ON collector_distributions BEGIN SELECT RAISE(ABORT,'Collector distributions are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS collector_distributions_no_delete
+			BEFORE DELETE ON collector_distributions BEGIN SELECT RAISE(ABORT,'Collector distributions are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS configurations (
 			id TEXT PRIMARY KEY, group_id TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, version TEXT NOT NULL,
             content TEXT NOT NULL, content_type TEXT NOT NULL, hash TEXT NOT NULL,
