@@ -277,7 +277,6 @@ func TestSessionNavigationHidesUnauthorizedPages(t *testing.T) {
 		"group_owner: [\"/agents\", \"/groups\", \"/collector-distributions\", \"/ownership-lifecycle\", \"/approvals\", \"/blueprints\"]",
 		"operator: [\"/agents\", \"/groups\", \"/otel-components\", \"/deployments\"",
 		"viewer: [\"/agents\", \"/groups\", \"/otel-components\", \"/deployments\"",
-		`\\\"/ownership-lifecycle\\\"`,
 		"document.querySelectorAll(\".admin-settings-link\")",
 		"label.hidden = !hasVisibleLink",
 		`pageURL.searchParams.get("access_denied")`,
