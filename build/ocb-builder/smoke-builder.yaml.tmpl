@@ -1,0 +1,11 @@
+dist:
+  module: fleetamp.local/ocb-smoke
+  name: fleetamp-collector
+  description: FleetAMP offline builder smoke test
+  output_path: /tmp/fleetamp-ocb-smoke
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver vVERSION
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor vVERSION
+exporters:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/debugexporter vVERSION

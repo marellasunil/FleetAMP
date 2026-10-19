@@ -151,6 +151,23 @@ var ocbModules = map[string]map[string]string{
 	"connectors": {"forward": "go.opentelemetry.io/collector/connector/forwardconnector", "spanmetrics": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/spanmetricsconnector"},
 }
 
+// ReviewedOCBModules returns the de-duplicated, sorted Go module allow-list
+// used by both manifest generation and the offline builder-image pipeline.
+func ReviewedOCBModules() []string {
+	seen := map[string]bool{}
+	for _, kind := range ocbModules {
+		for _, module := range kind {
+			seen[module] = true
+		}
+	}
+	modules := make([]string, 0, len(seen))
+	for module := range seen {
+		modules = append(modules, module)
+	}
+	sort.Strings(modules)
+	return modules
+}
+
 func GenerateOCBManifest(execution *BuildExecution) (string, error) {
 	if execution == nil {
 		return "", errors.New("build execution is required")
