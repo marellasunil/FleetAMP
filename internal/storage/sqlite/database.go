@@ -156,6 +156,9 @@ func (d *Database) DistributionBuildSourceAcquisitions() *DistributionBuildSourc
 func (d *Database) DistributionBuildSourceInspections() *DistributionBuildSourceInspectionStore {
 	return &DistributionBuildSourceInspectionStore{db: d.db}
 }
+func (d *Database) DistributionBuildArtifacts() *DistributionBuildArtifactStore {
+	return &DistributionBuildArtifactStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -263,6 +266,20 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_build_source_inspections_time ON distribution_build_source_inspections(inspected_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_source_inspections_no_update BEFORE UPDATE ON distribution_build_source_inspections BEGIN SELECT RAISE(ABORT,'Distribution source inspections are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_source_inspections_no_delete BEFORE DELETE ON distribution_build_source_inspections BEGIN SELECT RAISE(ABORT,'Distribution source inspections are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_build_artifacts (
+			id TEXT PRIMARY KEY, inspection_id TEXT NOT NULL UNIQUE, execution_id TEXT NOT NULL UNIQUE,
+			build_plan_hash TEXT NOT NULL, manifest_sha256 TEXT NOT NULL,
+			runtime TEXT NOT NULL CHECK(runtime IN ('docker','podman')), builder_image TEXT NOT NULL,
+			artifact_reference TEXT NOT NULL, artifact_sha256 TEXT NOT NULL,
+			artifact_size INTEGER NOT NULL CHECK(artifact_size > 0),
+			status TEXT NOT NULL CHECK(status = 'artifact-generated'), evidence_hash TEXT NOT NULL UNIQUE,
+			built_by TEXT NOT NULL, built_at TEXT NOT NULL,
+			FOREIGN KEY(inspection_id) REFERENCES distribution_build_source_inspections(id),
+			FOREIGN KEY(execution_id) REFERENCES distribution_build_executions(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_build_artifacts_time ON distribution_build_artifacts(built_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_artifacts_no_update BEFORE UPDATE ON distribution_build_artifacts BEGIN SELECT RAISE(ABORT,'Distribution build artifacts are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_artifacts_no_delete BEFORE DELETE ON distribution_build_artifacts BEGIN SELECT RAISE(ABORT,'Distribution build artifacts are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
