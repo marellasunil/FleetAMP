@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -25,7 +24,8 @@ type BuildAttempt struct {
 	ID, InspectionID, ExecutionID, BuildPlanHash, ManifestSHA256 string
 	AttemptNumber                                                int
 	Trigger, RetryRequestID, Status                              string
-	FailureCode, FailureMessage, ArtifactID, ArtifactSHA256      string
+	FailureCode, FailureMessage, FailureDigest                   string
+	ArtifactID, ArtifactSHA256                                   string
 	WorkerID, EvidenceHash                                       string
 	StartedAt, CompletedAt, NextRetryAt                          time.Time
 }
@@ -34,17 +34,18 @@ func NewSuccessfulBuildAttempt(inspection *BuildSourceInspection, artifact *Buil
 	if inspection == nil || artifact == nil || artifact.InspectionID != inspection.ID {
 		return nil, errors.New("matching source inspection and artifact are required")
 	}
-	return newBuildAttempt(inspection, number, trigger, retryRequestID, BuildAttemptSucceeded, "", "", artifact.ID, artifact.ArtifactSHA256, workerID, startedAt, completedAt, time.Time{})
+	return newBuildAttempt(inspection, number, trigger, retryRequestID, BuildAttemptSucceeded, "", "", "", artifact.ID, artifact.ArtifactSHA256, workerID, startedAt, completedAt, time.Time{})
 }
 
 func NewFailedBuildAttempt(inspection *BuildSourceInspection, number int, trigger, retryRequestID, failureCode, failureMessage, workerID string, startedAt, completedAt, nextRetryAt time.Time) (*BuildAttempt, error) {
 	if failureCode != BuildFailureTimeout && failureCode != BuildFailureRunner && failureCode != BuildFailureArtifact {
 		return nil, errors.New("unsupported build failure code")
 	}
-	return newBuildAttempt(inspection, number, trigger, retryRequestID, BuildAttemptFailed, failureCode, sanitizeFailureMessage(failureMessage), "", "", workerID, startedAt, completedAt, nextRetryAt)
+	diagnosticSum := sha256.Sum256([]byte(failureMessage))
+	return newBuildAttempt(inspection, number, trigger, retryRequestID, BuildAttemptFailed, failureCode, safeFailureSummary(failureCode), hex.EncodeToString(diagnosticSum[:]), "", "", workerID, startedAt, completedAt, nextRetryAt)
 }
 
-func newBuildAttempt(inspection *BuildSourceInspection, number int, trigger, retryRequestID, status, failureCode, failureMessage, artifactID, artifactSHA, workerID string, startedAt, completedAt, nextRetryAt time.Time) (*BuildAttempt, error) {
+func newBuildAttempt(inspection *BuildSourceInspection, number int, trigger, retryRequestID, status, failureCode, failureMessage, failureDigest, artifactID, artifactSHA, workerID string, startedAt, completedAt, nextRetryAt time.Time) (*BuildAttempt, error) {
 	if inspection == nil || inspection.Status != BuildSourceInspected {
 		return nil, errors.New("inspected source is required")
 	}
@@ -62,38 +63,28 @@ func newBuildAttempt(inspection *BuildSourceInspection, number int, trigger, ret
 		return nil, errors.New("successful attempt requires valid artifact evidence")
 	}
 	payload := struct {
-		InspectionID, ExecutionID, PlanHash, ManifestSHA               string
-		Number                                                         int
-		Trigger, RetryRequestID, Status                                string
-		FailureCode, FailureMessage, ArtifactID, ArtifactSHA, WorkerID string
-		StartedAt, CompletedAt, NextRetryAt                            time.Time
-	}{inspection.ID, inspection.ExecutionID, inspection.BuildPlanHash, inspection.ManifestSHA256, number, trigger, strings.TrimSpace(retryRequestID), status, failureCode, failureMessage, artifactID, artifactSHA, workerID, startedAt.UTC(), completedAt.UTC(), nextRetryAt.UTC()}
+		InspectionID, ExecutionID, PlanHash, ManifestSHA string
+		Number                                           int
+		Trigger, RetryRequestID, Status                  string
+		FailureCode, FailureMessage, FailureDigest       string
+		ArtifactID, ArtifactSHA, WorkerID                string
+		StartedAt, CompletedAt, NextRetryAt              time.Time
+	}{inspection.ID, inspection.ExecutionID, inspection.BuildPlanHash, inspection.ManifestSHA256, number, trigger, strings.TrimSpace(retryRequestID), status, failureCode, failureMessage, failureDigest, artifactID, artifactSHA, workerID, startedAt.UTC(), completedAt.UTC(), nextRetryAt.UTC()}
 	canonical, _ := json.Marshal(payload)
 	sum := sha256.Sum256(canonical)
 	evidence := hex.EncodeToString(sum[:])
-	return &BuildAttempt{ID: "build-attempt-" + evidence[:16], InspectionID: inspection.ID, ExecutionID: inspection.ExecutionID, BuildPlanHash: inspection.BuildPlanHash, ManifestSHA256: inspection.ManifestSHA256, AttemptNumber: number, Trigger: trigger, RetryRequestID: strings.TrimSpace(retryRequestID), Status: status, FailureCode: failureCode, FailureMessage: failureMessage, ArtifactID: artifactID, ArtifactSHA256: artifactSHA, WorkerID: workerID, EvidenceHash: evidence, StartedAt: startedAt.UTC(), CompletedAt: completedAt.UTC(), NextRetryAt: nextRetryAt.UTC()}, nil
+	return &BuildAttempt{ID: "build-attempt-" + evidence[:16], InspectionID: inspection.ID, ExecutionID: inspection.ExecutionID, BuildPlanHash: inspection.BuildPlanHash, ManifestSHA256: inspection.ManifestSHA256, AttemptNumber: number, Trigger: trigger, RetryRequestID: strings.TrimSpace(retryRequestID), Status: status, FailureCode: failureCode, FailureMessage: failureMessage, FailureDigest: failureDigest, ArtifactID: artifactID, ArtifactSHA256: artifactSHA, WorkerID: workerID, EvidenceHash: evidence, StartedAt: startedAt.UTC(), CompletedAt: completedAt.UTC(), NextRetryAt: nextRetryAt.UTC()}, nil
 }
 
-func sanitizeFailureMessage(value string) string {
-	value = strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\r' || r == '\t' {
-			return ' '
-		}
-		if r < 32 || r == 127 {
-			return -1
-		}
-		return r
-	}, strings.TrimSpace(value))
-	value = strings.Join(strings.Fields(value), " ")
-	value = regexp.MustCompile(`(?i)\b(token|password|authorization|secret)=\S+`).ReplaceAllString(value, "$1=[REDACTED]")
-	value = regexp.MustCompile(`(?i)\bbearer\s+\S+`).ReplaceAllString(value, "Bearer [REDACTED]")
-	if len(value) > 2048 {
-		value = value[:2048]
+func safeFailureSummary(code string) string {
+	switch code {
+	case BuildFailureTimeout:
+		return "The sandboxed OCB build exceeded its configured time limit."
+	case BuildFailureArtifact:
+		return "The sandboxed OCB build returned invalid artifact evidence."
+	default:
+		return "The sandboxed OCB runner reported a build failure."
 	}
-	if value == "" {
-		return "sandboxed OCB build failed without diagnostic output"
-	}
-	return value
 }
 
 // BuildRetryRequest is immutable authorization for exactly one additional run.

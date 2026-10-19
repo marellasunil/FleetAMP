@@ -292,7 +292,7 @@ func (d *Database) initialize(ctx context.Context) error {
 			attempt_number INTEGER NOT NULL CHECK(attempt_number > 0),
 			trigger TEXT NOT NULL CHECK(trigger IN ('automatic','manual')), retry_request_id TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL CHECK(status IN ('succeeded','failed')),
-			failure_code TEXT NOT NULL DEFAULT '', failure_message TEXT NOT NULL DEFAULT '',
+			failure_code TEXT NOT NULL DEFAULT '', failure_message TEXT NOT NULL DEFAULT '', failure_digest TEXT NOT NULL DEFAULT '',
 			artifact_id TEXT NOT NULL DEFAULT '', artifact_sha256 TEXT NOT NULL DEFAULT '',
 			worker_id TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE,
 			started_at TEXT NOT NULL, completed_at TEXT NOT NULL, next_retry_at TEXT NOT NULL DEFAULT '',

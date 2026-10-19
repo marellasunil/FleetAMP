@@ -19,6 +19,9 @@ func TestFailedBuildAttemptSanitizesAndBindsEvidence(t *testing.T) {
 	if strings.Contains(attempt.FailureMessage, "top-secret") || strings.Contains(attempt.FailureMessage, "credential") || strings.Contains(attempt.FailureMessage, "abc123") || strings.ContainsRune(attempt.FailureMessage, '\x00') {
 		t.Fatalf("unsafe failure receipt: %q", attempt.FailureMessage)
 	}
+	if len(attempt.FailureDigest) != 64 {
+		t.Fatalf("invalid diagnostic fingerprint: %q", attempt.FailureDigest)
+	}
 	if len(attempt.EvidenceHash) != 64 || attempt.ID == "" {
 		t.Fatalf("invalid evidence: %#v", attempt)
 	}
