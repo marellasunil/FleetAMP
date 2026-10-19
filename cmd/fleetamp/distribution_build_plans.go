@@ -20,6 +20,7 @@ type distributionBuildPlanView struct {
 	ResultByExecution    map[string]*distributions.BuildWorkerResult
 	Sources              []*distributions.BuildSourceResolution
 	Acquisitions         []*distributions.BuildSourceAcquisition
+	Inspections          []*distributions.BuildSourceInspection
 	Username             string
 	Message, Error       string
 }
@@ -30,9 +31,11 @@ const distributionBuildSourceHTML = `<section class="card" style="margin-top:16p
 
 const distributionBuildAcquisitionHTML = `<section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Verified source cache</div><div class="cardsub">Archives downloaded from the fixed official host with bounded streaming and SHA-256 verification.</div></div></div>{{if .Acquisitions}}<div style="overflow:auto"><table><thead><tr><th>Status</th><th>SHA-256</th><th>Size</th><th>Local reference</th><th>Acquired</th></tr></thead><tbody>{{range .Acquisitions}}<tr><td><span class="badge ok">{{.Status}}</span></td><td class="code">{{.ArchiveSHA256}}</td><td>{{.ArchiveSize}} bytes</td><td class="code">{{.LocalReference}}</td><td>{{.AcquiredBy}}<div class="tiny">{{.AcquiredAt}}</div></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No source archives acquired. Downloads are disabled by default.</div>{{end}}</section>`
 
-var distributionBuildPlanPage = template.Must(template.New("distribution-build-plans").Parse(strings.Replace(distributionBuildPlanHTML, `</div></main></div></body></html>`, distributionBuildSourceHTML+distributionBuildAcquisitionHTML+`</div></main></div></body></html>`, 1)))
+const distributionBuildInspectionHTML = `<section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Safe archive inspections and OCB manifests</div><div class="cardsub">Tarballs are inspected without extraction. Unsafe paths, links, devices and size-limit violations are rejected before a deterministic allow-listed manifest is recorded.</div></div><span class="badge off">Build execution disabled</span></div>{{if .Inspections}}<div style="overflow:auto"><table><thead><tr><th>Status</th><th>Archive inventory</th><th>Manifest evidence</th><th>Generated OCB manifest</th><th>Inspected</th></tr></thead><tbody>{{range .Inspections}}<tr><td><span class="badge ok">{{.Status}}</span><div class="tiny code">{{.EvidenceHash}}</div></td><td>{{.FileCount}} files · {{.DirectoryCount}} directories<div class="tiny">{{.UncompressedBytes}} uncompressed bytes<br>Root: <span class="code">{{.RootPrefix}}</span></div></td><td class="code">{{.ManifestSHA256}}</td><td><details><summary>View immutable manifest</summary><pre class="code" style="white-space:pre-wrap">{{.ManifestYAML}}</pre></details></td><td>{{.InspectedBy}}<div class="tiny">{{.InspectedAt}}</div></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No archive inspections recorded. Inspection is disabled by default.</div>{{end}}</section>`
 
-func registerDistributionBuildPlanRoutes(mux *http.ServeMux, distributionStore storage.DistributionStore, planStore storage.DistributionBuildPlanStore, approvalStore storage.DistributionBuildApprovalStore, executionStore storage.DistributionBuildExecutionStore, preflightStore storage.DistributionBuildPreflightStore, resultStore storage.DistributionBuildWorkerResultStore, sourceStore storage.DistributionBuildSourceStore, acquisitionStore storage.DistributionBuildSourceAcquisitionStore, auth *authManager) {
+var distributionBuildPlanPage = template.Must(template.New("distribution-build-plans").Parse(strings.Replace(distributionBuildPlanHTML, `</div></main></div></body></html>`, distributionBuildSourceHTML+distributionBuildAcquisitionHTML+distributionBuildInspectionHTML+`</div></main></div></body></html>`, 1)))
+
+func registerDistributionBuildPlanRoutes(mux *http.ServeMux, distributionStore storage.DistributionStore, planStore storage.DistributionBuildPlanStore, approvalStore storage.DistributionBuildApprovalStore, executionStore storage.DistributionBuildExecutionStore, preflightStore storage.DistributionBuildPreflightStore, resultStore storage.DistributionBuildWorkerResultStore, sourceStore storage.DistributionBuildSourceStore, acquisitionStore storage.DistributionBuildSourceAcquisitionStore, inspectionStore storage.DistributionBuildSourceInspectionStore, auth *authManager) {
 	mux.HandleFunc("/collector-distributions/build-plans", func(w http.ResponseWriter, r *http.Request) {
 		if auth != nil && currentRole(auth, r) != roleAdmin {
 			http.Error(w, "administrator access required", http.StatusForbidden)
@@ -102,7 +105,7 @@ func registerDistributionBuildPlanRoutes(mux *http.ServeMux, distributionStore s
 				}
 			}
 			if err != nil {
-				renderDistributionBuildPlans(w, r, distributionStore, planStore, approvalStore, executionStore, preflightStore, resultStore, sourceStore, acquisitionStore, auth, "", err.Error())
+				renderDistributionBuildPlans(w, r, distributionStore, planStore, approvalStore, executionStore, preflightStore, resultStore, sourceStore, acquisitionStore, inspectionStore, auth, "", err.Error())
 				return
 			}
 			http.Redirect(w, r, "/collector-distributions/build-plans?message="+url.QueryEscape(message), http.StatusSeeOther)
@@ -112,10 +115,10 @@ func registerDistributionBuildPlanRoutes(mux *http.ServeMux, distributionStore s
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		renderDistributionBuildPlans(w, r, distributionStore, planStore, approvalStore, executionStore, preflightStore, resultStore, sourceStore, acquisitionStore, auth, r.URL.Query().Get("message"), "")
+		renderDistributionBuildPlans(w, r, distributionStore, planStore, approvalStore, executionStore, preflightStore, resultStore, sourceStore, acquisitionStore, inspectionStore, auth, r.URL.Query().Get("message"), "")
 	})
 }
-func renderDistributionBuildPlans(w http.ResponseWriter, r *http.Request, distributionStore storage.DistributionStore, planStore storage.DistributionBuildPlanStore, approvalStore storage.DistributionBuildApprovalStore, executionStore storage.DistributionBuildExecutionStore, preflightStore storage.DistributionBuildPreflightStore, resultStore storage.DistributionBuildWorkerResultStore, sourceStore storage.DistributionBuildSourceStore, acquisitionStore storage.DistributionBuildSourceAcquisitionStore, auth *authManager, message, pageError string) {
+func renderDistributionBuildPlans(w http.ResponseWriter, r *http.Request, distributionStore storage.DistributionStore, planStore storage.DistributionBuildPlanStore, approvalStore storage.DistributionBuildApprovalStore, executionStore storage.DistributionBuildExecutionStore, preflightStore storage.DistributionBuildPreflightStore, resultStore storage.DistributionBuildWorkerResultStore, sourceStore storage.DistributionBuildSourceStore, acquisitionStore storage.DistributionBuildSourceAcquisitionStore, inspectionStore storage.DistributionBuildSourceInspectionStore, auth *authManager, message, pageError string) {
 	items, err := distributionStore.List(r.Context())
 	if err != nil {
 		internalServerError(w, err)
@@ -172,8 +175,13 @@ func renderDistributionBuildPlans(w http.ResponseWriter, r *http.Request, distri
 		internalServerError(w, err)
 		return
 	}
+	inspections, err := inspectionStore.List(r.Context(), 100)
+	if err != nil {
+		internalServerError(w, err)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := distributionBuildPlanPage.Execute(w, distributionBuildPlanView{Page: "collector-distributions", Distributions: items, Plans: plans, ApprovalByPlan: byPlan, ExecutionByPlan: executionByPlan, PreflightByExecution: preflightByExecution, ResultByExecution: resultByExecution, Sources: sources, Acquisitions: acquisitions, Username: currentUsername(auth, r), Message: message, Error: pageError}); err != nil {
+	if err := distributionBuildPlanPage.Execute(w, distributionBuildPlanView{Page: "collector-distributions", Distributions: items, Plans: plans, ApprovalByPlan: byPlan, ExecutionByPlan: executionByPlan, PreflightByExecution: preflightByExecution, ResultByExecution: resultByExecution, Sources: sources, Acquisitions: acquisitions, Inspections: inspections, Username: currentUsername(auth, r), Message: message, Error: pageError}); err != nil {
 		internalServerError(w, err)
 	}
 }
