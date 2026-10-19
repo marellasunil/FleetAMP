@@ -150,6 +150,7 @@ func main() {
 	distributionBuildSourceStore := database.DistributionBuildSources()
 	distributionBuildSourceAcquisitionStore := database.DistributionBuildSourceAcquisitions()
 	distributionBuildSourceInspectionStore := database.DistributionBuildSourceInspections()
+	distributionBuildArtifactStore := database.DistributionBuildArtifacts()
 	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("FLEETAMP_INTEGRATION_ALLOWED_HOSTS")}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
@@ -193,6 +194,16 @@ func main() {
 		inspector := &distributionSourceInspector{ID: inspectorID, CacheDir: dataDir + "/distribution-sources", Acquisitions: distributionBuildSourceAcquisitionStore, Inspections: distributionBuildSourceInspectionStore, Executions: distributionBuildExecutionStore, Limits: distributions.ArchiveInspectionLimits{MaxEntries: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_SOURCE_MAX_ENTRIES", 100000), MaxUncompressedBytes: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_SOURCE_MAX_UNCOMPRESSED_BYTES", 1<<30)}}
 		go inspector.run(ctx, durationEnvOrDefault("FLEETAMP_DISTRIBUTION_SOURCE_INSPECTION_INTERVAL", 30*time.Second))
 		slog.Warn("Collector source archive inspection enabled", "component", "distribution_source_inspector", "worker_id", inspectorID, "execution", "disabled")
+	}
+	if boolEnv("FLEETAMP_DISTRIBUTION_OCB_BUILD_ENABLED") {
+		workerID := envOrDefault("FLEETAMP_DISTRIBUTION_OCB_WORKER_ID", "fleetamp-ocb-worker")
+		runner := &distributions.ContainerOCBRunner{Runtime: envOrDefault("FLEETAMP_DISTRIBUTION_OCB_RUNTIME", "podman"), BuilderImage: strings.TrimSpace(os.Getenv("FLEETAMP_DISTRIBUTION_OCB_IMAGE")), WorkspaceRoot: dataDir + "/distribution-build-workspaces", ArtifactRoot: dataDir + "/distribution-artifacts", MemoryLimit: envOrDefault("FLEETAMP_DISTRIBUTION_OCB_MEMORY", "1g"), CPULimit: envOrDefault("FLEETAMP_DISTRIBUTION_OCB_CPUS", "1"), PIDsLimit: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_PIDS", 256), MaxArtifactBytes: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_MAX_ARTIFACT_BYTES", 512<<20)}
+		if err := runner.Validate(); err != nil {
+			fatalLog("initialize sandboxed OCB runner", err)
+		}
+		worker := &distributionOCBWorker{ID: workerID, Inspections: distributionBuildSourceInspectionStore, Artifacts: distributionBuildArtifactStore, Runner: runner, BuildTimeout: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_TIMEOUT", 15*time.Minute)}
+		go worker.run(ctx, durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_INTERVAL", 30*time.Second))
+		slog.Warn("offline sandboxed OCB builds enabled", "component", "distribution_ocb_worker", "worker_id", workerID, "runtime", runner.Runtime, "builder_image", runner.BuilderImage, "network", "none")
 	}
 
 	go func() {
@@ -313,7 +324,7 @@ func main() {
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
 	registerDistributionRoutes(mux, distributionStore, configValidator, auth)
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionPreviewStore, groupStore, configValidator, auth)
-	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, auth)
+	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, distributionBuildArtifactStore, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
