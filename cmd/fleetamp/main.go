@@ -149,6 +149,7 @@ func main() {
 	distributionBuildWorkerResultStore := database.DistributionBuildWorkerResults()
 	distributionBuildSourceStore := database.DistributionBuildSources()
 	distributionBuildSourceAcquisitionStore := database.DistributionBuildSourceAcquisitions()
+	distributionBuildSourceInspectionStore := database.DistributionBuildSourceInspections()
 	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("FLEETAMP_INTEGRATION_ALLOWED_HOSTS")}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
@@ -186,6 +187,12 @@ func main() {
 		downloader := &distributionSourceDownloader{ID: downloaderID, Sources: distributionBuildSourceStore, Acquisitions: distributionBuildSourceAcquisitionStore, Fetcher: fetcher}
 		go downloader.run(ctx, durationEnvOrDefault("FLEETAMP_DISTRIBUTION_SOURCE_DOWNLOAD_INTERVAL", 30*time.Second))
 		slog.Warn("official Collector source downloads enabled", "component", "distribution_source_downloader", "worker_id", downloaderID, "host", "codeload.github.com")
+	}
+	if boolEnv("FLEETAMP_DISTRIBUTION_SOURCE_INSPECTION_ENABLED") {
+		inspectorID := envOrDefault("FLEETAMP_DISTRIBUTION_SOURCE_INSPECTOR_ID", "fleetamp-source-inspector")
+		inspector := &distributionSourceInspector{ID: inspectorID, CacheDir: dataDir + "/distribution-sources", Acquisitions: distributionBuildSourceAcquisitionStore, Inspections: distributionBuildSourceInspectionStore, Executions: distributionBuildExecutionStore, Limits: distributions.ArchiveInspectionLimits{MaxEntries: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_SOURCE_MAX_ENTRIES", 100000), MaxUncompressedBytes: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_SOURCE_MAX_UNCOMPRESSED_BYTES", 1<<30)}}
+		go inspector.run(ctx, durationEnvOrDefault("FLEETAMP_DISTRIBUTION_SOURCE_INSPECTION_INTERVAL", 30*time.Second))
+		slog.Warn("Collector source archive inspection enabled", "component", "distribution_source_inspector", "worker_id", inspectorID, "execution", "disabled")
 	}
 
 	go func() {
@@ -306,7 +313,7 @@ func main() {
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
 	registerDistributionRoutes(mux, distributionStore, configValidator, auth)
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionPreviewStore, groupStore, configValidator, auth)
-	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, auth)
+	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)

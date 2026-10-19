@@ -153,6 +153,9 @@ func (d *Database) DistributionBuildSources() *DistributionBuildSourceStore {
 func (d *Database) DistributionBuildSourceAcquisitions() *DistributionBuildSourceAcquisitionStore {
 	return &DistributionBuildSourceAcquisitionStore{db: d.db}
 }
+func (d *Database) DistributionBuildSourceInspections() *DistributionBuildSourceInspectionStore {
+	return &DistributionBuildSourceInspectionStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -246,6 +249,20 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_build_source_acquisitions_time ON distribution_build_source_acquisitions(acquired_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_source_acquisitions_no_update BEFORE UPDATE ON distribution_build_source_acquisitions BEGIN SELECT RAISE(ABORT,'Distribution source acquisitions are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_source_acquisitions_no_delete BEFORE DELETE ON distribution_build_source_acquisitions BEGIN SELECT RAISE(ABORT,'Distribution source acquisitions are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_build_source_inspections (
+			id TEXT PRIMARY KEY, acquisition_id TEXT NOT NULL UNIQUE, execution_id TEXT NOT NULL UNIQUE,
+			build_plan_hash TEXT NOT NULL, archive_sha256 TEXT NOT NULL,
+			entry_count INTEGER NOT NULL, file_count INTEGER NOT NULL, directory_count INTEGER NOT NULL,
+			uncompressed_bytes INTEGER NOT NULL, root_prefix TEXT NOT NULL,
+			manifest_yaml TEXT NOT NULL, manifest_sha256 TEXT NOT NULL UNIQUE,
+			status TEXT NOT NULL CHECK(status = 'source-inspected'), evidence_hash TEXT NOT NULL UNIQUE,
+			inspected_by TEXT NOT NULL, inspected_at TEXT NOT NULL,
+			FOREIGN KEY(acquisition_id) REFERENCES distribution_build_source_acquisitions(id),
+			FOREIGN KEY(execution_id) REFERENCES distribution_build_executions(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_build_source_inspections_time ON distribution_build_source_inspections(inspected_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_source_inspections_no_update BEFORE UPDATE ON distribution_build_source_inspections BEGIN SELECT RAISE(ABORT,'Distribution source inspections are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_source_inspections_no_delete BEFORE DELETE ON distribution_build_source_inspections BEGIN SELECT RAISE(ABORT,'Distribution source inspections are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
