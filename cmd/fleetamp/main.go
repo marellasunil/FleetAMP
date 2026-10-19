@@ -151,6 +151,8 @@ func main() {
 	distributionBuildSourceAcquisitionStore := database.DistributionBuildSourceAcquisitions()
 	distributionBuildSourceInspectionStore := database.DistributionBuildSourceInspections()
 	distributionBuildArtifactStore := database.DistributionBuildArtifacts()
+	distributionBuildAttemptStore := database.DistributionBuildAttempts()
+	distributionBuildRetryRequestStore := database.DistributionBuildRetryRequests()
 	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("FLEETAMP_INTEGRATION_ALLOWED_HOSTS")}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
@@ -201,7 +203,7 @@ func main() {
 		if err := runner.Validate(); err != nil {
 			fatalLog("initialize sandboxed OCB runner", err)
 		}
-		worker := &distributionOCBWorker{ID: workerID, Inspections: distributionBuildSourceInspectionStore, Artifacts: distributionBuildArtifactStore, Runner: runner, BuildTimeout: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_TIMEOUT", 15*time.Minute)}
+		worker := &distributionOCBWorker{ID: workerID, Inspections: distributionBuildSourceInspectionStore, Artifacts: distributionBuildArtifactStore, Attempts: distributionBuildAttemptStore, Retries: distributionBuildRetryRequestStore, Runner: runner, BuildTimeout: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_TIMEOUT", 15*time.Minute), RetryBackoff: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_RETRY_BACKOFF", time.Minute), MaxAutomaticAttempts: int(int64EnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_MAX_ATTEMPTS", 3))}
 		go worker.run(ctx, durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_INTERVAL", 30*time.Second))
 		slog.Warn("offline sandboxed OCB builds enabled", "component", "distribution_ocb_worker", "worker_id", workerID, "runtime", runner.Runtime, "builder_image", runner.BuilderImage, "network", "none")
 	}
@@ -324,7 +326,7 @@ func main() {
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
 	registerDistributionRoutes(mux, distributionStore, configValidator, auth)
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionPreviewStore, groupStore, configValidator, auth)
-	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, distributionBuildArtifactStore, auth)
+	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, distributionBuildArtifactStore, distributionBuildAttemptStore, distributionBuildRetryRequestStore, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)

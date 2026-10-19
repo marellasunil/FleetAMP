@@ -159,6 +159,12 @@ func (d *Database) DistributionBuildSourceInspections() *DistributionBuildSource
 func (d *Database) DistributionBuildArtifacts() *DistributionBuildArtifactStore {
 	return &DistributionBuildArtifactStore{db: d.db}
 }
+func (d *Database) DistributionBuildAttempts() *DistributionBuildAttemptStore {
+	return &DistributionBuildAttemptStore{db: d.db}
+}
+func (d *Database) DistributionBuildRetryRequests() *DistributionBuildRetryRequestStore {
+	return &DistributionBuildRetryRequestStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -280,6 +286,31 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_build_artifacts_time ON distribution_build_artifacts(built_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_artifacts_no_update BEFORE UPDATE ON distribution_build_artifacts BEGIN SELECT RAISE(ABORT,'Distribution build artifacts are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_artifacts_no_delete BEFORE DELETE ON distribution_build_artifacts BEGIN SELECT RAISE(ABORT,'Distribution build artifacts are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_build_attempts (
+			id TEXT PRIMARY KEY, inspection_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+			build_plan_hash TEXT NOT NULL, manifest_sha256 TEXT NOT NULL,
+			attempt_number INTEGER NOT NULL CHECK(attempt_number > 0),
+			trigger TEXT NOT NULL CHECK(trigger IN ('automatic','manual')), retry_request_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL CHECK(status IN ('succeeded','failed')),
+			failure_code TEXT NOT NULL DEFAULT '', failure_message TEXT NOT NULL DEFAULT '',
+			artifact_id TEXT NOT NULL DEFAULT '', artifact_sha256 TEXT NOT NULL DEFAULT '',
+			worker_id TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE,
+			started_at TEXT NOT NULL, completed_at TEXT NOT NULL, next_retry_at TEXT NOT NULL DEFAULT '',
+			UNIQUE(inspection_id,attempt_number),
+			FOREIGN KEY(inspection_id) REFERENCES distribution_build_source_inspections(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_build_attempts_time ON distribution_build_attempts(completed_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_attempts_no_update BEFORE UPDATE ON distribution_build_attempts BEGIN SELECT RAISE(ABORT,'Distribution build attempts are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_attempts_no_delete BEFORE DELETE ON distribution_build_attempts BEGIN SELECT RAISE(ABORT,'Distribution build attempts are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_build_retry_requests (
+			id TEXT PRIMARY KEY, inspection_id TEXT NOT NULL, previous_attempt_id TEXT NOT NULL UNIQUE,
+			reason TEXT NOT NULL, requested_by TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE, requested_at TEXT NOT NULL,
+			FOREIGN KEY(inspection_id) REFERENCES distribution_build_source_inspections(id),
+			FOREIGN KEY(previous_attempt_id) REFERENCES distribution_build_attempts(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_build_retry_requests_time ON distribution_build_retry_requests(requested_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_retry_requests_no_update BEFORE UPDATE ON distribution_build_retry_requests BEGIN SELECT RAISE(ABORT,'Distribution build retry requests are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_build_retry_requests_no_delete BEFORE DELETE ON distribution_build_retry_requests BEGIN SELECT RAISE(ABORT,'Distribution build retry requests are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
