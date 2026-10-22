@@ -153,6 +153,9 @@ func main() {
 	distributionBuildArtifactStore := database.DistributionBuildArtifacts()
 	distributionBuildAttemptStore := database.DistributionBuildAttempts()
 	distributionBuildRetryRequestStore := database.DistributionBuildRetryRequests()
+	distributionArtifactPromotionStore := database.DistributionArtifactPromotions()
+	distributionArtifactPromotionReviewStore := database.DistributionArtifactPromotionReviews()
+	distributionArtifactPublicationStore := database.DistributionArtifactPublications()
 	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("FLEETAMP_INTEGRATION_ALLOWED_HOSTS")}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
@@ -327,6 +330,7 @@ func main() {
 	registerDistributionRoutes(mux, distributionStore, configValidator, auth)
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionPreviewStore, groupStore, configValidator, auth)
 	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, distributionBuildArtifactStore, distributionBuildAttemptStore, distributionBuildRetryRequestStore, auth)
+	registerDistributionArtifactPromotionRoutes(mux, distributionBuildArtifactStore, distributionBuildPlanStore, distributionArtifactPromotionStore, distributionArtifactPromotionReviewStore, distributionArtifactPublicationStore, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
