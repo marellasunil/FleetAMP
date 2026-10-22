@@ -14,12 +14,16 @@ var (
 )
 
 type ArtifactPublicationWork struct {
-	Publication *distributions.ArtifactPublication
-	Preflight   *distributions.ArtifactPublicationPreflight
+	Publication             *distributions.ArtifactPublication
+	Preflight               *distributions.ArtifactPublicationPreflight
+	AttemptNumber           int
+	Trigger, RetryRequestID string
 }
 
 type DistributionArtifactPublicationExecutionStore interface {
 	Claim(context.Context, string, time.Time, time.Time) (*ArtifactPublicationWork, error)
 	Complete(context.Context, string, *distributions.ArtifactPublicationExecution) error
 	List(context.Context, int) ([]*distributions.ArtifactPublicationExecution, error)
+	AuthorizeRetry(context.Context, *distributions.ArtifactPublicationRetryRequest) error
+	ListRetries(context.Context, int) ([]*distributions.ArtifactPublicationRetryRequest, error)
 }

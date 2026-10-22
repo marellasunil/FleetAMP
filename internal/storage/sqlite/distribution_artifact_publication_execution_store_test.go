@@ -43,8 +43,7 @@ func TestArtifactPublicationExecutionClaimAndComplete(t *testing.T) {
 	if _, err = store.Claim(ctx, "worker-2", now, now.Add(time.Minute)); !errors.Is(err, storage.ErrArtifactPublicationQueueEmpty) {
 		t.Fatalf("expected active lease to block second claim, got %v", err)
 	}
-	result := &distributions.RegistryPublishResult{ArtifactSHA256: sha, DestinationRef: work.Publication.DestinationRef}
-	receipt, err := distributions.NewSuccessfulArtifactPublicationExecution(work.Publication, work.Preflight, result, "worker-1", now, now.Add(time.Second))
+	receipt, err := distributions.NewFailedArtifactPublicationExecution(work.Publication, work.Preflight, distributions.ArtifactPublicationFailurePublisher, "registry unavailable", 1, distributions.ArtifactPublicationTriggerAutomatic, "", "worker-1", now, now.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,11 +53,33 @@ func TestArtifactPublicationExecutionClaimAndComplete(t *testing.T) {
 	if err = store.Complete(ctx, "worker-1", receipt); err != nil {
 		t.Fatal(err)
 	}
+	retry, err := distributions.NewArtifactPublicationRetryRequest(work.Publication, work.Preflight, receipt, "registry recovered", "admin", now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.AuthorizeRetry(ctx, retry); err != nil {
+		t.Fatal(err)
+	}
+	secondWork, err := store.Claim(ctx, "worker-2", now.Add(3*time.Second), now.Add(4*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondWork.AttemptNumber != 2 || secondWork.Trigger != distributions.ArtifactPublicationTriggerManual || secondWork.RetryRequestID != retry.ID {
+		t.Fatalf("unexpected retry work: %#v", secondWork)
+	}
+	result := &distributions.RegistryPublishResult{ArtifactSHA256: sha, DestinationRef: secondWork.Publication.DestinationRef}
+	success, err := distributions.NewSuccessfulArtifactPublicationExecution(secondWork.Publication, secondWork.Preflight, result, 2, distributions.ArtifactPublicationTriggerManual, retry.ID, "worker-2", now.Add(3*time.Second), now.Add(4*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Complete(ctx, "worker-2", success); err != nil {
+		t.Fatal(err)
+	}
 	items, err := store.List(ctx, 10)
-	if err != nil || len(items) != 1 || items[0].EvidenceHash != receipt.EvidenceHash {
+	if err != nil || len(items) != 2 || items[0].EvidenceHash != success.EvidenceHash {
 		t.Fatalf("unexpected receipts: %#v, %v", items, err)
 	}
-	if _, err = db.db.ExecContext(ctx, `UPDATE distribution_artifact_publication_executions SET status='failed' WHERE id=?`, receipt.ID); err == nil {
+	if _, err = db.db.ExecContext(ctx, `UPDATE distribution_artifact_publication_executions SET status='failed' WHERE id=?`, success.ID); err == nil {
 		t.Fatal("immutable publication receipt accepted update")
 	}
 }

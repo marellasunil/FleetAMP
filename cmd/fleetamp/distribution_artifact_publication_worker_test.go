@@ -30,6 +30,12 @@ func (s *publicationWorkerStore) Complete(_ context.Context, _ string, receipt *
 func (s *publicationWorkerStore) List(context.Context, int) ([]*distributions.ArtifactPublicationExecution, error) {
 	return nil, nil
 }
+func (s *publicationWorkerStore) AuthorizeRetry(context.Context, *distributions.ArtifactPublicationRetryRequest) error {
+	return nil
+}
+func (s *publicationWorkerStore) ListRetries(context.Context, int) ([]*distributions.ArtifactPublicationRetryRequest, error) {
+	return nil, nil
+}
 
 type publicationWorkerPublisher struct{ err error }
 
@@ -43,7 +49,7 @@ func (p publicationWorkerPublisher) Publish(_ context.Context, preflight *distri
 func publicationWorkerFixture() *storage.ArtifactPublicationWork {
 	publication := &distributions.ArtifactPublication{ID: "publication-1", ArtifactID: "artifact-1", ArtifactSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", DestinationRef: "oci://registry.example.test/fleetamp:v1", CredentialRef: "secret://registry", Status: distributions.ArtifactPublicationQueued, EvidenceHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
 	preflight := &distributions.ArtifactPublicationPreflight{ID: "preflight-1", PublicationID: publication.ID, PublicationEvidenceHash: publication.EvidenceHash, ArtifactID: publication.ArtifactID, ArtifactSHA256: publication.ArtifactSHA256, DestinationRef: publication.DestinationRef, CredentialRef: publication.CredentialRef, Status: distributions.ArtifactPublicationPreflightPassed, EvidenceHash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
-	return &storage.ArtifactPublicationWork{Publication: publication, Preflight: preflight}
+	return &storage.ArtifactPublicationWork{Publication: publication, Preflight: preflight, AttemptNumber: 1, Trigger: distributions.ArtifactPublicationTriggerAutomatic}
 }
 
 func TestArtifactPublicationWorkerRecordsSuccess(t *testing.T) {
