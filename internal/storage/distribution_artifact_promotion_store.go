@@ -20,3 +20,8 @@ type DistributionArtifactPublicationStore interface {
 	Create(context.Context, *distributions.ArtifactPublication) error
 	List(context.Context, int) ([]*distributions.ArtifactPublication, error)
 }
+
+type DistributionArtifactPublicationPreflightStore interface {
+	Create(context.Context, *distributions.ArtifactPublicationPreflight) error
+	List(context.Context, int) ([]*distributions.ArtifactPublicationPreflight, error)
+}
