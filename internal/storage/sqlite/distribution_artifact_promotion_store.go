@@ -92,6 +92,41 @@ func (s *DistributionArtifactPublicationStore) Create(ctx context.Context, item 
 	return nil
 }
 
+type DistributionArtifactPublicationPreflightStore struct{ db *sql.DB }
+
+func (s *DistributionArtifactPublicationPreflightStore) Create(ctx context.Context, item *distributions.ArtifactPublicationPreflight) error {
+	if item == nil {
+		return fmt.Errorf("artifact publication preflight is required")
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO distribution_artifact_publication_preflights(id,publication_id,publication_evidence_hash,artifact_id,artifact_reference,artifact_sha256,artifact_size,destination_ref,destination_host,credential_ref,credential_available,status,evidence_hash,checked_by,checked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, item.ID, item.PublicationID, item.PublicationEvidenceHash, item.ArtifactID, item.ArtifactReference, item.ArtifactSHA256, item.ArtifactSize, item.DestinationRef, item.DestinationHost, item.CredentialRef, item.CredentialAvailable, item.Status, item.EvidenceHash, item.CheckedBy, item.CheckedAt.Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("create artifact publication preflight: %w", err)
+	}
+	return nil
+}
+
+func (s *DistributionArtifactPublicationPreflightStore) List(ctx context.Context, limit int) ([]*distributions.ArtifactPublicationPreflight, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,publication_id,publication_evidence_hash,artifact_id,artifact_reference,artifact_sha256,artifact_size,destination_ref,destination_host,credential_ref,credential_available,status,evidence_hash,checked_by,checked_at FROM distribution_artifact_publication_preflights ORDER BY checked_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*distributions.ArtifactPublicationPreflight
+	for rows.Next() {
+		item := &distributions.ArtifactPublicationPreflight{}
+		var at string
+		if err := rows.Scan(&item.ID, &item.PublicationID, &item.PublicationEvidenceHash, &item.ArtifactID, &item.ArtifactReference, &item.ArtifactSHA256, &item.ArtifactSize, &item.DestinationRef, &item.DestinationHost, &item.CredentialRef, &item.CredentialAvailable, &item.Status, &item.EvidenceHash, &item.CheckedBy, &at); err != nil {
+			return nil, err
+		}
+		item.CheckedAt, _ = time.Parse(time.RFC3339Nano, at)
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 func (s *DistributionArtifactPublicationStore) List(ctx context.Context, limit int) ([]*distributions.ArtifactPublication, error) {
 	if limit <= 0 {
 		limit = 100
