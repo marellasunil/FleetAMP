@@ -23,6 +23,18 @@ func int64EnvOrDefault(key string, fallback int64) int64 {
 	return value
 }
 
+func boundedIntEnvOrDefault(key string, fallback, minimum, maximum int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minimum || value > maximum {
+		return fallback
+	}
+	return value
+}
+
 type distributionSourceDownloader struct {
 	ID           string
 	Sources      storage.DistributionBuildSourceStore

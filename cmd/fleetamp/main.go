@@ -203,7 +203,7 @@ func main() {
 		if err := runner.Validate(); err != nil {
 			fatalLog("initialize sandboxed OCB runner", err)
 		}
-		worker := &distributionOCBWorker{ID: workerID, Inspections: distributionBuildSourceInspectionStore, Artifacts: distributionBuildArtifactStore, Attempts: distributionBuildAttemptStore, Retries: distributionBuildRetryRequestStore, Runner: runner, BuildTimeout: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_TIMEOUT", 15*time.Minute), RetryBackoff: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_RETRY_BACKOFF", time.Minute), MaxAutomaticAttempts: int(int64EnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_MAX_ATTEMPTS", 3))}
+		worker := &distributionOCBWorker{ID: workerID, Inspections: distributionBuildSourceInspectionStore, Artifacts: distributionBuildArtifactStore, Attempts: distributionBuildAttemptStore, Retries: distributionBuildRetryRequestStore, Runner: runner, BuildTimeout: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_TIMEOUT", 15*time.Minute), RetryBackoff: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_RETRY_BACKOFF", time.Minute), MaxAutomaticAttempts: boundedIntEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_MAX_ATTEMPTS", 3, 1, 10)}
 		go worker.run(ctx, durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_INTERVAL", 30*time.Second))
 		slog.Warn("offline sandboxed OCB builds enabled", "component", "distribution_ocb_worker", "worker_id", workerID, "runtime", runner.Runtime, "builder_image", runner.BuilderImage, "network", "none")
 	}
