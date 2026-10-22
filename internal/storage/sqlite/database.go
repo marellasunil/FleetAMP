@@ -177,6 +177,9 @@ func (d *Database) DistributionArtifactPublications() *DistributionArtifactPubli
 func (d *Database) DistributionArtifactPublicationPreflights() *DistributionArtifactPublicationPreflightStore {
 	return &DistributionArtifactPublicationPreflightStore{db: d.db}
 }
+func (d *Database) DistributionArtifactPublicationExecutions() *DistributionArtifactPublicationExecutionStore {
+	return &DistributionArtifactPublicationExecutionStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -367,6 +370,26 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_publication_preflights_time ON distribution_artifact_publication_preflights(checked_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_preflights_no_update BEFORE UPDATE ON distribution_artifact_publication_preflights BEGIN SELECT RAISE(ABORT,'Distribution artifact publication preflights are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_preflights_no_delete BEFORE DELETE ON distribution_artifact_publication_preflights BEGIN SELECT RAISE(ABORT,'Distribution artifact publication preflights are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_artifact_publication_jobs (
+			publication_id TEXT PRIMARY KEY, preflight_id TEXT NOT NULL UNIQUE,
+			status TEXT NOT NULL CHECK(status IN ('queued','running','succeeded','failed')),
+			worker_id TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '', claimed_at TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY(publication_id) REFERENCES distribution_artifact_publications(id),
+			FOREIGN KEY(preflight_id) REFERENCES distribution_artifact_publication_preflights(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_publication_jobs_status ON distribution_artifact_publication_jobs(status,lease_until)`,
+		`CREATE TABLE IF NOT EXISTS distribution_artifact_publication_executions (
+			id TEXT PRIMARY KEY, publication_id TEXT NOT NULL UNIQUE, publication_evidence_hash TEXT NOT NULL,
+			preflight_id TEXT NOT NULL UNIQUE, preflight_evidence_hash TEXT NOT NULL,
+			artifact_id TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, destination_ref TEXT NOT NULL, credential_ref TEXT NOT NULL,
+			status TEXT NOT NULL CHECK(status IN ('succeeded','failed')), failure_code TEXT NOT NULL, failure_digest TEXT NOT NULL,
+			worker_id TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE, started_at TEXT NOT NULL, completed_at TEXT NOT NULL,
+			FOREIGN KEY(publication_id) REFERENCES distribution_artifact_publications(id),
+			FOREIGN KEY(preflight_id) REFERENCES distribution_artifact_publication_preflights(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_publication_executions_time ON distribution_artifact_publication_executions(completed_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_executions_no_update BEFORE UPDATE ON distribution_artifact_publication_executions BEGIN SELECT RAISE(ABORT,'Distribution artifact publication executions are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_executions_no_delete BEFORE DELETE ON distribution_artifact_publication_executions BEGIN SELECT RAISE(ABORT,'Distribution artifact publication executions are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,

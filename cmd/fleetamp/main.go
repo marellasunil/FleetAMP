@@ -157,6 +157,7 @@ func main() {
 	distributionArtifactPromotionReviewStore := database.DistributionArtifactPromotionReviews()
 	distributionArtifactPublicationStore := database.DistributionArtifactPublications()
 	distributionArtifactPublicationPreflightStore := database.DistributionArtifactPublicationPreflights()
+	distributionArtifactPublicationExecutionStore := database.DistributionArtifactPublicationExecutions()
 	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("FLEETAMP_INTEGRATION_ALLOWED_HOSTS")}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
@@ -210,6 +211,17 @@ func main() {
 		worker := &distributionOCBWorker{ID: workerID, Inspections: distributionBuildSourceInspectionStore, Artifacts: distributionBuildArtifactStore, Attempts: distributionBuildAttemptStore, Retries: distributionBuildRetryRequestStore, Runner: runner, BuildTimeout: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_TIMEOUT", 15*time.Minute), RetryBackoff: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_RETRY_BACKOFF", time.Minute), MaxAutomaticAttempts: boundedIntEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_MAX_ATTEMPTS", 3, 1, 10)}
 		go worker.run(ctx, durationEnvOrDefault("FLEETAMP_DISTRIBUTION_OCB_INTERVAL", 30*time.Second))
 		slog.Warn("offline sandboxed OCB builds enabled", "component", "distribution_ocb_worker", "worker_id", workerID, "runtime", runner.Runtime, "builder_image", runner.BuilderImage, "network", "none")
+	}
+	publicationWorkerEnabled := boolEnv("FLEETAMP_DISTRIBUTION_PUBLICATION_WORKER_ENABLED")
+	if publicationWorkerEnabled {
+		publisher := &distributions.ORASArtifactPublisher{Executable: envOrDefault("FLEETAMP_DISTRIBUTION_ORAS_BINARY", "oras"), ArtifactRoot: dataDir + "/distribution-artifacts", StagingRoot: dataDir + "/distribution-publication-staging", Username: envOrDefault("FLEETAMP_DISTRIBUTION_REGISTRY_USERNAME", "oauth2"), Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, MaxBytes: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_PUBLICATION_MAX_ARTIFACT_BYTES", 512<<20)}
+		if err := publisher.Validate(); err != nil {
+			fatalLog("initialize artifact registry publisher", err)
+		}
+		workerID := envOrDefault("FLEETAMP_DISTRIBUTION_PUBLICATION_WORKER_ID", "fleetamp-artifact-publisher")
+		worker := &distributionArtifactPublicationWorker{ID: workerID, Executions: distributionArtifactPublicationExecutionStore, Publisher: publisher, LeaseTTL: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_PUBLICATION_LEASE_TTL", 20*time.Minute), Timeout: durationEnvOrDefault("FLEETAMP_DISTRIBUTION_PUBLICATION_TIMEOUT", 15*time.Minute)}
+		go worker.run(ctx, durationEnvOrDefault("FLEETAMP_DISTRIBUTION_PUBLICATION_INTERVAL", 30*time.Second))
+		slog.Warn("artifact registry publication worker enabled", "component", "distribution_artifact_publisher", "worker_id", workerID, "publisher", "oras")
 	}
 
 	go func() {
@@ -332,7 +344,7 @@ func main() {
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionPreviewStore, groupStore, configValidator, auth)
 	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, distributionBuildArtifactStore, distributionBuildAttemptStore, distributionBuildRetryRequestStore, auth)
 	publicationPreflightVerifier := &distributions.ArtifactPublicationPreflightVerifier{ArtifactRoot: dataDir + "/distribution-artifacts", AllowedHosts: commaSeparatedEnv("FLEETAMP_DISTRIBUTION_PUBLICATION_ALLOWED_HOSTS"), Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, MaxBytes: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_PUBLICATION_MAX_ARTIFACT_BYTES", 512<<20)}
-	registerDistributionArtifactPromotionRoutes(mux, distributionBuildArtifactStore, distributionBuildPlanStore, distributionArtifactPromotionStore, distributionArtifactPromotionReviewStore, distributionArtifactPublicationStore, distributionArtifactPublicationPreflightStore, publicationPreflightVerifier, auth)
+	registerDistributionArtifactPromotionRoutes(mux, distributionBuildArtifactStore, distributionBuildPlanStore, distributionArtifactPromotionStore, distributionArtifactPromotionReviewStore, distributionArtifactPublicationStore, distributionArtifactPublicationPreflightStore, distributionArtifactPublicationExecutionStore, publicationPreflightVerifier, publicationWorkerEnabled, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)
