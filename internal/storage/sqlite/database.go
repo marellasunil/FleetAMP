@@ -165,6 +165,15 @@ func (d *Database) DistributionBuildAttempts() *DistributionBuildAttemptStore {
 func (d *Database) DistributionBuildRetryRequests() *DistributionBuildRetryRequestStore {
 	return &DistributionBuildRetryRequestStore{db: d.db}
 }
+func (d *Database) DistributionArtifactPromotions() *DistributionArtifactPromotionStore {
+	return &DistributionArtifactPromotionStore{db: d.db}
+}
+func (d *Database) DistributionArtifactPromotionReviews() *DistributionArtifactPromotionReviewStore {
+	return &DistributionArtifactPromotionReviewStore{db: d.db}
+}
+func (d *Database) DistributionArtifactPublications() *DistributionArtifactPublicationStore {
+	return &DistributionArtifactPublicationStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -311,6 +320,38 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_build_retry_requests_time ON distribution_build_retry_requests(requested_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_retry_requests_no_update BEFORE UPDATE ON distribution_build_retry_requests BEGIN SELECT RAISE(ABORT,'Distribution build retry requests are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_build_retry_requests_no_delete BEFORE DELETE ON distribution_build_retry_requests BEGIN SELECT RAISE(ABORT,'Distribution build retry requests are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_artifact_promotions (
+			id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL UNIQUE, artifact_sha256 TEXT NOT NULL,
+			build_plan_hash TEXT NOT NULL, destination_ref TEXT NOT NULL, credential_ref TEXT NOT NULL,
+			reason TEXT NOT NULL, requested_by TEXT NOT NULL,
+			status TEXT NOT NULL CHECK(status = 'pending'), evidence_hash TEXT NOT NULL UNIQUE, requested_at TEXT NOT NULL,
+			FOREIGN KEY(artifact_id) REFERENCES distribution_build_artifacts(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_promotions_time ON distribution_artifact_promotions(requested_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_promotions_no_update BEFORE UPDATE ON distribution_artifact_promotions BEGIN SELECT RAISE(ABORT,'Distribution artifact promotions are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_promotions_no_delete BEFORE DELETE ON distribution_artifact_promotions BEGIN SELECT RAISE(ABORT,'Distribution artifact promotions are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_artifact_promotion_reviews (
+			id TEXT PRIMARY KEY, promotion_id TEXT NOT NULL UNIQUE, promotion_evidence_hash TEXT NOT NULL,
+			artifact_sha256 TEXT NOT NULL, decision TEXT NOT NULL CHECK(decision IN ('approved','rejected')),
+			reason TEXT NOT NULL, reviewed_by TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE, reviewed_at TEXT NOT NULL,
+			FOREIGN KEY(promotion_id) REFERENCES distribution_artifact_promotions(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_promotion_reviews_time ON distribution_artifact_promotion_reviews(reviewed_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_promotion_reviews_no_update BEFORE UPDATE ON distribution_artifact_promotion_reviews BEGIN SELECT RAISE(ABORT,'Distribution artifact promotion reviews are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_promotion_reviews_no_delete BEFORE DELETE ON distribution_artifact_promotion_reviews BEGIN SELECT RAISE(ABORT,'Distribution artifact promotion reviews are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_artifact_publications (
+			id TEXT PRIMARY KEY, promotion_id TEXT NOT NULL UNIQUE, review_id TEXT NOT NULL UNIQUE,
+			artifact_id TEXT NOT NULL UNIQUE, artifact_sha256 TEXT NOT NULL,
+			destination_ref TEXT NOT NULL, credential_ref TEXT NOT NULL,
+			status TEXT NOT NULL CHECK(status = 'queued'), evidence_hash TEXT NOT NULL UNIQUE,
+			queued_by TEXT NOT NULL, queued_at TEXT NOT NULL,
+			FOREIGN KEY(promotion_id) REFERENCES distribution_artifact_promotions(id),
+			FOREIGN KEY(review_id) REFERENCES distribution_artifact_promotion_reviews(id),
+			FOREIGN KEY(artifact_id) REFERENCES distribution_build_artifacts(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_publications_time ON distribution_artifact_publications(queued_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publications_no_update BEFORE UPDATE ON distribution_artifact_publications BEGIN SELECT RAISE(ABORT,'Distribution artifact publications are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publications_no_delete BEFORE DELETE ON distribution_artifact_publications BEGIN SELECT RAISE(ABORT,'Distribution artifact publications are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
