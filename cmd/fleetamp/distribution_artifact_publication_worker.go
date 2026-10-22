@@ -51,13 +51,13 @@ func (w *distributionArtifactPublicationWorker) runOnce(ctx context.Context) err
 	}
 	var receipt *distributions.ArtifactPublicationExecution
 	if publishErr == nil {
-		receipt, err = distributions.NewSuccessfulArtifactPublicationExecution(work.Publication, work.Preflight, result, w.ID, now, completedAt)
+		receipt, err = distributions.NewSuccessfulArtifactPublicationExecution(work.Publication, work.Preflight, result, work.AttemptNumber, work.Trigger, work.RetryRequestID, w.ID, now, completedAt)
 	} else {
 		failureCode := distributions.ArtifactPublicationFailurePublisher
 		if errors.Is(publishErr, context.DeadlineExceeded) || errors.Is(publishCtx.Err(), context.DeadlineExceeded) {
 			failureCode = distributions.ArtifactPublicationFailureTimeout
 		}
-		receipt, err = distributions.NewFailedArtifactPublicationExecution(work.Publication, work.Preflight, failureCode, publishErr.Error(), w.ID, now, completedAt)
+		receipt, err = distributions.NewFailedArtifactPublicationExecution(work.Publication, work.Preflight, failureCode, publishErr.Error(), work.AttemptNumber, work.Trigger, work.RetryRequestID, w.ID, now, completedAt)
 	}
 	if err != nil {
 		return err

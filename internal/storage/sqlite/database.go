@@ -379,17 +379,31 @@ func (d *Database) initialize(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_publication_jobs_status ON distribution_artifact_publication_jobs(status,lease_until)`,
 		`CREATE TABLE IF NOT EXISTS distribution_artifact_publication_executions (
-			id TEXT PRIMARY KEY, publication_id TEXT NOT NULL UNIQUE, publication_evidence_hash TEXT NOT NULL,
-			preflight_id TEXT NOT NULL UNIQUE, preflight_evidence_hash TEXT NOT NULL,
+			id TEXT PRIMARY KEY, publication_id TEXT NOT NULL, publication_evidence_hash TEXT NOT NULL,
+			preflight_id TEXT NOT NULL, preflight_evidence_hash TEXT NOT NULL,
 			artifact_id TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, destination_ref TEXT NOT NULL, credential_ref TEXT NOT NULL,
 			status TEXT NOT NULL CHECK(status IN ('succeeded','failed')), failure_code TEXT NOT NULL, failure_digest TEXT NOT NULL,
+			attempt_number INTEGER NOT NULL, trigger TEXT NOT NULL CHECK(trigger IN ('automatic','manual')), retry_request_id TEXT NOT NULL,
 			worker_id TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE, started_at TEXT NOT NULL, completed_at TEXT NOT NULL,
+			UNIQUE(publication_id,attempt_number),
 			FOREIGN KEY(publication_id) REFERENCES distribution_artifact_publications(id),
 			FOREIGN KEY(preflight_id) REFERENCES distribution_artifact_publication_preflights(id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_publication_executions_time ON distribution_artifact_publication_executions(completed_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_executions_no_update BEFORE UPDATE ON distribution_artifact_publication_executions BEGIN SELECT RAISE(ABORT,'Distribution artifact publication executions are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_executions_no_delete BEFORE DELETE ON distribution_artifact_publication_executions BEGIN SELECT RAISE(ABORT,'Distribution artifact publication executions are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_artifact_publication_retry_requests (
+			id TEXT PRIMARY KEY, publication_id TEXT NOT NULL, publication_evidence_hash TEXT NOT NULL,
+			preflight_id TEXT NOT NULL, preflight_evidence_hash TEXT NOT NULL,
+			previous_execution_id TEXT NOT NULL UNIQUE, previous_execution_evidence_hash TEXT NOT NULL,
+			reason TEXT NOT NULL, requested_by TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE, requested_at TEXT NOT NULL,
+			FOREIGN KEY(publication_id) REFERENCES distribution_artifact_publications(id),
+			FOREIGN KEY(preflight_id) REFERENCES distribution_artifact_publication_preflights(id),
+			FOREIGN KEY(previous_execution_id) REFERENCES distribution_artifact_publication_executions(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_publication_retries_time ON distribution_artifact_publication_retry_requests(requested_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_retry_requests_no_update BEFORE UPDATE ON distribution_artifact_publication_retry_requests BEGIN SELECT RAISE(ABORT,'Distribution artifact publication retry requests are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_retry_requests_no_delete BEFORE DELETE ON distribution_artifact_publication_retry_requests BEGIN SELECT RAISE(ABORT,'Distribution artifact publication retry requests are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
@@ -681,10 +695,51 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureDistributionBaselineColumn(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureArtifactPublicationRetrySchema(ctx); err != nil {
+		return err
+	}
 	if err := d.migrateAdministratorToUsers(ctx); err != nil {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureArtifactPublicationRetrySchema(ctx context.Context) error {
+	present, err := sqliteColumnExists(ctx, d.db, "distribution_artifact_publication_executions", "attempt_number")
+	if err != nil || present {
+		return err
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	statements := []string{
+		`DROP TRIGGER IF EXISTS distribution_artifact_publication_executions_no_update`,
+		`DROP TRIGGER IF EXISTS distribution_artifact_publication_executions_no_delete`,
+		`DROP INDEX IF EXISTS idx_distribution_artifact_publication_executions_time`,
+		`CREATE TABLE distribution_artifact_publication_executions_next (
+			id TEXT PRIMARY KEY, publication_id TEXT NOT NULL, publication_evidence_hash TEXT NOT NULL,
+			preflight_id TEXT NOT NULL, preflight_evidence_hash TEXT NOT NULL,
+			artifact_id TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, destination_ref TEXT NOT NULL, credential_ref TEXT NOT NULL,
+			status TEXT NOT NULL CHECK(status IN ('succeeded','failed')), failure_code TEXT NOT NULL, failure_digest TEXT NOT NULL,
+			attempt_number INTEGER NOT NULL, trigger TEXT NOT NULL CHECK(trigger IN ('automatic','manual')), retry_request_id TEXT NOT NULL,
+			worker_id TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE, started_at TEXT NOT NULL, completed_at TEXT NOT NULL,
+			UNIQUE(publication_id,attempt_number), FOREIGN KEY(publication_id) REFERENCES distribution_artifact_publications(id),
+			FOREIGN KEY(preflight_id) REFERENCES distribution_artifact_publication_preflights(id))`,
+		`INSERT INTO distribution_artifact_publication_executions_next(id,publication_id,publication_evidence_hash,preflight_id,preflight_evidence_hash,artifact_id,artifact_sha256,destination_ref,credential_ref,status,failure_code,failure_digest,attempt_number,trigger,retry_request_id,worker_id,evidence_hash,started_at,completed_at) SELECT id,publication_id,publication_evidence_hash,preflight_id,preflight_evidence_hash,artifact_id,artifact_sha256,destination_ref,credential_ref,status,failure_code,failure_digest,1,'automatic','',worker_id,evidence_hash,started_at,completed_at FROM distribution_artifact_publication_executions`,
+		`DROP TABLE distribution_artifact_publication_executions`,
+		`ALTER TABLE distribution_artifact_publication_executions_next RENAME TO distribution_artifact_publication_executions`,
+		`CREATE INDEX idx_distribution_artifact_publication_executions_time ON distribution_artifact_publication_executions(completed_at DESC)`,
+		`CREATE TRIGGER distribution_artifact_publication_executions_no_update BEFORE UPDATE ON distribution_artifact_publication_executions BEGIN SELECT RAISE(ABORT,'Distribution artifact publication executions are immutable'); END`,
+		`CREATE TRIGGER distribution_artifact_publication_executions_no_delete BEFORE DELETE ON distribution_artifact_publication_executions BEGIN SELECT RAISE(ABORT,'Distribution artifact publication executions are immutable'); END`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("migrate artifact publication retry schema: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (d *Database) ensureDistributionBaselineColumn(ctx context.Context) error {
