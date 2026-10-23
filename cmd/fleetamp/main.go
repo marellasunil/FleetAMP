@@ -158,6 +158,7 @@ func main() {
 	distributionArtifactPublicationStore := database.DistributionArtifactPublications()
 	distributionArtifactPublicationPreflightStore := database.DistributionArtifactPublicationPreflights()
 	distributionArtifactPublicationExecutionStore := database.DistributionArtifactPublicationExecutions()
+	distributionReleaseStore := database.DistributionReleases()
 	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("FLEETAMP_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("FLEETAMP_INTEGRATION_ALLOWED_HOSTS")}
 	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
 	configValidator := configs.NewValidator(os.Getenv("FLEETAMP_OTELCOL_BINARY"))
@@ -340,11 +341,11 @@ func main() {
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
-	registerDistributionRoutes(mux, distributionStore, configValidator, auth)
+	registerDistributionRoutes(mux, distributionStore, distributionReleaseStore, configValidator, auth)
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionPreviewStore, groupStore, configValidator, auth)
 	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, distributionBuildArtifactStore, distributionBuildAttemptStore, distributionBuildRetryRequestStore, auth)
 	publicationPreflightVerifier := &distributions.ArtifactPublicationPreflightVerifier{ArtifactRoot: dataDir + "/distribution-artifacts", AllowedHosts: commaSeparatedEnv("FLEETAMP_DISTRIBUTION_PUBLICATION_ALLOWED_HOSTS"), Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, MaxBytes: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_PUBLICATION_MAX_ARTIFACT_BYTES", 512<<20)}
-	registerDistributionArtifactPromotionRoutes(mux, distributionBuildArtifactStore, distributionBuildPlanStore, distributionArtifactPromotionStore, distributionArtifactPromotionReviewStore, distributionArtifactPublicationStore, distributionArtifactPublicationPreflightStore, distributionArtifactPublicationExecutionStore, publicationPreflightVerifier, publicationWorkerEnabled, auth)
+	registerDistributionArtifactPromotionRoutes(mux, distributionStore, distributionBuildArtifactStore, distributionBuildPlanStore, distributionArtifactPromotionStore, distributionArtifactPromotionReviewStore, distributionArtifactPublicationStore, distributionArtifactPublicationPreflightStore, distributionArtifactPublicationExecutionStore, distributionReleaseStore, publicationPreflightVerifier, publicationWorkerEnabled, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
 	registerUIRoutes(mux, guideCatalogStore, auth)

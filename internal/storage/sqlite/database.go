@@ -180,6 +180,9 @@ func (d *Database) DistributionArtifactPublicationPreflights() *DistributionArti
 func (d *Database) DistributionArtifactPublicationExecutions() *DistributionArtifactPublicationExecutionStore {
 	return &DistributionArtifactPublicationExecutionStore{db: d.db}
 }
+func (d *Database) DistributionReleases() *DistributionReleaseStore {
+	return &DistributionReleaseStore{db: d.db}
+}
 
 // initialize creates all required tables and indexes in an idempotent transaction.
 func (d *Database) initialize(ctx context.Context) error {
@@ -404,6 +407,22 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_artifact_publication_retries_time ON distribution_artifact_publication_retry_requests(requested_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_retry_requests_no_update BEFORE UPDATE ON distribution_artifact_publication_retry_requests BEGIN SELECT RAISE(ABORT,'Distribution artifact publication retry requests are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_artifact_publication_retry_requests_no_delete BEFORE DELETE ON distribution_artifact_publication_retry_requests BEGIN SELECT RAISE(ABORT,'Distribution artifact publication retry requests are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_releases (
+			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL UNIQUE, distribution_spec_hash TEXT NOT NULL,
+			build_plan_id TEXT NOT NULL, build_plan_hash TEXT NOT NULL, artifact_id TEXT NOT NULL UNIQUE,
+			artifact_evidence_hash TEXT NOT NULL, artifact_sha256 TEXT NOT NULL,
+			publication_id TEXT NOT NULL UNIQUE, publication_evidence_hash TEXT NOT NULL,
+			execution_id TEXT NOT NULL UNIQUE, execution_evidence_hash TEXT NOT NULL,
+			artifact_uri TEXT NOT NULL, released_by TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE, released_at TEXT NOT NULL,
+			FOREIGN KEY(distribution_id) REFERENCES collector_distributions(id),
+			FOREIGN KEY(build_plan_id) REFERENCES distribution_build_plans(id),
+			FOREIGN KEY(artifact_id) REFERENCES distribution_build_artifacts(id),
+			FOREIGN KEY(publication_id) REFERENCES distribution_artifact_publications(id),
+			FOREIGN KEY(execution_id) REFERENCES distribution_artifact_publication_executions(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_releases_time ON distribution_releases(released_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_releases_no_update BEFORE UPDATE ON distribution_releases BEGIN SELECT RAISE(ABORT,'Distribution releases are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_releases_no_delete BEFORE DELETE ON distribution_releases BEGIN SELECT RAISE(ABORT,'Distribution releases are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
