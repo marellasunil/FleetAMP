@@ -115,6 +115,18 @@ func TestDescribeGitOpsAndIntegrationAuditActions(t *testing.T) {
 	}
 }
 
+func TestDescribeDistributionAuditActionAndCategory(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/collector-distributions/configure", strings.NewReader("action=submit_for_approval&preview_id=preview-1"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	action, resource, id := describeAuditAction(request)
+	if action != "distribution.submit_for_approval" || resource != "collector_distribution" || id != "preview-1" {
+		t.Fatalf("descriptor=%q %q %q", action, resource, id)
+	}
+	if !auditCategoryMatches("distribution", action) {
+		t.Fatalf("%s is missing from distribution audit category", action)
+	}
+}
+
 func TestDeploymentAuditDetailsRecordsReviewerAndReason(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/groups/group-1", strings.NewReader(
 		"action=request_deployment&assigned_reviewer=owner-one&change_reason=Enable+the+validated+metrics+pipeline"))

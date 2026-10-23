@@ -16,7 +16,7 @@ func TestDistributionCatalogPublishesAndRenders(t *testing.T) {
 	store := memory.NewDistributionStore()
 	releaseStore := memory.NewDistributionReleaseStore()
 	mux := http.NewServeMux()
-	registerDistributionRoutes(mux, store, releaseStore, configs.NewValidator(""), nil)
+	registerDistributionRoutes(mux, store, releaseStore, distributionLifecycleStores{}, configs.NewValidator(""), nil)
 	form := url.Values{"name": {"Platform Collector"}, "version": {"0.140.0"}, "source_ref": {"v0.140.0"}, "receivers": {"otlp"}, "processors": {"batch"}, "exporters": {"otlphttp"}, "section_receivers": {"editable"}, "baseline_config": {`receivers:
   otlp:
     protocols:
