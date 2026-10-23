@@ -425,6 +425,7 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE TRIGGER IF NOT EXISTS distribution_releases_no_delete BEFORE DELETE ON distribution_releases BEGIN SELECT RAISE(ABORT,'Distribution releases are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS distribution_deployment_previews (
 			id TEXT PRIMARY KEY, distribution_id TEXT NOT NULL, distribution_spec_hash TEXT NOT NULL,
+			release_id TEXT NOT NULL, release_evidence_hash TEXT NOT NULL, artifact_uri TEXT NOT NULL, artifact_sha256 TEXT NOT NULL,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, sections TEXT NOT NULL,
 			composed_config TEXT NOT NULL, content_hash TEXT NOT NULL,
 			validation_evidence TEXT NOT NULL, prepared_by TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -717,10 +718,34 @@ func (d *Database) initialize(ctx context.Context) error {
 	if err := d.ensureArtifactPublicationRetrySchema(ctx); err != nil {
 		return err
 	}
+	if err := d.ensureDistributionPreviewReleaseColumns(ctx); err != nil {
+		return err
+	}
 	if err := d.migrateAdministratorToUsers(ctx); err != nil {
 		return err
 	}
 	return d.db.PingContext(ctx)
+}
+
+func (d *Database) ensureDistributionPreviewReleaseColumns(ctx context.Context) error {
+	columns := []struct{ name, definition string }{
+		{"release_id", "TEXT NOT NULL DEFAULT ''"},
+		{"release_evidence_hash", "TEXT NOT NULL DEFAULT ''"},
+		{"artifact_uri", "TEXT NOT NULL DEFAULT ''"},
+		{"artifact_sha256", "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, column := range columns {
+		present, err := sqliteColumnExists(ctx, d.db, "distribution_deployment_previews", column.name)
+		if err != nil {
+			return err
+		}
+		if !present {
+			if _, err = d.db.ExecContext(ctx, `ALTER TABLE distribution_deployment_previews ADD COLUMN `+column.name+` `+column.definition); err != nil {
+				return fmt.Errorf("add distribution_deployment_previews.%s: %w", column.name, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (d *Database) ensureArtifactPublicationRetrySchema(ctx context.Context) error {
