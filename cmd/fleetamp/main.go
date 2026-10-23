@@ -142,6 +142,7 @@ func main() {
 	integrationValidationStore := database.IntegrationValidations()
 	distributionStore := database.Distributions()
 	distributionPreviewStore := database.DistributionPreviews()
+	distributionPreviewHandoffStore := database.DistributionPreviewHandoffs()
 	distributionBuildPlanStore := database.DistributionBuildPlans()
 	distributionBuildApprovalStore := database.DistributionBuildApprovals()
 	distributionBuildExecutionStore := database.DistributionBuildExecutions()
@@ -342,7 +343,7 @@ func main() {
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
 	registerDistributionRoutes(mux, distributionStore, distributionReleaseStore, configValidator, auth)
-	registerDistributionPreviewRoutes(mux, distributionStore, distributionReleaseStore, distributionPreviewStore, groupStore, configValidator, auth)
+	registerDistributionPreviewRoutes(mux, distributionStore, distributionReleaseStore, distributionPreviewStore, distributionPreviewHandoffStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
 	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, distributionBuildArtifactStore, distributionBuildAttemptStore, distributionBuildRetryRequestStore, auth)
 	publicationPreflightVerifier := &distributions.ArtifactPublicationPreflightVerifier{ArtifactRoot: dataDir + "/distribution-artifacts", AllowedHosts: commaSeparatedEnv("FLEETAMP_DISTRIBUTION_PUBLICATION_ALLOWED_HOSTS"), Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, MaxBytes: int64EnvOrDefault("FLEETAMP_DISTRIBUTION_PUBLICATION_MAX_ARTIFACT_BYTES", 512<<20)}
 	registerDistributionArtifactPromotionRoutes(mux, distributionStore, distributionBuildArtifactStore, distributionBuildPlanStore, distributionArtifactPromotionStore, distributionArtifactPromotionReviewStore, distributionArtifactPublicationStore, distributionArtifactPublicationPreflightStore, distributionArtifactPublicationExecutionStore, distributionReleaseStore, publicationPreflightVerifier, publicationWorkerEnabled, auth)
