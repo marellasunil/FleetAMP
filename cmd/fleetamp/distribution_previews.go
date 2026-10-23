@@ -24,7 +24,7 @@ type distributionConfigureView struct {
 	Message, Error string
 }
 
-func handleDistributionPreviewApproval(w http.ResponseWriter, r *http.Request, distribution *distributions.Distribution, release *distributions.DistributionRelease, visible []*groups.Group, previewStore storage.DistributionPreviewStore, handoffStore storage.DistributionPreviewHandoffStore, _ storage.GroupStore, agentStore storage.ManagedAgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, requestStore storage.GroupDeploymentRequestStore, auth *authManager, notifier *approvalNotifier) {
+func handleDistributionPreviewApproval(w http.ResponseWriter, r *http.Request, distribution *distributions.Distribution, release *distributions.DistributionRelease, visible []*groups.Group, previewStore storage.DistributionPreviewStore, handoffStore storage.DistributionPreviewHandoffStore, agentStore storage.ManagedAgentStore, assignmentStore storage.AssignmentStore, auth *authManager, notifier *approvalNotifier) {
 	preview, err := previewStore.Get(r.Context(), strings.TrimSpace(r.FormValue("preview_id")))
 	if err != nil || preview.DistributionID != distribution.ID || preview.DistributionSpecHash != distribution.SpecHash {
 		http.Error(w, "the selected immutable preview is unavailable or does not match this distribution", http.StatusConflict)
@@ -115,15 +115,7 @@ func handleDistributionPreviewApproval(w http.ResponseWriter, r *http.Request, d
 		internalServerError(w, err)
 		return
 	}
-	if err = configStore.Put(r.Context(), configuration); err != nil {
-		internalServerError(w, err)
-		return
-	}
-	if err = requestStore.Create(r.Context(), request); err != nil {
-		internalServerError(w, err)
-		return
-	}
-	if err = handoffStore.Create(r.Context(), handoff); err != nil {
+	if err = handoffStore.CreateApprovalHandoff(r.Context(), configuration, request, handoff); err != nil {
 		internalServerError(w, err)
 		return
 	}
@@ -143,7 +135,7 @@ const distributionConfigureHTML = `<!doctype html><html><head><meta charset="utf
 
 var distributionConfigurePage = template.Must(template.New("distribution-configure").Parse(strings.Replace(strings.Replace(distributionConfigureHTML, `<div class="tiny code">Admin baseline: {{.Distribution.BaselineHash}}</div>`, `<div class="tiny code">Admin baseline: {{.Distribution.BaselineHash}}</div>{{if .Release}}<div class="tiny code">Release: {{.Release.ID}}</div><div class="tiny code">Artifact: {{.Release.ArtifactURI}}</div><div class="tiny code">Artifact SHA-256: {{.Release.ArtifactSHA256}}</div><div class="tiny code">Release evidence: {{.Release.EvidenceHash}}</div>{{else}}<div class="tiny">Legacy artifact evidence is bound directly from the specification.</div>{{end}}`, 1), `<td class="code">{{.DistributionSpecHash}}</td>`, `<td><div class="tiny code">Spec: {{.DistributionSpecHash}}</div><div class="tiny code">Release: {{.ReleaseID}}</div><div class="tiny code">Artifact: {{.ArtifactSHA256}}</div></td>`, 1)))
 
-func registerDistributionPreviewRoutes(mux *http.ServeMux, distributionStore storage.DistributionStore, releaseStore storage.DistributionReleaseStore, previewStore storage.DistributionPreviewStore, handoffStore storage.DistributionPreviewHandoffStore, groupStore storage.GroupStore, agentStore storage.ManagedAgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, auth *authManager, notifier *approvalNotifier) {
+func registerDistributionPreviewRoutes(mux *http.ServeMux, distributionStore storage.DistributionStore, releaseStore storage.DistributionReleaseStore, previewStore storage.DistributionPreviewStore, handoffStore storage.DistributionPreviewHandoffStore, groupStore storage.GroupStore, agentStore storage.ManagedAgentStore, assignmentStore storage.AssignmentStore, validator *configs.Validator, auth *authManager, notifier *approvalNotifier) {
 	mux.HandleFunc("/collector-distributions/configure", func(w http.ResponseWriter, r *http.Request) {
 		distribution, err := distributionStore.Get(r.Context(), strings.TrimSpace(r.URL.Query().Get("id")))
 		if err != nil {
@@ -182,7 +174,7 @@ func registerDistributionPreviewRoutes(mux *http.ServeMux, distributionStore sto
 				return
 			}
 			if r.FormValue("action") == "submit_approval" {
-				handleDistributionPreviewApproval(w, r, distribution, release, visible, previewStore, handoffStore, groupStore, agentStore, configStore, assignmentStore, requestStore, auth, notifier)
+				handleDistributionPreviewApproval(w, r, distribution, release, visible, previewStore, handoffStore, agentStore, assignmentStore, auth, notifier)
 				return
 			}
 			groupID := strings.TrimSpace(r.FormValue("group_id"))
