@@ -5,12 +5,40 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/marellasunil/FleetAMP/internal/configs"
 	"github.com/marellasunil/FleetAMP/internal/distributions"
 )
 
 type DistributionPreviewHandoffStore struct {
-	mu    sync.RWMutex
-	items []*distributions.PreviewHandoff
+	mu             sync.RWMutex
+	items          []*distributions.PreviewHandoff
+	configurations []*configs.Configuration
+	requests       []*configs.GroupDeploymentRequest
+}
+
+func (s *DistributionPreviewHandoffStore) CreateApprovalHandoff(_ context.Context, configuration *configs.Configuration, request *configs.GroupDeploymentRequest, handoff *distributions.PreviewHandoff) error {
+	if configuration == nil || request == nil || handoff == nil {
+		return fmt.Errorf("configuration, approval request and distribution preview handoff are required")
+	}
+	if request.ConfigurationID != configuration.ID || request.ConfigurationHash != configuration.Hash || handoff.ConfigurationID != configuration.ID || handoff.ConfigurationHash != configuration.Hash || handoff.ApprovalRequestID != request.ID || handoff.GroupID != configuration.GroupID || request.GroupID != configuration.GroupID {
+		return fmt.Errorf("distribution handoff evidence does not match configuration and approval request")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.items {
+		if item.ID == handoff.ID || item.PreviewID == handoff.PreviewID {
+			return fmt.Errorf("distribution preview handoff already exists")
+		}
+	}
+	for _, item := range s.requests {
+		if item.ID == request.ID {
+			return fmt.Errorf("approval request already exists")
+		}
+	}
+	s.configurations = append(s.configurations, configuration)
+	s.requests = append(s.requests, request)
+	s.items = append(s.items, handoff)
+	return nil
 }
 
 func NewDistributionPreviewHandoffStore() *DistributionPreviewHandoffStore {
