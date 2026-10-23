@@ -82,4 +82,16 @@ func TestArtifactPublicationExecutionClaimAndComplete(t *testing.T) {
 	if _, err = db.db.ExecContext(ctx, `UPDATE distribution_artifact_publication_executions SET status='failed' WHERE id=?`, success.ID); err == nil {
 		t.Fatal("immutable publication receipt accepted update")
 	}
+	release := &distributions.DistributionRelease{ID: "distribution-release-1", DistributionID: "distribution-1", DistributionSpecHash: strings.Repeat("1", 64), BuildPlanID: "plan-1", BuildPlanHash: strings.Repeat("2", 64), ArtifactID: "artifact-1", ArtifactEvidenceHash: strings.Repeat("3", 64), ArtifactSHA256: sha, PublicationID: work.Publication.ID, PublicationEvidenceHash: work.Publication.EvidenceHash, ExecutionID: success.ID, ExecutionEvidenceHash: success.EvidenceHash, ArtifactURI: work.Publication.DestinationRef, ReleasedBy: "admin", EvidenceHash: strings.Repeat("4", 64), ReleasedAt: now.Add(5 * time.Second)}
+	releaseStore := db.DistributionReleases()
+	if err = releaseStore.Create(ctx, release); err != nil {
+		t.Fatal(err)
+	}
+	releases, err := releaseStore.List(ctx, 10)
+	if err != nil || len(releases) != 1 || releases[0].ExecutionEvidenceHash != success.EvidenceHash {
+		t.Fatalf("unexpected releases: %#v, %v", releases, err)
+	}
+	if _, err = db.db.ExecContext(ctx, `UPDATE distribution_releases SET released_by='other' WHERE id=?`, release.ID); err == nil {
+		t.Fatal("immutable distribution release accepted update")
+	}
 }
