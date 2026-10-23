@@ -6,6 +6,7 @@ import (
 )
 
 type DistributionPreviewStore interface {
-	Create(context.Context,*distributions.DeploymentPreview) error
-	List(context.Context,int)([]*distributions.DeploymentPreview,error)
+	Create(context.Context, *distributions.DeploymentPreview) error
+	Get(context.Context, string) (*distributions.DeploymentPreview, error)
+	List(context.Context, int) ([]*distributions.DeploymentPreview, error)
 }

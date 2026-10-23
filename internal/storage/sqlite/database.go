@@ -132,6 +132,9 @@ func (d *Database) Distributions() *DistributionStore { return &DistributionStor
 func (d *Database) DistributionPreviews() *DistributionPreviewStore {
 	return &DistributionPreviewStore{db: d.db}
 }
+func (d *Database) DistributionPreviewHandoffs() *DistributionPreviewHandoffStore {
+	return &DistributionPreviewHandoffStore{db: d.db}
+}
 func (d *Database) DistributionBuildPlans() *DistributionBuildPlanStore {
 	return &DistributionBuildPlanStore{db: d.db}
 }
@@ -435,6 +438,17 @@ func (d *Database) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_distribution_previews_created ON distribution_deployment_previews(created_at DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_previews_no_update BEFORE UPDATE ON distribution_deployment_previews BEGIN SELECT RAISE(ABORT,'distribution previews are immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS distribution_previews_no_delete BEFORE DELETE ON distribution_deployment_previews BEGIN SELECT RAISE(ABORT,'distribution previews are immutable'); END`,
+		`CREATE TABLE IF NOT EXISTS distribution_preview_handoffs (
+			id TEXT PRIMARY KEY, preview_id TEXT NOT NULL UNIQUE, preview_content_hash TEXT NOT NULL,
+			release_id TEXT NOT NULL, release_evidence_hash TEXT NOT NULL, artifact_sha256 TEXT NOT NULL,
+			group_id TEXT NOT NULL, configuration_id TEXT NOT NULL UNIQUE, configuration_hash TEXT NOT NULL,
+			approval_request_id TEXT NOT NULL UNIQUE, submitted_by TEXT NOT NULL, evidence_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,
+			FOREIGN KEY(preview_id) REFERENCES distribution_deployment_previews(id), FOREIGN KEY(group_id) REFERENCES groups(id),
+			FOREIGN KEY(configuration_id) REFERENCES configurations(id), FOREIGN KEY(approval_request_id) REFERENCES group_deployment_requests(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_distribution_preview_handoffs_created ON distribution_preview_handoffs(created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_preview_handoffs_no_update BEFORE UPDATE ON distribution_preview_handoffs BEGIN SELECT RAISE(ABORT,'distribution preview handoffs are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS distribution_preview_handoffs_no_delete BEFORE DELETE ON distribution_preview_handoffs BEGIN SELECT RAISE(ABORT,'distribution preview handoffs are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS configurations (
 			id TEXT PRIMARY KEY, group_id TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, version TEXT NOT NULL,
             content TEXT NOT NULL, content_type TEXT NOT NULL, hash TEXT NOT NULL,

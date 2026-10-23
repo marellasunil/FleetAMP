@@ -31,6 +31,9 @@ func scanDistributionPreview(row interface{ Scan(...any) error }) (*distribution
 	p.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 	return p, nil
 }
+func (s *DistributionPreviewStore) Get(ctx context.Context, id string) (*distributions.DeploymentPreview, error) {
+	return scanDistributionPreview(s.db.QueryRowContext(ctx, `SELECT id,distribution_id,distribution_spec_hash,release_id,release_evidence_hash,artifact_uri,artifact_sha256,group_id,group_name,sections,composed_config,content_hash,validation_evidence,prepared_by,created_at FROM distribution_deployment_previews WHERE id=?`, id))
+}
 func (s *DistributionPreviewStore) List(ctx context.Context, limit int) ([]*distributions.DeploymentPreview, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
