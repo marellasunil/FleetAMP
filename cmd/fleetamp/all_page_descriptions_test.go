@@ -25,6 +25,7 @@ func TestAuthenticatedPagesIncludeContextualDescription(t *testing.T) {
 		"GitOps previews":              gitOpsPreviewsHTML,
 		"GitOps executions":            gitOpsExecutionsHTML,
 		"configuration builder":        blueprintsHTML,
+		"configuration templates":      configurationTemplatesHTML,
 		"configuration migration":      migrationHTMLBase,
 		"fleet adoption":               fleetAdoptionHTML,
 		"telemetry integrations":       addonsHTML,

@@ -55,6 +55,10 @@ func (d *Database) Close() error { return d.db.Close() }
 // Configurations returns the SQLite-backed configuration repository.
 func (d *Database) Configurations() *ConfigStore { return &ConfigStore{db: d.db} }
 
+func (d *Database) ConfigurationTemplates() *ConfigurationTemplateStore {
+	return &ConfigurationTemplateStore{db: d.db}
+}
+
 // Assignments returns the SQLite-backed desired-state assignment repository.
 func (d *Database) Assignments() *AssignmentStore { return &AssignmentStore{db: d.db} }
 
@@ -453,6 +457,14 @@ func (d *Database) initialize(ctx context.Context) error {
             created_at TEXT NOT NULL
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_configurations_created_at ON configurations(created_at)`,
+		`CREATE TABLE IF NOT EXISTS configuration_templates (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL, content_hash TEXT NOT NULL, visibility TEXT NOT NULL, group_ids TEXT NOT NULL DEFAULT '[]',
+			source_configuration_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_configuration_templates_created ON configuration_templates(created_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS configuration_templates_no_update BEFORE UPDATE ON configuration_templates BEGIN SELECT RAISE(ABORT,'configuration templates are immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS configuration_templates_no_delete BEFORE DELETE ON configuration_templates BEGIN SELECT RAISE(ABORT,'configuration templates are immutable'); END`,
 		`CREATE TABLE IF NOT EXISTS migration_history (
 			id TEXT PRIMARY KEY, configuration_id TEXT NOT NULL UNIQUE,
 			group_id TEXT NOT NULL, group_name TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL,
