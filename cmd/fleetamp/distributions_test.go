@@ -53,7 +53,7 @@ service:
 	if !strings.Contains(response.Body.String(), "Released package") || !strings.Contains(response.Body.String(), "oci://registry.example/platform:0.140.0") {
 		t.Fatalf("released package missing: %s", response.Body.String())
 	}
-	for _, want := range []string{"Collector Packages", "not a configuration template or blueprint", "Build &amp; release status", "Publish Collector distribution", "Distribution identity", "Organization baseline Collector YAML", "Included Collector components", "Configuration ownership", "Validate and save distribution", "Available Collector packages", "Platform Collector", "Collector 0.140.0", "Group-editable sections", "receivers", "Specification:", "Admin baseline", "SHA-256:"} {
+	for _, want := range []string{"Collector Packages", "not a configuration template or blueprint", "Build &amp; release status", "Publish Collector distribution", "Distribution identity", "Organization baseline Collector YAML", `data-section-tab="receivers"`, "Service pipelines", "Telemetry / self-monitoring", "Complete YAML", `src="/assets/distribution-editor.js"`, "Included Collector components", "Configuration ownership", "Validate and save distribution", "Available Collector packages", "Platform Collector", "Collector 0.140.0", "Group-editable sections", "receivers", "Specification:", "Admin baseline", "SHA-256:"} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Fatalf("page missing %q", want)
 		}
