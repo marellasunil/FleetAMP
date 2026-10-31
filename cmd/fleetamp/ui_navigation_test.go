@@ -22,7 +22,7 @@ func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
 		last = index
 	}
 
-	for _, path := range []string{"/agents", "/groups", "/otel-components", "/deployments", "/approvals", "/settings/integrations", "/blueprints", "/migration", "/addons", "/mcp", "/audit-log"} {
+	for _, path := range []string{"/agents", "/groups", "/deployments", "/approvals", "/settings/integrations", "/blueprints", "/migration", "/addons", "/mcp", "/audit-log"} {
 		if !strings.Contains(sideNav, `href="`+path+`"`) {
 			t.Fatalf("side navigation is missing %q", path)
 		}
@@ -30,6 +30,11 @@ func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
 	for _, expected := range []string{"Groups & Labels", "AI Insights", "/agents?tab=ai-insights", "SLOs & Alerts", "/agents?tab=slos", "Pipelines", "/agents?tab=pipelines", "/assets/fleetamp-logo-transparent.png"} {
 		if !strings.Contains(sideNav, expected) {
 			t.Fatalf("side navigation is missing %q", expected)
+		}
+	}
+	for _, removed := range []string{"OTel Components", "/otel-components"} {
+		if strings.Contains(sideNav, removed) {
+			t.Fatalf("side navigation still contains removed feature %q", removed)
 		}
 	}
 	for _, expected := range []string{"profile-menu", `href="/account"`, "Change theme", "Sign out"} {
