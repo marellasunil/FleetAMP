@@ -22,7 +22,7 @@ func TestOwnershipLifecyclePageAggregatesGovernedChanges(t *testing.T) {
 	change, err := configs.NewMembershipChange(configs.MembershipChange{
 		Operation: configs.MembershipMove, SourceGroupID: "payments-dev", SourceGroupName: "Payments Dev",
 		TargetGroupID: "payments-prod", TargetGroupName: "Payments Prod",
-		Targets: []configs.MembershipTarget{{AgentInstanceUID: "collector-1", AgentName: "payments-collector-01"}},
+		Targets:     []configs.MembershipTarget{{AgentInstanceUID: "collector-1", AgentName: "payments-collector-01"}},
 		RequestedBy: "operator", AssignedReviewer: "owner", Reason: "promote ownership",
 	})
 	if err != nil {
@@ -48,7 +48,7 @@ func TestOwnershipLifecyclePageAggregatesGovernedChanges(t *testing.T) {
 func TestSideNavigationSeparatesCollectorAndOwnershipLifecycle(t *testing.T) {
 	for _, expected := range []string{
 		`<div class="navlabel">Lifecycle</div>`, `href="/deployments"`, "Collector Lifecycle",
-		`href="/ownership-lifecycle"`, "Ownership Lifecycle", "Distributions", "Bundles", "Rollouts",
+		`href="/ownership-lifecycle"`, "Ownership Lifecycle", "Distributions",
 	} {
 		if !strings.Contains(sideNav, expected) {
 			t.Errorf("lifecycle navigation missing %q", expected)

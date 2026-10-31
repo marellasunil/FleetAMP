@@ -16,7 +16,6 @@ type runtimeProvidersView struct {
 	Page          string
 	Tab           string
 	Providers     []runtimes.Descriptor
-	Guides        []runtimes.InstallationGuide
 	Installed     []installedComponentView
 	Compatibility []componentCompatibilityView
 	Total         int
