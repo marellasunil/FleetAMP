@@ -28,18 +28,18 @@ type blueprintGroup struct {
 	Reviewers []reviewerOption
 }
 type blueprintView struct {
-	Page           string
-	Groups         []blueprintGroup
-	Destinations   []*blueprints.DestinationProfile
-	Patterns       []*blueprints.Pattern
-	Blocks         []*blueprints.Block
-	Starters       []*blueprints.Starter
-	Selected       *blueprints.Starter
-	SelectedGroupID string
+	Page                  string
+	Groups                []blueprintGroup
+	Destinations          []*blueprints.DestinationProfile
+	Patterns              []*blueprints.Pattern
+	Blocks                []*blueprints.Block
+	Starters              []*blueprints.Starter
+	Selected              *blueprints.Starter
+	SelectedGroupID       string
 	SelectedDestinationID string
-	Preview        string
-	IsAdmin        bool
-	Message, Error string
+	Preview               string
+	IsAdmin               bool
+	Message, Error        string
 }
 
 const legacyBlueprintsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FleetAMP Blueprints</title><style>` + controlPlaneCSS + `
@@ -58,7 +58,18 @@ const blueprintsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta n
 
 const governanceCatalogHTML = `{{if not .Selected}}<div class="governance-banner"><div><strong>Central control plane</strong><p class="tiny">Shared catalog, policy and audit.</p></div><div><strong>Federated ownership</strong><p class="tiny">Every destination names its owning domain.</p></div><div><strong>Common governance</strong><p class="tiny">Visibility and group boundaries are enforced.</p></div><div><strong>Governed self-service</strong><p class="tiny">Teams generate, validate and request approval.</p></div></div>{{if .IsAdmin}}<div class="catalog-layout"><section class="card"><div class="cardhead"><div><div class="cardtitle">Publish Destination Profile</div><div class="cardsub">Define protected exporter settings and federated scope.</div></div></div><div class="cardbody"><form method="post" action="/blueprints"><input type="hidden" name="action" value="create_destination"><div class="form-grid"><label class="field">Name<input class="input" name="destination_name" required></label><label class="field">Environment<input class="input" name="environment" required></label><label class="field">Owning domain<input class="input" name="owner" placeholder="Cloud Platform, Security, Observability" required></label><label class="field">Exporter ID<input class="input" name="exporter_id" placeholder="otlphttp/production" required></label><label class="field full">Visibility<select class="select" name="visibility"><option value="organization">All groups</option><option value="restricted">Selected groups only</option></select></label><fieldset class="field full"><legend>Approved groups</legend><div class="check-grid">{{range .Groups}}<label><input type="checkbox" name="destination_group_ids" value="{{.Group.ID}}"> {{.Group.Name}}</label>{{end}}</div></fieldset><label class="field full">Exporter configuration<textarea class="input code" name="exporter_config" rows="7" required placeholder="endpoint: https://gateway.example/otlp"></textarea></label></div><div class="form-actions"><button class="btn primary" type="submit">Validate &amp; publish</button></div></form></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Destination Catalog</div><div class="cardsub">Exporter values stay encrypted and are never displayed.</div></div></div><div style="overflow:auto"><table><thead><tr><th>Destination</th><th>Owner</th><th>Scope</th><th>Status</th><th>Action</th></tr></thead><tbody>{{range .Destinations}}<tr><td><strong>{{.Name}}</strong><div class="tiny">{{.Environment}} · <span class="code">{{.ExporterID}}</span></div></td><td>{{.Owner}}</td><td>{{if eq .Visibility "organization"}}All groups{{else}}{{len .GroupIDs}} selected group(s){{end}}</td><td>{{if .Enabled}}<span class="badge ok">Published</span>{{else}}<span class="badge off">Disabled</span>{{end}}</td><td><form method="post" action="/blueprints" onsubmit="return confirm('Delete this Destination Profile?')"><input type="hidden" name="action" value="delete_destination"><input type="hidden" name="destination_id" value="{{.ID}}"><button class="btn" type="submit">Delete</button></form></td></tr>{{else}}<tr><td colspan="5" class="tiny">No Destination Profiles published.</td></tr>{{end}}</tbody></table></div></section></div>{{end}}{{end}}`
 
-var blueprintsPage = template.Must(template.New("blueprints").Parse(strings.Replace(blueprintsHTML, "{{if .Selected}}", governanceCatalogHTML+"{{if .Selected}}", 1)))
+var configurationBuilderHTML = strings.NewReplacer(
+	"FleetAMP Blueprints", "FleetAMP Configuration Builder",
+	"FleetAMP / Instrumentation / Blueprints", "FleetAMP / Configuration / Builder",
+	`<div class="pagetitle">Blueprints</div>`, `<div class="pagetitle">Configuration Builder</div>`,
+	`<div class="topactions"><a class="btn" href="/instrumentation">Open Guides</a></div>`, "",
+	"Choose a governed starting point, inspect its Collector configuration, then save or request approval.", "Generate a governed Collector configuration, validate it, then save or request approval.",
+	"Choose what you want to observe", "Select a configuration baseline",
+	"Common Blueprints are governed starting points that can be adapted before approval.", "Generate a deployable Collector configuration and adapt it within policy before approval.",
+	"Use Blueprint", "Open Builder",
+).Replace(blueprintsHTML)
+
+var blueprintsPage = template.Must(template.New("configuration-builder").Parse(strings.Replace(configurationBuilderHTML, "{{if .Selected}}", governanceCatalogHTML+"{{if .Selected}}", 1)))
 
 func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.DestinationProfileStore, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, requests storage.GroupDeploymentRequestStore, validator *configs.Validator, auth *authManager, notifier *approvalNotifier) {
 	mux.HandleFunc("/blueprints", func(w http.ResponseWriter, r *http.Request) {
@@ -80,32 +91,65 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 					return
 				}
 				if action == "delete_pattern" {
-					if err := destinations.DeletePattern(r.Context(), strings.TrimSpace(r.FormValue("pattern_id"))); err != nil { http.Error(w, err.Error(), http.StatusNotFound); return }
-					http.Redirect(w, r, "/blueprints?message="+url.QueryEscape("Pattern deleted"), http.StatusSeeOther); return
+					if err := destinations.DeletePattern(r.Context(), strings.TrimSpace(r.FormValue("pattern_id"))); err != nil {
+						http.Error(w, err.Error(), http.StatusNotFound)
+						return
+					}
+					http.Redirect(w, r, "/blueprints?message="+url.QueryEscape("Pattern deleted"), http.StatusSeeOther)
+					return
 				}
 				if action == "delete_block" {
-					if err := destinations.DeleteBlock(r.Context(), strings.TrimSpace(r.FormValue("block_id"))); err != nil { http.Error(w, err.Error(), http.StatusNotFound); return }
-					http.Redirect(w, r, "/blueprints?message="+url.QueryEscape("Component block deleted"), http.StatusSeeOther); return
+					if err := destinations.DeleteBlock(r.Context(), strings.TrimSpace(r.FormValue("block_id"))); err != nil {
+						http.Error(w, err.Error(), http.StatusNotFound)
+						return
+					}
+					http.Redirect(w, r, "/blueprints?message="+url.QueryEscape("Component block deleted"), http.StatusSeeOther)
+					return
 				}
 				if action == "create_pattern" {
 					name, platform := strings.TrimSpace(r.FormValue("pattern_name")), strings.TrimSpace(r.FormValue("platform"))
 					receiverID, receiverConfig := strings.TrimSpace(r.FormValue("receiver_id")), strings.TrimSpace(r.FormValue("receiver_config"))
-					if name == "" || platform == "" || receiverID == "" { http.Error(w, "pattern name, platform and receiver are required", http.StatusUnprocessableEntity); return }
+					if name == "" || platform == "" || receiverID == "" {
+						http.Error(w, "pattern name, platform and receiver are required", http.StatusUnprocessableEntity)
+						return
+					}
 					var cfg map[string]any
-					if err := yaml.Unmarshal([]byte(receiverConfig), &cfg); err != nil || cfg == nil { http.Error(w, "receiver configuration must be a YAML mapping", http.StatusUnprocessableEntity); return }
+					if err := yaml.Unmarshal([]byte(receiverConfig), &cfg); err != nil || cfg == nil {
+						http.Error(w, "receiver configuration must be a YAML mapping", http.StatusUnprocessableEntity)
+						return
+					}
 					p := blueprints.NewPattern(name, r.FormValue("pattern_description"), platform, receiverID, receiverConfig, r.Form["pattern_signals"])
-					if err := destinations.CreatePattern(r.Context(), p); err != nil { http.Error(w, err.Error(), http.StatusConflict); return }
-					http.Redirect(w, r, "/blueprints?message="+url.QueryEscape("Pattern added"), http.StatusSeeOther); return
+					if err := destinations.CreatePattern(r.Context(), p); err != nil {
+						http.Error(w, err.Error(), http.StatusConflict)
+						return
+					}
+					http.Redirect(w, r, "/blueprints?message="+url.QueryEscape("Pattern added"), http.StatusSeeOther)
+					return
 				}
 				name, kind := strings.TrimSpace(r.FormValue("block_name")), strings.TrimSpace(r.FormValue("block_kind"))
 				componentID, configYAML := strings.TrimSpace(r.FormValue("component_id")), strings.TrimSpace(r.FormValue("block_config"))
-				if name == "" || componentID == "" || configYAML == "" { http.Error(w, "block name, component ID and configuration are required", http.StatusUnprocessableEntity); return }
-				switch kind { case "receivers", "processors", "extensions", "connectors": default: http.Error(w, "unsupported block kind", http.StatusUnprocessableEntity); return }
+				if name == "" || componentID == "" || configYAML == "" {
+					http.Error(w, "block name, component ID and configuration are required", http.StatusUnprocessableEntity)
+					return
+				}
+				switch kind {
+				case "receivers", "processors", "extensions", "connectors":
+				default:
+					http.Error(w, "unsupported block kind", http.StatusUnprocessableEntity)
+					return
+				}
 				var cfg map[string]any
-				if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil || cfg == nil { http.Error(w, "block configuration must be a YAML mapping", http.StatusUnprocessableEntity); return }
+				if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil || cfg == nil {
+					http.Error(w, "block configuration must be a YAML mapping", http.StatusUnprocessableEntity)
+					return
+				}
 				block := blueprints.NewBlock(name, r.FormValue("block_description"), kind, componentID, configYAML, r.Form["block_signals"], r.Form["block_platforms"], r.FormValue("required") == "true", r.FormValue("locked") == "true")
-				if err := destinations.CreateBlock(r.Context(), block); err != nil { http.Error(w, err.Error(), http.StatusConflict); return }
-				http.Redirect(w, r, "/blueprints?message="+url.QueryEscape("Component block added"), http.StatusSeeOther); return
+				if err := destinations.CreateBlock(r.Context(), block); err != nil {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
+				http.Redirect(w, r, "/blueprints?message="+url.QueryEscape("Component block added"), http.StatusSeeOther)
+				return
 			}
 			if action == "create_destination" || action == "delete_destination" {
 				if roleNow != roleAdmin {
@@ -155,11 +199,19 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 					return
 				}
 				allGroups, listErr := groupStore.List(r.Context())
-				if listErr != nil { internalServerError(w, listErr); return }
+				if listErr != nil {
+					internalServerError(w, listErr)
+					return
+				}
 				knownGroups := map[string]bool{}
-				for _, candidate := range allGroups { knownGroups[candidate.ID] = true }
+				for _, candidate := range allGroups {
+					knownGroups[candidate.ID] = true
+				}
 				for _, groupID := range p.GroupIDs {
-					if !knownGroups[groupID] { http.Error(w, "destination contains an unknown group", http.StatusUnprocessableEntity); return }
+					if !knownGroups[groupID] {
+						http.Error(w, "destination contains an unknown group", http.StatusUnprocessableEntity)
+						return
+					}
 				}
 				if err := destinations.Create(r.Context(), p); err != nil {
 					http.Error(w, err.Error(), http.StatusConflict)
@@ -211,18 +263,28 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 				return
 			}
 			pattern, err := destinations.GetPattern(r.Context(), strings.TrimSpace(r.FormValue("pattern")))
-			if err != nil || !pattern.Enabled { http.Error(w, "enabled Pattern not found", http.StatusNotFound); return }
+			if err != nil || !pattern.Enabled {
+				http.Error(w, "enabled Pattern not found", http.StatusNotFound)
+				return
+			}
 			if pattern.Platform != "any" && pattern.Platform != platform && !(goal == "apm" && pattern.Platform == "application") {
 				http.Error(w, "selected Pattern is not compatible with the chosen capability and platform", http.StatusUnprocessableEntity)
 				return
 			}
 			allBlocks, err := destinations.ListBlocks(r.Context())
-			if err != nil { internalServerError(w, err); return }
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
 			selected := map[string]bool{}
-			for _, id := range r.Form["block_id"] { selected[id] = true }
+			for _, id := range r.Form["block_id"] {
+				selected[id] = true
+			}
 			var blocks []*blueprints.Block
 			for _, block := range allBlocks {
-				if block.Enabled && (block.Required || block.Locked || selected[block.ID]) { blocks = append(blocks, block) }
+				if block.Enabled && (block.Required || block.Locked || selected[block.ID]) {
+					blocks = append(blocks, block)
+				}
 			}
 			content, err := generateBlueprintYAML(pattern, r.Form["signal"], blocks, destination)
 			if err != nil {
@@ -310,11 +372,20 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 			internalServerError(w, err)
 			return
 		}
-		if err := ensureDefaultBlueprintCatalog(r.Context(), destinations); err != nil { internalServerError(w, err); return }
+		if err := ensureDefaultBlueprintCatalog(r.Context(), destinations); err != nil {
+			internalServerError(w, err)
+			return
+		}
 		patterns, err := destinations.ListPatterns(r.Context())
-		if err != nil { internalServerError(w, err); return }
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
 		blocks, err := destinations.ListBlocks(r.Context())
-		if err != nil { internalServerError(w, err); return }
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
 		items := make([]blueprintGroup, 0, len(visible))
 		for _, g := range visible {
 			reviewers, e := eligibleDeploymentReviewers(r.Context(), auth, g, username, roleNow)
@@ -328,14 +399,28 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 		var selected *blueprints.Starter
 		selectedID := strings.TrimSpace(r.URL.Query().Get("starter"))
 		for _, starter := range starters {
-			if starter.ID == selectedID { selected = starter; break }
+			if starter.ID == selectedID {
+				selected = starter
+				break
+			}
 		}
-		if selectedID != "" && selected == nil { http.NotFound(w, r); return }
+		if selectedID != "" && selected == nil {
+			http.NotFound(w, r)
+			return
+		}
 		selectedGroupID := strings.TrimSpace(r.URL.Query().Get("group_id"))
 		if selectedGroupID != "" {
 			visibleGroup := false
-			for _, item := range items { if item.Group.ID == selectedGroupID { visibleGroup = true; break } }
-			if !visibleGroup { http.Error(w, "group not found or not accessible", http.StatusNotFound); return }
+			for _, item := range items {
+				if item.Group.ID == selectedGroupID {
+					visibleGroup = true
+					break
+				}
+			}
+			if !visibleGroup {
+				http.Error(w, "group not found or not accessible", http.StatusNotFound)
+				return
+			}
 		}
 		selectedDestinationID := strings.TrimSpace(r.URL.Query().Get("destination_id"))
 		preview := ""
@@ -343,15 +428,35 @@ func registerBlueprintRoutes(mux *http.ServeMux, destinations storage.Destinatio
 			previewDestination := blueprints.NewDestinationProfile("Select a Destination Profile", "Preview", "destination", "{}")
 			if selectedDestinationID != "" {
 				profile, profileErr := destinations.Get(r.Context(), selectedDestinationID)
-				if profileErr != nil || !profile.Enabled { http.Error(w, "enabled destination profile not found", http.StatusNotFound); return }
-				if selectedGroupID == "" { http.Error(w, "select a target group before choosing a destination", http.StatusUnprocessableEntity); return }
-				if !profile.AllowsGroup(selectedGroupID) { http.Error(w, "destination profile is not approved for this group", http.StatusForbidden); return }
-				decrypted, decryptErr := decryptDestinationConfig(auth.pepper, profile.ExporterConfig); if decryptErr != nil { internalServerError(w, decryptErr); return }
-				profile.ExporterConfig, decryptErr = sanitizeExporterPreview(decrypted); if decryptErr != nil { internalServerError(w, decryptErr); return }
+				if profileErr != nil || !profile.Enabled {
+					http.Error(w, "enabled destination profile not found", http.StatusNotFound)
+					return
+				}
+				if selectedGroupID == "" {
+					http.Error(w, "select a target group before choosing a destination", http.StatusUnprocessableEntity)
+					return
+				}
+				if !profile.AllowsGroup(selectedGroupID) {
+					http.Error(w, "destination profile is not approved for this group", http.StatusForbidden)
+					return
+				}
+				decrypted, decryptErr := decryptDestinationConfig(auth.pepper, profile.ExporterConfig)
+				if decryptErr != nil {
+					internalServerError(w, decryptErr)
+					return
+				}
+				profile.ExporterConfig, decryptErr = sanitizeExporterPreview(decrypted)
+				if decryptErr != nil {
+					internalServerError(w, decryptErr)
+					return
+				}
 				previewDestination = profile
 			}
 			preview, err = generateBlueprintYAML(selected.Pattern, selected.Signals, blueprints.CommonSafetyBlocks(), previewDestination)
-			if err != nil { internalServerError(w, err); return }
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
 		}
 		if err := blueprintsPage.Execute(w, blueprintView{Page: "blueprints", Groups: items, Destinations: profiles, Patterns: patterns, Blocks: blocks, Starters: starters, Selected: selected, SelectedGroupID: selectedGroupID, SelectedDestinationID: selectedDestinationID, Preview: preview, IsAdmin: roleNow == roleAdmin, Message: r.URL.Query().Get("message"), Error: r.URL.Query().Get("error")}); err != nil {
 			internalServerError(w, err)
@@ -416,7 +521,9 @@ func decryptDestinationConfig(pepper []byte, stored string) (string, error) {
 
 func sanitizeExporterPreview(content string) (string, error) {
 	var document map[string]any
-	if err := yaml.Unmarshal([]byte(content), &document); err != nil { return "", err }
+	if err := yaml.Unmarshal([]byte(content), &document); err != nil {
+		return "", err
+	}
 	var sanitize func(map[string]any, bool)
 	sanitize = func(values map[string]any, redactValues bool) {
 		for key, value := range values {
@@ -426,9 +533,13 @@ func sanitizeExporterPreview(content string) (string, error) {
 			case map[string]any:
 				sanitize(typed, sensitive || lower == "headers")
 			case string:
-				if sensitive && !secretReferencePattern.MatchString(typed) { values[key] = "<protected>" }
+				if sensitive && !secretReferencePattern.MatchString(typed) {
+					values[key] = "<protected>"
+				}
 			default:
-				if sensitive { values[key] = "<protected>" }
+				if sensitive {
+					values[key] = "<protected>"
+				}
 			}
 		}
 	}
@@ -439,18 +550,34 @@ func sanitizeExporterPreview(content string) (string, error) {
 
 func ensureDefaultBlueprintCatalog(ctx context.Context, store storage.DestinationProfileStore) error {
 	patterns, err := store.ListPatterns(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	existingPatterns := make(map[string]bool, len(patterns))
-	for _, pattern := range patterns { existingPatterns[pattern.ID] = true }
+	for _, pattern := range patterns {
+		existingPatterns[pattern.ID] = true
+	}
 	for _, starter := range blueprints.CommonStarters() {
-		if !existingPatterns[starter.Pattern.ID] { if err := store.CreatePattern(ctx, starter.Pattern); err != nil { return err } }
+		if !existingPatterns[starter.Pattern.ID] {
+			if err := store.CreatePattern(ctx, starter.Pattern); err != nil {
+				return err
+			}
+		}
 	}
 	blocks, err := store.ListBlocks(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	existingBlocks := make(map[string]bool, len(blocks))
-	for _, block := range blocks { existingBlocks[block.ID] = true }
+	for _, block := range blocks {
+		existingBlocks[block.ID] = true
+	}
 	for _, block := range blueprints.CommonSafetyBlocks() {
-		if !existingBlocks[block.ID] { if err := store.CreateBlock(ctx, block); err != nil { return err } }
+		if !existingBlocks[block.ID] {
+			if err := store.CreateBlock(ctx, block); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -460,7 +587,9 @@ func uniqueNonEmpty(values []string) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
-		if value == "" || seen[value] { continue }
+		if value == "" || seen[value] {
+			continue
+		}
 		seen[value] = true
 		result = append(result, value)
 	}
@@ -469,40 +598,64 @@ func uniqueNonEmpty(values []string) []string {
 
 func blueprintApproachAllowed(goal, platform, method string) bool {
 	allowed := map[string]map[string][]string{
-		"auto-linux": {"apm": {"application", "linux"}},
-		"sdk": {"apm": {"application", "linux", "kubernetes", "any"}, "custom": {"application", "linux", "kubernetes", "any"}},
+		"auto-linux":      {"apm": {"application", "linux"}},
+		"sdk":             {"apm": {"application", "linux", "kubernetes", "any"}, "custom": {"application", "linux", "kubernetes", "any"}},
 		"collector-agent": {"infrastructure": {"linux"}, "logs": {"linux"}, "custom": {"linux"}},
-		"operator": {"apm": {"kubernetes"}, "kubernetes": {"kubernetes"}},
-		"daemonset": {"kubernetes": {"kubernetes"}, "infrastructure": {"kubernetes"}, "logs": {"kubernetes"}},
-		"deployment": {"kubernetes": {"kubernetes"}, "infrastructure": {"kubernetes"}, "custom": {"kubernetes"}},
-		"sidecar": {"apm": {"kubernetes"}, "logs": {"kubernetes"}, "custom": {"kubernetes"}},
-		"gateway": {"apm": {"application", "kubernetes", "any"}, "kubernetes": {"kubernetes"}, "infrastructure": {"kubernetes", "any"}, "logs": {"kubernetes", "application", "any"}, "custom": {"kubernetes", "application", "any"}},
-		"ebpf": {"apm": {"linux"}, "kubernetes": {"kubernetes"}},
+		"operator":        {"apm": {"kubernetes"}, "kubernetes": {"kubernetes"}},
+		"daemonset":       {"kubernetes": {"kubernetes"}, "infrastructure": {"kubernetes"}, "logs": {"kubernetes"}},
+		"deployment":      {"kubernetes": {"kubernetes"}, "infrastructure": {"kubernetes"}, "custom": {"kubernetes"}},
+		"sidecar":         {"apm": {"kubernetes"}, "logs": {"kubernetes"}, "custom": {"kubernetes"}},
+		"gateway":         {"apm": {"application", "kubernetes", "any"}, "kubernetes": {"kubernetes"}, "infrastructure": {"kubernetes", "any"}, "logs": {"kubernetes", "application", "any"}, "custom": {"kubernetes", "application", "any"}},
+		"ebpf":            {"apm": {"linux"}, "kubernetes": {"kubernetes"}},
 	}
 	goals, ok := allowed[method]
-	if !ok { return false }
-	for _, candidate := range goals[goal] { if candidate == platform { return true } }
+	if !ok {
+		return false
+	}
+	for _, candidate := range goals[goal] {
+		if candidate == platform {
+			return true
+		}
+	}
 	return false
 }
 
 func containsCatalogValue(values []string, wanted string) bool {
-	for _, value := range values { if value == wanted || value == "any" { return true } }
+	for _, value := range values {
+		if value == wanted || value == "any" {
+			return true
+		}
+	}
 	return false
 }
 
 func generateBlueprintYAML(pattern *blueprints.Pattern, selected []string, blocks []*blueprints.Block, destination *blueprints.DestinationProfile) (string, error) {
-	if pattern == nil { return "", fmt.Errorf("Pattern is required") }
-	if destination == nil { return "", fmt.Errorf("destination profile is required") }
+	if pattern == nil {
+		return "", fmt.Errorf("Pattern is required")
+	}
+	if destination == nil {
+		return "", fmt.Errorf("destination profile is required")
+	}
 	var exporter map[string]any
-	if err := yaml.Unmarshal([]byte(destination.ExporterConfig), &exporter); err != nil { return "", fmt.Errorf("invalid destination profile: %w", err) }
+	if err := yaml.Unmarshal([]byte(destination.ExporterConfig), &exporter); err != nil {
+		return "", fmt.Errorf("invalid destination profile: %w", err)
+	}
 	var receiverConfig map[string]any
-	if err := yaml.Unmarshal([]byte(pattern.ReceiverConfig), &receiverConfig); err != nil { return "", fmt.Errorf("invalid Pattern receiver: %w", err) }
+	if err := yaml.Unmarshal([]byte(pattern.ReceiverConfig), &receiverConfig); err != nil {
+		return "", fmt.Errorf("invalid Pattern receiver: %w", err)
+	}
 	signalSet := map[string]bool{}
 	for _, signal := range selected {
-		if containsCatalogValue(pattern.Signals, signal) { signalSet[signal] = true }
+		if containsCatalogValue(pattern.Signals, signal) {
+			signalSet[signal] = true
+		}
 	}
-	if len(signalSet) == 0 && len(pattern.Signals) == 1 { signalSet[pattern.Signals[0]] = true }
-	if len(signalSet) == 0 { return "", fmt.Errorf("select at least one signal supported by the Pattern") }
+	if len(signalSet) == 0 && len(pattern.Signals) == 1 {
+		signalSet[pattern.Signals[0]] = true
+	}
+	if len(signalSet) == 0 {
+		return "", fmt.Errorf("select at least one signal supported by the Pattern")
+	}
 	receivers := map[string]any{pattern.ReceiverID: receiverConfig}
 	processors := map[string]any{}
 	extensions := map[string]any{}
@@ -511,16 +664,24 @@ func generateBlueprintYAML(pattern *blueprints.Pattern, selected []string, block
 	extensionIDs := []string{}
 	extraReceivers := map[string][]string{}
 	for _, block := range blocks {
-		if block == nil || !block.Enabled || !containsCatalogValue(block.Platforms, pattern.Platform) { continue }
+		if block == nil || !block.Enabled || !containsCatalogValue(block.Platforms, pattern.Platform) {
+			continue
+		}
 		var cfg map[string]any
-		if err := yaml.Unmarshal([]byte(block.ConfigYAML), &cfg); err != nil { return "", fmt.Errorf("invalid block %s: %w", block.Name, err) }
+		if err := yaml.Unmarshal([]byte(block.ConfigYAML), &cfg); err != nil {
+			return "", fmt.Errorf("invalid block %s: %w", block.Name, err)
+		}
 		switch block.Kind {
 		case "processors":
 			processors[block.ComponentID] = cfg
 			processorIDs = append(processorIDs, block.ComponentID)
 		case "receivers":
 			receivers[block.ComponentID] = cfg
-			for signal := range signalSet { if containsCatalogValue(block.Signals, signal) { extraReceivers[signal] = append(extraReceivers[signal], block.ComponentID) } }
+			for signal := range signalSet {
+				if containsCatalogValue(block.Signals, signal) {
+					extraReceivers[signal] = append(extraReceivers[signal], block.ComponentID)
+				}
+			}
 		case "extensions":
 			extensions[block.ComponentID] = cfg
 			extensionIDs = append(extensionIDs, block.ComponentID)
@@ -531,18 +692,22 @@ func generateBlueprintYAML(pattern *blueprints.Pattern, selected []string, block
 		}
 	}
 	pipelines := map[string]any{}
-	for _, signal := range []string{"metrics","traces","logs"} {
-		if !signalSet[signal] { continue }
+	for _, signal := range []string{"metrics", "traces", "logs"} {
+		if !signalSet[signal] {
+			continue
+		}
 		pipelineReceivers := append([]string{pattern.ReceiverID}, extraReceivers[signal]...)
 		pipelines[signal] = map[string]any{"receivers": pipelineReceivers, "processors": processorIDs, "exporters": []string{destination.ExporterID}}
 	}
 	doc := map[string]any{
 		"receivers": receivers, "processors": processors,
-		"exporters": map[string]any{destination.ExporterID: exporter},
+		"exporters":  map[string]any{destination.ExporterID: exporter},
 		"extensions": extensions, "connectors": connectors,
 		"service": map[string]any{"extensions": extensionIDs, "pipelines": pipelines, "telemetry": map[string]any{"logs": map[string]any{"level": "info"}}},
 	}
 	b, err := yaml.Marshal(doc)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	return string(b), nil
 }

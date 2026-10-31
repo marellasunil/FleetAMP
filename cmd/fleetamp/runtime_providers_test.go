@@ -136,7 +136,7 @@ func TestCompatibilityAssessmentSeparatesAttentionAndUnsupported(t *testing.T) {
 	}
 }
 
-func TestOTelComponentsInstallationGuidesAreReadOnly(t *testing.T) {
+func TestOTelComponentsInstallationGuidesAreRemoved(t *testing.T) {
 	mux := http.NewServeMux()
 	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry())
 	response := httptest.NewRecorder()
@@ -145,14 +145,12 @@ func TestOTelComponentsInstallationGuidesAreReadOnly(t *testing.T) {
 		t.Fatalf("GET installation guides status = %d, want %d", response.Code, http.StatusOK)
 	}
 	body := response.Body.String()
-	for _, text := range []string{"Choose an installation model", "Linux system service", "Container runtime", "Kubernetes workload", "OpenTelemetry Operator", "GitOps-managed Kubernetes", "Prerequisites", "Recommended sequence", "Verify before governance", "Read-only guidance"} {
-		if !strings.Contains(body, text) {
-			t.Errorf("installation guides page does not contain %q", text)
-		}
+	if !strings.Contains(body, "Built-in component catalog") {
+		t.Fatal("removed guides tab did not fall back to the component catalog")
 	}
-	for _, forbidden := range []string{"Install now", "Run installation", "Connect repository"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("installation guides page contains mutation control %q", forbidden)
+	for _, removed := range []string{"Installation Guides", "Choose an installation model", "Recommended sequence", "Read-only guidance"} {
+		if strings.Contains(body, removed) {
+			t.Errorf("removed instructional content %q is still visible", removed)
 		}
 	}
 }
