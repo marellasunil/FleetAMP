@@ -100,7 +100,9 @@ func TestGenerateBlueprintIncludesAdminBlock(t *testing.T) {
 	pattern := testPattern("OTLP service", "application", "otlp", "protocols:\n  grpc: {}", []string{"metrics"})
 	memory := blueprints.NewBlock("Memory limiter", "", "processors", "memory_limiter", "check_interval: 1s\nlimit_mib: 768", []string{"metrics"}, []string{"application"}, false, true)
 	content, err := generateBlueprintYAML(pattern, []string{"metrics"}, []*blueprints.Block{memory}, destination)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(content, "memory_limiter:") || !strings.Contains(content, "limit_mib: 768") {
 		t.Fatalf("admin block missing from generated Blueprint:\n%s", content)
 	}
@@ -108,26 +110,34 @@ func TestGenerateBlueprintIncludesAdminBlock(t *testing.T) {
 
 func TestBlueprintPageOffersCommonStarters(t *testing.T) {
 	for _, expected := range []string{
-		"Starter catalog",
-		"Choose what you want to observe",
-		"Use Blueprint",
+		"Configuration Builder",
+		"Select a configuration baseline",
+		"Open Builder",
 		"Generated Collector configuration",
 		"Validate &amp; save version",
-		`href="/instrumentation"`,
 	} {
-		if !strings.Contains(blueprintsHTML, expected) {
-			t.Fatalf("Blueprint page is missing %q", expected)
+		if !strings.Contains(configurationBuilderHTML, expected) {
+			t.Fatalf("Configuration Builder page is missing %q", expected)
 		}
+	}
+	if strings.Contains(configurationBuilderHTML, "/instrumentation") {
+		t.Fatal("Configuration Builder still links to removed Guides")
 	}
 }
 
 func TestCommonBlueprintCatalog(t *testing.T) {
 	starters := blueprints.CommonStarters()
-	if len(starters) != 6 { t.Fatalf("got %d common Blueprints, want 6", len(starters)) }
+	if len(starters) != 6 {
+		t.Fatalf("got %d common Blueprints, want 6", len(starters))
+	}
 	seen := map[string]bool{}
 	for _, starter := range starters {
-		if starter.ID == "" || starter.Name == "" || starter.Pattern == nil { t.Fatalf("incomplete starter: %#v", starter) }
-		if seen[starter.ID] { t.Fatalf("duplicate starter ID %q", starter.ID) }
+		if starter.ID == "" || starter.Name == "" || starter.Pattern == nil {
+			t.Fatalf("incomplete starter: %#v", starter)
+		}
+		if seen[starter.ID] {
+			t.Fatalf("duplicate starter ID %q", starter.ID)
+		}
 		seen[starter.ID] = true
 		if !blueprintApproachAllowed(starter.Goal, starter.Platform, starter.Method) {
 			t.Fatalf("starter %q has incompatible approach %s/%s/%s", starter.ID, starter.Goal, starter.Platform, starter.Method)
@@ -136,7 +146,10 @@ func TestCommonBlueprintCatalog(t *testing.T) {
 }
 
 func TestBlueprintApproachCompatibility(t *testing.T) {
-	for _, test := range []struct{ goal, platform, method string; allowed bool }{
+	for _, test := range []struct {
+		goal, platform, method string
+		allowed                bool
+	}{
 		{"apm", "linux", "auto-linux", true},
 		{"apm", "linux", "ebpf", true},
 		{"apm", "kubernetes", "operator", true},

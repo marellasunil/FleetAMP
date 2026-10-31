@@ -137,3 +137,14 @@ func sectionChoices(r *http.Request) (locked, editable []string) {
 	}
 	return
 }
+
+func splitLines(value string) []string {
+	lines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line = strings.TrimSpace(line); line != "" {
+			result = append(result, line)
+		}
+	}
+	return result
+}
