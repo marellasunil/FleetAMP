@@ -116,11 +116,11 @@ func TestBlueprintPageOffersCommonStarters(t *testing.T) {
 		"Generated Collector configuration",
 		"Validate &amp; save version",
 	} {
-		if !strings.Contains(configurationBuilderHTML, expected) {
+		if !strings.Contains(blueprintsHTML, expected) {
 			t.Fatalf("Configuration Builder page is missing %q", expected)
 		}
 	}
-	if strings.Contains(configurationBuilderHTML, "/instrumentation") {
+	if strings.Contains(blueprintsHTML, "/instrumentation") {
 		t.Fatal("Configuration Builder still links to removed Guides")
 	}
 }
