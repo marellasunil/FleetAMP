@@ -48,7 +48,7 @@ func TestOwnershipLifecyclePageAggregatesGovernedChanges(t *testing.T) {
 func TestSideNavigationSeparatesCollectorAndOwnershipLifecycle(t *testing.T) {
 	for _, expected := range []string{
 		`<div class="navlabel">Lifecycle</div>`, `href="/deployments"`, "Collector Lifecycle",
-		`href="/ownership-lifecycle"`, "Ownership Lifecycle", "Distributions",
+		`href="/ownership-lifecycle"`, "Ownership Lifecycle", "Collector Packages",
 	} {
 		if !strings.Contains(sideNav, expected) {
 			t.Errorf("lifecycle navigation missing %q", expected)
