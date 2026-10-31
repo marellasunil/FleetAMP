@@ -69,7 +69,7 @@ const sectionPolicyHTML = `<!doctype html><html><head><meta charset="utf-8">
 <div class="pagetitle">Configuration section policies</div>
 <div class="subtitle">Control which Collector configuration sections each role may change.</div></div>
 <div class="topactions"><a class="btn" href="/settings/users">Users & roles</a></div></header>
-<div class="content">
+<div class="content"><section class="page-description" aria-label="About this page"><div class="page-description-icon" aria-hidden="true">i</div><div><div class="page-description-title">About Configuration Policies</div><p>Define the configuration sections that users may edit and the sections controlled centrally by administrators. These policies constrain configuration generation and validation so group-owned changes cannot modify organization-locked Collector settings.</p></div></section>
 {{if .Message}}<div class="notice">✓ {{.Message}}</div>{{end}}
 {{if .Error}}<div class="configerror" role="alert">{{.Error}}</div>{{end}}
 <section class="card"><div class="cardhead"><div><div class="cardtitle">Operator editing policy</div>
