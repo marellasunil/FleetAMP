@@ -128,7 +128,6 @@ func main() {
 	sectionPolicyStore := database.SectionPolicies()
 	driftPolicyStore := database.DriftPolicy()
 	auditStore := database.Audit()
-	guideCatalogStore := database.GuideCatalog()
 	groupSecretStore := database.GroupSecrets()
 	migrationStore := database.Migrations()
 	componentLifecycleRequestStore := database.ComponentLifecycleRequests()
@@ -349,7 +348,7 @@ func main() {
 	registerDistributionArtifactPromotionRoutes(mux, distributionStore, distributionBuildArtifactStore, distributionBuildPlanStore, distributionArtifactPromotionStore, distributionArtifactPromotionReviewStore, distributionArtifactPublicationStore, distributionArtifactPublicationPreflightStore, distributionArtifactPublicationExecutionStore, distributionReleaseStore, publicationPreflightVerifier, publicationWorkerEnabled, auth)
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("FLEETAMP_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
-	registerUIRoutes(mux, guideCatalogStore, auth)
+	registerUIRoutes(mux)
 
 	httpServer := &http.Server{
 		Addr:              httpAddr,

@@ -2,18 +2,21 @@ package addons
 
 import "testing"
 
-func TestDefaultCatalogIsExternalAndReadOnly(t *testing.T) {
+func TestDefaultCatalogIncludesVendorDestinationsAndExternalCollector(t *testing.T) {
 	catalog := NewDefaultCatalog()
 	entries := catalog.List()
-	if len(entries) != 1 {
-		t.Fatalf("List() returned %d entries, want 1", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("List() returned %d entries, want 3", len(entries))
 	}
-	entry := entries[0]
-	if entry.ID != "alloy" || entry.Bundled || entry.Status != Planned {
-		t.Fatalf("unexpected default entry: %#v", entry)
+	alloy, ok := catalog.Get("alloy")
+	if !ok || alloy.Bundled || alloy.Status != Planned {
+		t.Fatalf("unexpected Alloy entry: %#v", alloy)
 	}
-	if entry.RepositoryURL == "" || len(entry.Capabilities) == 0 || entry.Notice == "" {
-		t.Fatalf("default entry is incomplete: %#v", entry)
+	for _, id := range []string{"splunk", "grafana"} {
+		entry, found := catalog.Get(id)
+		if !found || entry.Status != Available || len(entry.Capabilities) == 0 || entry.Notice == "" {
+			t.Fatalf("vendor destination %q is incomplete: %#v", id, entry)
+		}
 	}
 }
 

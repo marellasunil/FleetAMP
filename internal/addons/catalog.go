@@ -61,9 +61,27 @@ func NewCatalog(entries ...Entry) (*Catalog, error) {
 
 func NewDefaultCatalog() *Catalog {
 	catalog, err := NewCatalog(Entry{
+		ID:          "splunk",
+		Name:        "Splunk integration",
+		Description: "Governed OpenTelemetry export to Splunk Enterprise HEC and Splunk Observability Cloud OTLP destinations.",
+		Status:      Available,
+		Capabilities: []Capability{
+			ConfigurationRendering, ConfigurationValidation, HealthReporting, RemoteConfiguration,
+		},
+		Notice: "Endpoints, tokens and realm settings are supplied through protected destination profiles and secret references.",
+	}, Entry{
+		ID:          "grafana",
+		Name:        "Grafana integration",
+		Description: "Governed OTLP, Prometheus-compatible, Loki and Tempo destination configuration for Grafana Cloud or approved Grafana stacks.",
+		Status:      Available,
+		Capabilities: []Capability{
+			ConfigurationRendering, ConfigurationValidation, HealthReporting, RemoteConfiguration,
+		},
+		Notice: "Destination endpoints and credentials remain administrator-controlled and are never embedded in the public catalog.",
+	}, Entry{
 		ID:            "alloy",
 		Name:          "Grafana Alloy integration",
-		Description:   "External add-on structure reserved for future Alloy interoperability documentation and capabilities.",
+		Description:   "External provider contract reserved for future Grafana Alloy discovery and lifecycle interoperability.",
 		RepositoryURL: "https://github.com/marellasunil/FleetAMP-Addons/tree/main/alloy",
 		DocsURL:       "https://github.com/marellasunil/FleetAMP-Addons/tree/main/alloy/docs",
 		Status:        Planned,

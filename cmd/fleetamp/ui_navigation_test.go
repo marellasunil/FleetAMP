@@ -9,7 +9,7 @@ import (
 )
 
 func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
-	labels := []string{"Management", "Delivery", "Instrumentation", "Intelligence", "Observe", "Administration"}
+	labels := []string{"Management", "Delivery", "Configuration", "Intelligence", "Observe", "Administration"}
 	last := -1
 	for _, label := range labels {
 		index := strings.Index(sideNav, ">"+label+"<")
@@ -22,7 +22,7 @@ func TestSideNavigationIsGroupedByProductArea(t *testing.T) {
 		last = index
 	}
 
-	for _, path := range []string{"/agents", "/groups", "/otel-components", "/deployments", "/approvals", "/settings/integrations", "/instrumentation", "/blueprints", "/migration", "/mcp", "/audit-log"} {
+	for _, path := range []string{"/agents", "/groups", "/otel-components", "/deployments", "/approvals", "/settings/integrations", "/blueprints", "/migration", "/addons", "/mcp", "/audit-log"} {
 		if !strings.Contains(sideNav, `href="`+path+`"`) {
 			t.Fatalf("side navigation is missing %q", path)
 		}
@@ -94,21 +94,14 @@ func TestIntelligenceUpcomingPagesDescribeGovernedRoadmap(t *testing.T) {
 	}
 }
 
-func TestInstrumentationGuideNavigationPage(t *testing.T) {
+func TestInstructionalGuideRoutesAreRemoved(t *testing.T) {
 	mux := http.NewServeMux()
 	registerUIRoutes(mux)
-
-	request := httptest.NewRequest(http.MethodGet, "/instrumentation", nil)
-	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, request)
-
-	if response.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-	}
-	body := response.Body.String()
-	for _, expected := range []string{"Instrumentation Guides", "Application performance", "Select a radio node", "Recommended implementation direction"} {
-		if !strings.Contains(body, expected) {
-			t.Fatalf("instrumentation page is missing %q", expected)
+	for _, path := range []string{"/instrumentation", "/settings/guide-catalog"} {
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s status=%d, want %d", path, response.Code, http.StatusNotFound)
 		}
 	}
 }
