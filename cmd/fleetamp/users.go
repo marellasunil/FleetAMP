@@ -121,8 +121,8 @@ const sessionJS = `(() => {
       }
       const allowedNavigation = {
         group_owner: ["/agents", "/groups", "/collector-distributions", "/ownership-lifecycle", "/approvals", "/blueprints"],
-        operator: ["/agents", "/groups", "/otel-components", "/collector-distributions", "/deployments", "/ownership-lifecycle", "/blueprints", "/migration", "/addons", "/mcp"],
-        viewer: ["/agents", "/groups", "/otel-components", "/collector-distributions", "/deployments", "/ownership-lifecycle", "/blueprints", "/migration", "/addons", "/mcp"]
+        operator: ["/agents", "/groups", "/collector-distributions", "/deployments", "/ownership-lifecycle", "/blueprints", "/migration", "/addons", "/mcp"],
+        viewer: ["/agents", "/groups", "/collector-distributions", "/deployments", "/ownership-lifecycle", "/blueprints", "/migration", "/addons", "/mcp"]
       };
       document.querySelectorAll("nav a.navitem").forEach((link) => {
         if (session.role === "admin") return;

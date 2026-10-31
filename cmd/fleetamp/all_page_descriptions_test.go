@@ -12,7 +12,6 @@ func TestAuthenticatedPagesIncludeContextualDescription(t *testing.T) {
 		"collector detail":             agentDetailHTML,
 		"group detail":                 groupDetailBaseHTML,
 		"upcoming capability":          upcomingHTML,
-		"OTel components":              runtimeProvidersHTML,
 		"collector lifecycle":          deploymentsHTML,
 		"ownership lifecycle":          ownershipLifecycleHTML,
 		"distributions":                distributionHTML,

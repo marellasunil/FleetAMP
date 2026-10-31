@@ -49,7 +49,6 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/groups"
 	"github.com/marellasunil/FleetAMP/internal/integrations"
 	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
-	"github.com/marellasunil/FleetAMP/internal/runtimes"
 	"github.com/marellasunil/FleetAMP/internal/storage"
 	filestore "github.com/marellasunil/FleetAMP/internal/storage/file"
 	"github.com/marellasunil/FleetAMP/internal/storage/memory"
@@ -340,7 +339,6 @@ func main() {
 	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
-	registerRuntimeProviderRoutes(mux, runtimes.NewDefaultRegistry(), agentStore)
 	registerDistributionRoutes(mux, distributionStore, distributionReleaseStore, distributionLifecycleStores{BuildPlans: distributionBuildPlanStore, BuildAttempts: distributionBuildAttemptStore, Promotions: distributionArtifactPromotionStore, PromotionReviews: distributionArtifactPromotionReviewStore, Publications: distributionArtifactPublicationStore, PublicationExecutions: distributionArtifactPublicationExecutionStore, Previews: distributionPreviewStore, Handoffs: distributionPreviewHandoffStore}, configValidator, auth)
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionReleaseStore, distributionPreviewStore, distributionPreviewHandoffStore, groupStore, agentStore, assignmentStore, configValidator, auth, notifier)
 	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, distributionBuildArtifactStore, distributionBuildAttemptStore, distributionBuildRetryRequestStore, auth)

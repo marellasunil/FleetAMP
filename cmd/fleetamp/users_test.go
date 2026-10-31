@@ -275,8 +275,8 @@ func TestGroupOwnershipFollowsPerGroupRole(t *testing.T) {
 func TestSessionNavigationHidesUnauthorizedPages(t *testing.T) {
 	for _, want := range []string{
 		"group_owner: [\"/agents\", \"/groups\", \"/collector-distributions\", \"/ownership-lifecycle\", \"/approvals\", \"/blueprints\"]",
-		"operator: [\"/agents\", \"/groups\", \"/otel-components\", \"/collector-distributions\", \"/deployments\"",
-		"viewer: [\"/agents\", \"/groups\", \"/otel-components\", \"/collector-distributions\", \"/deployments\"",
+		"operator: [\"/agents\", \"/groups\", \"/collector-distributions\", \"/deployments\"",
+		"viewer: [\"/agents\", \"/groups\", \"/collector-distributions\", \"/deployments\"",
 		"document.querySelectorAll(\".admin-settings-link\")",
 		"label.hidden = !hasVisibleLink",
 		`pageURL.searchParams.get("access_denied")`,
@@ -291,7 +291,6 @@ func TestSessionNavigationHidesUnauthorizedPages(t *testing.T) {
 		t.Fatal("control-plane CSS must not override hidden navigation elements")
 	}
 }
-
 
 func TestProfilePageAndMenuExposeAccountCapabilities(t *testing.T) {
 	for _, expected := range []string{
