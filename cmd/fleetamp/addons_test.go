@@ -9,7 +9,7 @@ import (
 	"github.com/marellasunil/FleetAMP/internal/addons"
 )
 
-func TestVendorIntegrationsPageShowsSupportedDestinations(t *testing.T) {
+func TestTelemetryIntegrationsPageIsProviderNeutral(t *testing.T) {
 	mux := http.NewServeMux()
 	registerAddonRoutes(mux, addons.NewDefaultCatalog())
 	response := httptest.NewRecorder()
@@ -18,18 +18,18 @@ func TestVendorIntegrationsPageShowsSupportedDestinations(t *testing.T) {
 		t.Fatalf("GET /addons status = %d, want %d", response.Code, http.StatusOK)
 	}
 	body := response.Body.String()
-	for _, text := range []string{"Vendor Integrations", "Splunk integration", "Grafana integration", "Grafana Alloy integration", "Integration boundary"} {
+	for _, text := range []string{"Telemetry Integrations", "OTLP destination", "Prometheus Remote Write destination", "External Collector adapter", "Connection boundary"} {
 		if !strings.Contains(body, text) {
 			t.Errorf("page does not contain %q", text)
 		}
 	}
-	for _, removed := range []string{"Documentation", "Open add-ons repository", "Installation unavailable"} {
-		if strings.Contains(body, removed) {
-			t.Errorf("instructional action %q is still visible", removed)
+	for _, vendor := range []string{"Splunk", "Grafana", "Alloy"} {
+		if strings.Contains(body, vendor) {
+			t.Errorf("provider-neutral page contains vendor-specific term %q", vendor)
 		}
 	}
 	if !strings.Contains(body, `class="navitem active" href="/addons"`) {
-		t.Error("add-ons navigation is not active")
+		t.Error("telemetry integrations navigation is not active")
 	}
 }
 

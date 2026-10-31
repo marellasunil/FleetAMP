@@ -1,6 +1,5 @@
-// Package addons defines metadata contracts for optional, external FleetAMP
-// integrations. Catalog entries are descriptive only: registering an entry
-// does not download, install, enable, or execute add-on code.
+// Package addons defines provider-neutral contracts for optional FleetAMP
+// telemetry destinations and Collector interoperability.
 package addons
 
 import (
@@ -14,7 +13,6 @@ type Capability string
 const (
 	ConfigurationRendering  Capability = "configuration-rendering"
 	ConfigurationValidation Capability = "configuration-validation"
-	AgentDiscovery          Capability = "agent-discovery"
 	HealthReporting         Capability = "health-reporting"
 	RemoteConfiguration     Capability = "remote-configuration"
 	WorkloadDeployment      Capability = "workload-deployment"
@@ -28,15 +26,15 @@ const (
 )
 
 type Entry struct {
-	ID            string
-	Name          string
-	Description   string
-	RepositoryURL string
-	DocsURL       string
-	Status        Status
-	Bundled       bool
-	Capabilities  []Capability
-	Notice        string
+	ID           string
+	Name         string
+	Kind         string
+	Description  string
+	Status       Status
+	Protocols    []string
+	Signals      []string
+	Capabilities []Capability
+	Notice       string
 }
 
 type Catalog struct {
@@ -48,11 +46,12 @@ func NewCatalog(entries ...Entry) (*Catalog, error) {
 	for _, entry := range entries {
 		entry.ID = strings.TrimSpace(entry.ID)
 		entry.Name = strings.TrimSpace(entry.Name)
-		if entry.ID == "" || entry.Name == "" {
-			return nil, errors.New("add-on id and name are required")
+		entry.Kind = strings.TrimSpace(entry.Kind)
+		if entry.ID == "" || entry.Name == "" || entry.Kind == "" {
+			return nil, errors.New("integration id, name and kind are required")
 		}
 		if _, exists := catalog.entries[entry.ID]; exists {
-			return nil, errors.New("duplicate add-on id: " + entry.ID)
+			return nil, errors.New("duplicate integration id: " + entry.ID)
 		}
 		catalog.entries[entry.ID] = cloneEntry(entry)
 	}
@@ -60,35 +59,47 @@ func NewCatalog(entries ...Entry) (*Catalog, error) {
 }
 
 func NewDefaultCatalog() *Catalog {
-	catalog, err := NewCatalog(Entry{
-		ID:          "splunk",
-		Name:        "Splunk integration",
-		Description: "Governed OpenTelemetry export to Splunk Enterprise HEC and Splunk Observability Cloud OTLP destinations.",
-		Status:      Available,
-		Capabilities: []Capability{
-			ConfigurationRendering, ConfigurationValidation, HealthReporting, RemoteConfiguration,
+	catalog, err := NewCatalog(
+		Entry{
+			ID:          "otlp-destination",
+			Name:        "OTLP destination",
+			Kind:        "Telemetry destination",
+			Description: "Connect governed Collector pipelines to any approved backend that accepts OpenTelemetry Protocol.",
+			Status:      Available,
+			Protocols:   []string{"OTLP/gRPC", "OTLP/HTTP"},
+			Signals:     []string{"Metrics", "Logs", "Traces", "Profiles"},
+			Capabilities: []Capability{
+				ConfigurationRendering, ConfigurationValidation, HealthReporting, RemoteConfiguration,
+			},
+			Notice: "Endpoint, transport security and authentication values are supplied through protected destination profiles and secret references.",
 		},
-		Notice: "Endpoints, tokens and realm settings are supplied through protected destination profiles and secret references.",
-	}, Entry{
-		ID:          "grafana",
-		Name:        "Grafana integration",
-		Description: "Governed OTLP, Prometheus-compatible, Loki and Tempo destination configuration for Grafana Cloud or approved Grafana stacks.",
-		Status:      Available,
-		Capabilities: []Capability{
-			ConfigurationRendering, ConfigurationValidation, HealthReporting, RemoteConfiguration,
+		Entry{
+			ID:          "prometheus-remote-write",
+			Name:        "Prometheus Remote Write destination",
+			Kind:        "Metrics destination",
+			Description: "Connect governed metrics pipelines to any approved Prometheus Remote Write compatible endpoint.",
+			Status:      Available,
+			Protocols:   []string{"Prometheus Remote Write"},
+			Signals:     []string{"Metrics"},
+			Capabilities: []Capability{
+				ConfigurationRendering, ConfigurationValidation, HealthReporting, RemoteConfiguration,
+			},
+			Notice: "FleetAMP stores organization-specific endpoints, headers and credentials outside the public capability catalog.",
 		},
-		Notice: "Destination endpoints and credentials remain administrator-controlled and are never embedded in the public catalog.",
-	}, Entry{
-		ID:            "alloy",
-		Name:          "Grafana Alloy integration",
-		Description:   "External provider contract reserved for future Grafana Alloy discovery and lifecycle interoperability.",
-		RepositoryURL: "https://github.com/marellasunil/FleetAMP-Addons/tree/main/alloy",
-		DocsURL:       "https://github.com/marellasunil/FleetAMP-Addons/tree/main/alloy/docs",
-		Status:        Planned,
-		Bundled:       false,
-		Capabilities:  []Capability{ConfigurationRendering, ConfigurationValidation, AgentDiscovery, HealthReporting, RemoteConfiguration},
-		Notice:        "Not installed or bundled with FleetAMP. The external repository currently contains structure only.",
-	})
+		Entry{
+			ID:          "external-collector-adapter",
+			Name:        "External Collector adapter",
+			Kind:        "Collector interoperability",
+			Description: "Provider-neutral contract for an externally maintained Collector or telemetry agent to declare supported management capabilities.",
+			Status:      Planned,
+			Protocols:   []string{"Provider-declared"},
+			Signals:     []string{"Provider-declared"},
+			Capabilities: []Capability{
+				ConfigurationRendering, ConfigurationValidation, HealthReporting, RemoteConfiguration, WorkloadDeployment,
+			},
+			Notice: "Adapters remain external and unbundled. A future security boundary must verify provenance and declared capabilities before activation.",
+		},
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -110,6 +121,8 @@ func (c *Catalog) List() []Entry {
 }
 
 func cloneEntry(entry Entry) Entry {
+	entry.Protocols = append([]string(nil), entry.Protocols...)
+	entry.Signals = append([]string(nil), entry.Signals...)
 	entry.Capabilities = append([]Capability(nil), entry.Capabilities...)
 	return entry
 }
