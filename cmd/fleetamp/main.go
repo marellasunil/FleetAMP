@@ -117,6 +117,7 @@ func main() {
 		fatalLog("initialize approval notifications", err)
 	}
 	configStore := database.Configurations()
+	configurationTemplateStore := database.ConfigurationTemplates()
 	assignmentStore := database.Assignments()
 	deploymentStore := database.Deployments()
 	groupStore := database.Groups()
@@ -338,6 +339,7 @@ func main() {
 	registerDeploymentRoutes(mux, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleApprovalStore, groupStore, agentStore, auth)
 	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
 	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
+	registerConfigurationTemplateRoutes(mux, configurationTemplateStore, configStore, groupStore, configValidator, auth)
 	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
 	registerDistributionRoutes(mux, distributionStore, distributionReleaseStore, distributionLifecycleStores{BuildPlans: distributionBuildPlanStore, BuildAttempts: distributionBuildAttemptStore, Promotions: distributionArtifactPromotionStore, PromotionReviews: distributionArtifactPromotionReviewStore, Publications: distributionArtifactPublicationStore, PublicationExecutions: distributionArtifactPublicationExecutionStore, Previews: distributionPreviewStore, Handoffs: distributionPreviewHandoffStore}, configValidator, auth)
 	registerDistributionPreviewRoutes(mux, distributionStore, distributionReleaseStore, distributionPreviewStore, distributionPreviewHandoffStore, groupStore, agentStore, assignmentStore, configValidator, auth, notifier)
