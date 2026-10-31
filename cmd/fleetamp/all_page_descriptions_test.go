@@ -27,7 +27,7 @@ func TestAuthenticatedPagesIncludeContextualDescription(t *testing.T) {
 		"configuration builder":        blueprintsHTML,
 		"configuration migration":      migrationHTMLBase,
 		"fleet adoption":               fleetAdoptionHTML,
-		"vendor integrations":          addonsHTML,
+		"telemetry integrations":       addonsHTML,
 		"users groups and roles":       usersPageHTML,
 		"my profile":                   accountPageHTML,
 		"configuration policies":       sectionPolicyHTML,
