@@ -96,7 +96,7 @@ jobs:
 
       - name: Attest published image provenance
         if: ${{ inputs.publish }}
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.publish.outputs.digest }}
