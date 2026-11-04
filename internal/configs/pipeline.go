@@ -179,7 +179,7 @@ func sortedKeys[T any](values map[string]T) []string {
 }
 
 func sortedUnionKeys(first, second map[string]yaml.Node) []string {
-	keys := make(map[string]struct{}, len(first)+len(second))
+	keys := make(map[string]struct{})
 	for key := range first {
 		keys[key] = struct{}{}
 	}
