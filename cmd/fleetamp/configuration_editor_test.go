@@ -153,6 +153,11 @@ func TestConfigurationEditorJavaScriptIsServed(t *testing.T) {
 		"data-completion-index",
 		"Ctrl+Space show all",
 		"sectionComponentNames",
+		"referenceContext",
+		"normalizedReferences",
+		"componentTypeLabels",
+		"prefixDash",
+		"defined in this configuration",
 		"form.requestSubmit",
 	} {
 		if !strings.Contains(script, expected) {
