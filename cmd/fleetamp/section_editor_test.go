@@ -79,6 +79,36 @@ func TestComposeSectionsEndpointValidatesCompleteDocument(t *testing.T) {
 	}
 }
 
+func TestReferenceValidationEndpointRejectsUndefinedComponent(t *testing.T) {
+	mux := http.NewServeMux()
+	registerSectionEditorRoutes(mux, nil, configs.NewValidator(""), nil)
+	body := `{"baseline":"","sections":{"receivers":"otlp: {}\n","service_pipelines":"traces:\n  receivers: [otlp]\n  exporters: [missing]\n","exporters":"debug: {}\n"}}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/configurations/sections/references", strings.NewReader(body))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `references undefined exporter \"missing\"`) {
+		t.Fatalf("response does not identify undefined reference: %s", response.Body.String())
+	}
+}
+
+func TestReferenceValidationEndpointAcceptsCompatibleComponents(t *testing.T) {
+	mux := http.NewServeMux()
+	registerSectionEditorRoutes(mux, nil, configs.NewValidator(""), nil)
+	body := `{"baseline":"","sections":{"receivers":"otlp: {}\n","service_pipelines":"traces:\n  receivers: [otlp]\n  exporters: [forward]\n","connectors":"forward: {}\n"}}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/configurations/sections/references", strings.NewReader(body))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"valid":true`) {
+		t.Fatalf("response is not valid: %s", response.Body.String())
+	}
+}
+
 func TestConfigurationSectionSettingsAndRawCreationRequireAdmin(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/settings/configuration-sections", nil)
 	if got := requiredPermission(request); got != permissionAdmin {
@@ -91,6 +121,10 @@ func TestConfigurationSectionSettingsAndRawCreationRequireAdmin(t *testing.T) {
 	request = httptest.NewRequest(http.MethodPost, "/api/v1/configurations/sections/compose", nil)
 	if got := requiredPermission(request); got != permissionEdit {
 		t.Fatalf("section compose permission=%q, want edit", got)
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/configurations/sections/references", nil)
+	if got := requiredPermission(request); got != permissionEdit {
+		t.Fatalf("reference validation permission=%q, want edit", got)
 	}
 }
 
