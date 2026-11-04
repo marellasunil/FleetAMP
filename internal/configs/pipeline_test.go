@@ -72,6 +72,83 @@ service:
 	}
 }
 
+func TestParseComponentCatalogReturnsNamesWithoutSettings(t *testing.T) {
+	content := `
+receivers:
+  zipkin:
+  otlp/internal:
+    protocols:
+      grpc:
+processors:
+  batch:
+exporters:
+  otlphttp/production:
+    endpoint: https://example.invalid
+    headers:
+      authorization: secret-value
+extensions:
+  health_check:
+connectors:
+  forward:
+`
+
+	catalog, err := ParseComponentCatalog(content)
+	if err != nil {
+		t.Fatalf("ParseComponentCatalog() error = %v", err)
+	}
+	if got := strings.Join(catalog.Receivers, ","); got != "forward,otlp/internal,zipkin" {
+		t.Fatalf("receivers = %q", got)
+	}
+	if got := strings.Join(catalog.Processors, ","); got != "batch" {
+		t.Fatalf("processors = %q", got)
+	}
+	if got := strings.Join(catalog.Exporters, ","); got != "forward,otlphttp/production" {
+		t.Fatalf("exporters = %q", got)
+	}
+	if got := strings.Join(catalog.Extensions, ","); got != "health_check" {
+		t.Fatalf("extensions = %q", got)
+	}
+	if got := strings.Join(catalog.Connectors, ","); got != "forward" {
+		t.Fatalf("connectors = %q", got)
+	}
+	data, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "secret-value") || strings.Contains(string(data), "example.invalid") {
+		t.Fatal("component catalog exposed component settings")
+	}
+}
+
+func TestParsePipelineModelAcceptsConnectorEndpoints(t *testing.T) {
+	content := `
+receivers:
+  otlp:
+exporters:
+  debug:
+connectors:
+  forward:
+service:
+  pipelines:
+    traces/in:
+      receivers: [otlp]
+      exporters: [forward]
+    traces/out:
+      receivers: [forward]
+      exporters: [debug]
+`
+	model, err := ParsePipelineModel(content)
+	if err != nil {
+		t.Fatalf("ParsePipelineModel() error = %v", err)
+	}
+	if len(model.Pipelines) != 2 {
+		t.Fatalf("got %d pipelines, want 2", len(model.Pipelines))
+	}
+	if warnings := strings.Join(model.Warnings, "\n"); strings.Contains(warnings, "connector") {
+		t.Fatalf("used connector reported as unused: %s", warnings)
+	}
+}
+
 func TestParsePipelineModelRejectsBrokenRelationships(t *testing.T) {
 	tests := []struct {
 		name, content, want string

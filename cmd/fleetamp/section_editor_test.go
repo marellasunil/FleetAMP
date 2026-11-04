@@ -72,7 +72,7 @@ func TestComposeSectionsEndpointValidatesCompleteDocument(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	for _, expected := range []string{"custom_key", "receivers", "pipelines", "exporters", `"valid":true`} {
+	for _, expected := range []string{"custom_key", "receivers", "pipelines", "exporters", `"valid":true`, `"pipeline"`, `"components"`, `"otlp"`, `"debug"`} {
 		if !strings.Contains(response.Body.String(), expected) {
 			t.Fatalf("response is missing %q: %s", expected, response.Body.String())
 		}

@@ -147,9 +147,22 @@ const configurationEditorJS = `(() => {
   const editors = Array.from(form.querySelectorAll("[data-section-key]"));
   const tabs = Array.from(form.querySelectorAll("[data-section-tab]"));
   const panels = Array.from(form.querySelectorAll("[data-section-panel]"));
+  const modeButtons = Array.from(form.querySelectorAll("[data-editor-mode-button]"));
+  const modePanels = Array.from(form.querySelectorAll("[data-editor-mode-panel]"));
+  const visualList = document.getElementById("visual-pipeline-list");
+  const visualWarnings = document.getElementById("visual-builder-warnings");
+  const visualSignal = document.getElementById("visual-signal");
+  const visualName = document.getElementById("visual-pipeline-name");
+  const visualReceiver = document.getElementById("visual-receiver");
+  const visualProcessors = document.getElementById("visual-processors");
+  const visualExporter = document.getElementById("visual-exporter");
+  const visualAdd = document.getElementById("visual-add-pipeline");
+  const pipelineEditor = editors.find((editor) => editor.dataset.sectionKey === "service_pipelines");
   const hasBaseline = form.dataset.hasBaseline === "true";
   const initialSections = editors.map((editor) => editor.value);
   let validated = false;
+  let visualModel = {pipelines: [], warnings: []};
+  let componentCatalog = {receivers: [], processors: [], exporters: []};
 
   const hasChanges = () => !hasBaseline || editors.some((editor, index) => editor.value !== initialSections[index]);
   const updateActionState = () => {
@@ -164,6 +177,121 @@ const configurationEditorJS = `(() => {
     panels.forEach((panel) => panel.classList.toggle("active", panel.dataset.sectionPanel === key));
   };
   tabs.forEach((tab) => tab.addEventListener("click", () => selectTab(tab.dataset.sectionTab)));
+
+  const escapeHTML = (value) => String(value).replace(/[&<>\"']/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"})[character]);
+  const chips = (values, empty) => values && values.length
+    ? values.map((value) => '<span class="chip">' + escapeHTML(value) + '</span>').join("")
+    : '<span class="tiny">' + empty + '</span>';
+  const fillSelect = (select, values, placeholder) => {
+    if (!select) return;
+    select.replaceChildren();
+    if (!select.multiple) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = placeholder;
+      select.append(option);
+    }
+    (values || []).forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      select.append(option);
+    });
+  };
+  const pipelineYAML = () => (visualModel.pipelines || []).map((pipeline) => {
+    const processors = pipeline.processors && pipeline.processors.length
+      ? "\n  processors: [" + pipeline.processors.map(JSON.stringify).join(", ") + "]"
+      : "";
+    return JSON.stringify(pipeline.name) + ":\n  receivers: [" + pipeline.receivers.map(JSON.stringify).join(", ") + "]" + processors + "\n  exporters: [" + pipeline.exporters.map(JSON.stringify).join(", ") + "]";
+  }).join("\n");
+  const renderVisualBuilder = () => {
+    if (!visualList) return;
+    const canEditPipelines = Boolean(pipelineEditor && !pipelineEditor.readOnly);
+    fillSelect(visualReceiver, componentCatalog.receivers, "Select receiver");
+    fillSelect(visualProcessors, componentCatalog.processors, "");
+    fillSelect(visualExporter, componentCatalog.exporters, "Select exporter");
+    if (visualAdd) visualAdd.disabled = !canEditPipelines;
+    const pipelines = visualModel.pipelines || [];
+    if (!pipelines.length) {
+      visualList.innerHTML = '<div class="visual-empty">No service pipelines yet. Define receiver and exporter components in YAML Editor, then add the first pipeline here.</div>';
+    } else {
+      visualList.innerHTML = pipelines.map((pipeline, index) => '<article class="visual-pipeline"><div class="visual-pipeline-head"><div><strong>' + escapeHTML(pipeline.name) + '</strong><div class="tiny">' + escapeHTML(pipeline.signal) + ' telemetry</div></div>' + (canEditPipelines ? '<button class="btn" type="button" data-remove-visual-pipeline="' + index + '">Remove</button>' : '') + '</div><div class="visual-flow"><div class="visual-node"><div class="visual-node-title">Collect</div><div class="visual-node-items">' + chips(pipeline.receivers, "No receivers") + '</div></div><div class="visual-arrow" aria-hidden="true">→</div><div class="visual-node"><div class="visual-node-title">Process</div><div class="visual-node-items">' + chips(pipeline.processors, "No processors") + '</div></div><div class="visual-arrow" aria-hidden="true">→</div><div class="visual-node"><div class="visual-node-title">Send</div><div class="visual-node-items">' + chips(pipeline.exporters, "No exporters") + '</div></div></div></article>').join("");
+    }
+    visualList.querySelectorAll("[data-remove-visual-pipeline]").forEach((button) => button.addEventListener("click", () => {
+      visualModel.pipelines.splice(Number(button.dataset.removeVisualPipeline), 1);
+      pipelineEditor.value = pipelineYAML();
+      pipelineEditor.dispatchEvent(new Event("input", {bubbles: true}));
+      renderVisualBuilder();
+    }));
+    const warnings = [...(visualModel.warnings || [])];
+    if (!canEditPipelines) warnings.unshift("Service pipelines are read-only under the active group policy.");
+    if (visualWarnings) visualWarnings.textContent = warnings.join(" · ");
+  };
+  const setMode = async (mode) => {
+    if (mode === "visual") {
+      try {
+        const result = await composeAndValidate();
+        visualModel = result.pipeline || {pipelines: [], warnings: []};
+        componentCatalog = result.components || {receivers: [], processors: [], exporters: []};
+        renderVisualBuilder();
+      } catch (error) {
+        showError(error.message);
+        return;
+      }
+    }
+    modeButtons.forEach((button) => {
+      const active = button.dataset.editorModeButton === mode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    modePanels.forEach((panel) => panel.hidden = panel.dataset.editorModePanel !== mode);
+  };
+  modeButtons.forEach((button) => button.addEventListener("click", () => setMode(button.dataset.editorModeButton)));
+  if (visualAdd) visualAdd.addEventListener("click", async () => {
+    clearValidation();
+    if (!pipelineEditor || pipelineEditor.readOnly) {
+      showError("Service pipelines are read-only under the active group policy.");
+      return;
+    }
+    const signal = visualSignal ? visualSignal.value : "";
+    const suffix = visualName ? visualName.value.trim() : "";
+    const receiver = visualReceiver ? visualReceiver.value : "";
+    const exporter = visualExporter ? visualExporter.value : "";
+    if (!receiver || !exporter) {
+      showError("Select both a receiver and an exporter before adding a pipeline.");
+      return;
+    }
+    if (suffix && !/^[A-Za-z0-9._-]+$/.test(suffix)) {
+      showError("Pipeline names may contain only letters, numbers, dots, underscores and hyphens.");
+      return;
+    }
+    const name = suffix ? signal + "/" + suffix : signal;
+    if ((visualModel.pipelines || []).some((pipeline) => pipeline.name === name)) {
+      showError("A pipeline named " + name + " already exists.");
+      return;
+    }
+    const processors = visualProcessors
+      ? Array.from(visualProcessors.selectedOptions).map((option) => option.value)
+      : [];
+    visualModel.pipelines = [...(visualModel.pipelines || []), {
+      name: name,
+      signal: signal,
+      receivers: [receiver],
+      processors: processors,
+      exporters: [exporter]
+    }];
+    pipelineEditor.value = pipelineYAML();
+    pipelineEditor.dispatchEvent(new Event("input", {bubbles: true}));
+    if (visualName) visualName.value = "";
+    try {
+      const result = await composeAndValidate();
+      visualModel = result.pipeline || visualModel;
+      componentCatalog = result.components || componentCatalog;
+      renderVisualBuilder();
+    } catch (error) {
+      showError(error.message);
+    }
+  });
 
   const clearValidation = () => {
     errorBox.hidden = true;
@@ -197,7 +325,7 @@ const configurationEditorJS = `(() => {
     }
     content.value = result.content;
     if (preview) preview.value = result.content;
-    return result.content;
+    return result;
   };
 
   if (previewButton) previewButton.addEventListener("click", async () => {
@@ -308,7 +436,7 @@ const groupDetailBaseHTML = `<!doctype html><html><head><meta charset="utf-8"><m
 <div class="sectionhead"><div><div class="eyebrow">Group identity</div><div class="sectiontitle">{{.Group.Name}}</div><div class="subtitle">Selector-driven membership managed by FleetAMP.</div></div><div>{{if .Group.Enabled}}<span class="badge ok">● Active</span>{{else}}<span class="badge off">Disabled</span>{{end}}</div></div>
 <div class="detailgrid">
 {{if and .CanManage .ShowEdit}}<section class="card wide" id="edit-group"><div class="cardhead"><div><div class="cardtitle">Edit ownership group</div><div class="cardsub">Change the display name or exact-match managed metadata conditions</div></div><a href="/groups/{{.Group.ID}}" class="btn">Close</a></div><div class="cardbody"><form method="post" action="/groups/{{.Group.ID}}" data-selector-form data-group-id="{{.Group.ID}}"><input type="hidden" name="action" value="update"><div class="detailform"><label>Group name<input class="input" name="name" value="{{.Group.Name}}" required maxlength="120"></label></div><div class="selector-rows" data-selector-rows>{{range $key,$value := .Group.Selector}}<div class="detailform selector-row"><input class="input" name="selector_key" value="{{$key}}" aria-label="Selector key" required><input class="input" name="selector_value" value="{{$value}}" aria-label="Selector value" required><button class="btn" type="button" data-remove-selector aria-label="Remove condition">−</button></div>{{end}}</div><div class="detailactions" style="margin-top:12px"><button class="btn" type="button" data-add-selector>＋ Add condition</button><button class="btn" type="button" data-preview-selector>Preview membership</button><button class="btn primary" type="submit">Validate and save</button></div><div class="tiny" data-selector-preview aria-live="polite"></div><p class="tiny">Changing a selector immediately recalculates membership. FleetAMP rejects overlap with another active ownership group.</p></form></div></section>{{end}}
-<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">The latest successfully deployed version is loaded by default</div></div><div class="topactions"><a class="btn" href="/blueprints/templates">Use Template</a><a class="btn" href="/blueprints?group_id={{.Group.ID}}">Use Blueprint</a><a class="btn" href="/migration?group_id={{.Group.ID}}">Import existing configuration</a></div></div><div class="cardbody">{{if .EditorError}}<div class="configerror" role="alert">{{.EditorError}}</div>{{end}}<div id="configuration-validation-error" class="configerror" role="alert" aria-live="polite" hidden></div>{{if .EditorVersions}}<form class="detailform" method="get" action="/groups/{{.Group.ID}}"><label>Base configuration version<select class="select" name="editor_base" onchange="this.form.submit()">{{range .EditorVersions}}<option value="{{.ID}}" {{if eq .ID $.EditorBaseID}}selected{{end}}>{{.Name}} v{{.Version}}{{if eq .ID $.EditorBaseID}} · selected{{end}}</option>{{end}}</select></label><noscript><button class="btn" type="submit">Load version</button></noscript></form><p class="tiny">FleetAMP selects the latest successfully deployed version. Choose an older saved version only when intentionally creating from that baseline.</p>{{end}}<form id="configuration-editor-form" class="configeditor" method="post" action="/groups/{{.Group.ID}}" data-has-baseline="{{if .EditorBaseID}}true{{else}}false{{end}}"><input type="hidden" name="action" value="create_configuration"><input type="hidden" name="base_configuration_id" value="{{.EditorBaseID}}"><textarea id="configuration-baseline" hidden>{{.EditorBaseline}}</textarea><input type="hidden" id="configuration-content" name="content"><div class="detailform"><label>Configuration name<input class="input" name="name" value="{{.EditorName}}" required maxlength="160"></label><label>New version<input class="input" id="configuration-new-version" name="version" value="{{.EditorVersion}}" data-baseline-version="{{.EditorVersion}}" placeholder="Enter a new version after changing configuration" required maxlength="80"></label></div>{{if .EditorSections}}<p class="tiny">Each tab displays the selected baseline section. FleetAMP adds its Collector key. A matching wrapper such as <span class="code">receivers:</span> is accepted and normalized, while a section pasted into the wrong tab is rejected.</p><div class="section-tabs" role="tablist">{{range $index,$section := .EditorSections}}<button class="section-tab {{if eq $index 0}}active{{end}}" type="button" role="tab" data-section-tab="{{$section.Key}}">{{$section.Title}}</button>{{end}}<button class="section-tab" type="button" role="tab" data-section-tab="complete_preview">Complete YAML</button></div>{{range $index,$section := .EditorSections}}<section class="section-panel {{if eq $index 0}}active{{end}}" data-section-panel="{{$section.Key}}"><div class="section-heading"><div><strong>{{$section.Title}}</strong><div class="tiny">{{$section.Description}}</div></div>{{if $section.Editable}}<span class="badge ok">Editable</span>{{else}}<span class="badge off">Read-only by Admin policy</span>{{end}}</div><textarea class="section-editor" name="section_{{$section.Key}}" data-section-key="{{$section.Key}}" spellcheck="false" {{if not $section.Editable}}readonly{{end}}>{{$section.Content}}</textarea></section>{{end}}<section class="section-panel" data-section-panel="complete_preview"><div class="section-heading"><div><strong>Complete Collector YAML</strong><div class="tiny">Generated and validated from all configuration sections.</div></div><span class="badge off">Generated preview</span></div><textarea id="configuration-preview" class="section-editor preview-editor" readonly spellcheck="false">{{.EditorBaseline}}</textarea></section><div class="detailactions"><button class="btn" id="configuration-preview-button" type="button">Validate and preview</button>{{if .CanEditConfiguration}}<button class="btn primary" type="submit">Validate and save version</button>{{end}}</div>{{end}}<p class="tiny">Change at least one editable section and enter a new version. Unchanged content or a reused version is rejected.</p></form></div></section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">The latest successfully deployed version is loaded by default</div></div><div class="topactions"><a class="btn" href="/blueprints/templates">Use Template</a><a class="btn" href="/blueprints?group_id={{.Group.ID}}">Use Blueprint</a><a class="btn" href="/migration?group_id={{.Group.ID}}">Import existing configuration</a></div></div><div class="cardbody">{{if .EditorError}}<div class="configerror" role="alert">{{.EditorError}}</div>{{end}}<div id="configuration-validation-error" class="configerror" role="alert" aria-live="polite" hidden></div>{{if .EditorVersions}}<form class="detailform" method="get" action="/groups/{{.Group.ID}}"><label>Base configuration version<select class="select" name="editor_base" onchange="this.form.submit()">{{range .EditorVersions}}<option value="{{.ID}}" {{if eq .ID $.EditorBaseID}}selected{{end}}>{{.Name}} v{{.Version}}{{if eq .ID $.EditorBaseID}} · selected{{end}}</option>{{end}}</select></label><noscript><button class="btn" type="submit">Load version</button></noscript></form><p class="tiny">FleetAMP selects the latest successfully deployed version. Choose an older saved version only when intentionally creating from that baseline.</p>{{end}}<form id="configuration-editor-form" class="configeditor" method="post" action="/groups/{{.Group.ID}}" data-has-baseline="{{if .EditorBaseID}}true{{else}}false{{end}}"><input type="hidden" name="action" value="create_configuration"><input type="hidden" name="base_configuration_id" value="{{.EditorBaseID}}"><textarea id="configuration-baseline" hidden>{{.EditorBaseline}}</textarea><input type="hidden" id="configuration-content" name="content"><div class="detailform"><label>Configuration name<input class="input" name="name" value="{{.EditorName}}" required maxlength="160"></label><label>New version<input class="input" id="configuration-new-version" name="version" value="{{.EditorVersion}}" data-baseline-version="{{.EditorVersion}}" placeholder="Enter a new version after changing configuration" required maxlength="80"></label></div>{{if .EditorSections}}<div class="editor-mode-switch"><div><strong>Configuration editing mode</strong><div class="tiny">Use the visual builder for pipeline wiring or YAML for advanced Collector settings.</div></div><div class="editor-mode-actions" role="tablist" aria-label="Configuration editing mode"><button class="editor-mode-button active" type="button" role="tab" aria-selected="true" data-editor-mode-button="yaml">YAML Editor</button><button class="editor-mode-button" type="button" role="tab" aria-selected="false" data-editor-mode-button="visual">Visual Builder</button></div></div><div class="yaml-builder" data-editor-mode-panel="yaml"><p class="tiny">Each tab displays the selected baseline section. FleetAMP adds its Collector key. A matching wrapper such as <span class="code">receivers:</span> is accepted and normalized, while a section pasted into the wrong tab is rejected.</p><div class="section-tabs" role="tablist">{{range $index,$section := .EditorSections}}<button class="section-tab {{if eq $index 0}}active{{end}}" type="button" role="tab" data-section-tab="{{$section.Key}}">{{$section.Title}}</button>{{end}}<button class="section-tab" type="button" role="tab" data-section-tab="complete_preview">Complete YAML</button></div>{{range $index,$section := .EditorSections}}<section class="section-panel {{if eq $index 0}}active{{end}}" data-section-panel="{{$section.Key}}"><div class="section-heading"><div><strong>{{$section.Title}}</strong><div class="tiny">{{$section.Description}}</div></div>{{if $section.Editable}}<span class="badge ok">Editable</span>{{else}}<span class="badge off">Read-only by Admin policy</span>{{end}}</div><textarea class="section-editor" name="section_{{$section.Key}}" data-section-key="{{$section.Key}}" spellcheck="false" {{if not $section.Editable}}readonly{{end}}>{{$section.Content}}</textarea></section>{{end}}<section class="section-panel" data-section-panel="complete_preview"><div class="section-heading"><div><strong>Complete Collector YAML</strong><div class="tiny">Generated and validated from all configuration sections.</div></div><span class="badge off">Generated preview</span></div><textarea id="configuration-preview" class="section-editor preview-editor" readonly spellcheck="false">{{.EditorBaseline}}</textarea></section></div><div id="configuration-visual-builder" class="visual-builder" data-editor-mode-panel="visual" hidden><div class="visual-toolbar"><label>Signal<select class="select" id="visual-signal"><option value="traces">Traces</option><option value="metrics">Metrics</option><option value="logs">Logs</option><option value="profiles">Profiles</option></select></label><label>Pipeline name<input class="input" id="visual-pipeline-name" maxlength="80" placeholder="application"></label><label>Receiver<select class="select" id="visual-receiver"></select></label><label>Processors<select class="select" id="visual-processors" multiple size="3"></select></label><label>Exporter<select class="select" id="visual-exporter"></select></label><button class="btn visual-add" id="visual-add-pipeline" type="button">＋ Add pipeline</button></div><div class="tiny">Component settings remain in YAML Editor. The visual builder connects components that are already defined and permitted by configuration policy.</div><div id="visual-pipeline-list" class="visual-pipelines" aria-live="polite"></div><div id="visual-builder-warnings" class="visual-warning"></div></div><div class="detailactions"><button class="btn" id="configuration-preview-button" type="button">Validate and preview</button>{{if .CanEditConfiguration}}<button class="btn primary" type="submit">Validate and save version</button>{{end}}</div>{{end}}<p class="tiny">Change at least one editable section and enter a new version. Unchanged content or a reused version is rejected.</p></form></div></section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Saved configuration versions</div><div class="cardsub">Validated versions available to this group workflow</div></div></div>{{if .Configurations}}<div style="overflow:auto"><table><thead><tr><th>Name</th><th>Version</th><th>Hash</th><th>Created</th></tr></thead><tbody>{{range .Configurations}}<tr><td><a class="agentname" href="/configurations/{{.ID}}">{{.Name}}</a></td><td>{{.Version}}</td><td class="tiny code">{{.Hash}}</td><td>{{.CreatedAt}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No saved configuration versions yet.</div>{{end}}</section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Group deployment preview</div><div class="cardsub">Review the group, optional label filter, configuration flow and readiness before approval</div></div><span class="badge warn">Approval required</span></div><div class="cardbody"><form class="detailform" method="get" action="/groups/{{.Group.ID}}"><label>Saved configuration<select class="select" name="configuration_id" required><option value="">Select a version</option>{{range .Configurations}}<option value="{{.ID}}" {{if $.SelectedConfig}}{{if eq .ID $.SelectedConfig.ID}}selected{{end}}{{end}}>{{.Name}} v{{.Version}}</option>{{end}}</select></label><label>Optional label target<input class="input" name="labels" value="{{.LabelSelectorText}}" placeholder="team=payments, tier=backend"></label><button class="btn primary" type="submit">Preview targets</button></form><p class="tiny">Labels narrow this owned group using exact-match AND semantics. FleetAMP-managed labels override reported values. Leave empty to target every group member.</p>{{if not .Configurations}}<p class="tiny">Create and validate a configuration version in this group workspace first.</p>{{end}}
 {{if .SelectedConfig}}<p class="tiny">Selected: <a class="agentname" href="/configurations/{{.SelectedConfig.ID}}">{{.SelectedConfig.Name}} v{{.SelectedConfig.Version}}</a> · hash <code>{{.SelectedConfig.Hash}}</code></p>

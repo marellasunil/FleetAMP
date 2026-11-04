@@ -143,6 +143,9 @@ func TestConfigurationEditorJavaScriptIsServed(t *testing.T) {
 		"configuration-editor-form",
 		"configuration-validation-error",
 		"/api/v1/configurations/sections/compose",
+		"visual-pipeline-list",
+		"visual-add-pipeline",
+		"pipelineYAML",
 		"form.requestSubmit",
 	} {
 		if !strings.Contains(script, expected) {
@@ -161,7 +164,14 @@ func TestConfigurationAuthoringIsOnlyShownOnGroupDetail(t *testing.T) {
 	if !strings.Contains(groupDetailHTML, "Create configuration version") {
 		t.Fatal("group detail is missing configuration authoring")
 	}
-	for _, expected := range []string{`id="configuration-editor-form"`, `data-section-tab=`, `src="/assets/configuration-editor.js"`} {
+	for _, expected := range []string{
+		`id="configuration-editor-form"`,
+		`data-section-tab=`,
+		`data-editor-mode-button="yaml"`,
+		`data-editor-mode-button="visual"`,
+		`id="configuration-visual-builder"`,
+		`src="/assets/configuration-editor.js"`,
+	} {
 		if !strings.Contains(groupDetailHTML, expected) {
 			t.Fatalf("group detail editor is missing %q", expected)
 		}

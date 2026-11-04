@@ -45,8 +45,10 @@ type composeSectionsRequest struct {
 }
 
 type composeSectionsResponse struct {
-	Content    string                   `json:"content,omitempty"`
-	Validation configs.ValidationResult `json:"validation"`
+	Content    string                    `json:"content,omitempty"`
+	Validation configs.ValidationResult  `json:"validation"`
+	Pipeline   *configs.PipelineModel    `json:"pipeline,omitempty"`
+	Components *configs.ComponentCatalog `json:"components,omitempty"`
 }
 
 const sectionEditorCSS = `
@@ -60,6 +62,7 @@ const sectionEditorCSS = `
 .section-editor{width:100%;min-height:330px;resize:vertical;background:#07111e;border:1px solid #29405f;border-radius:8px;padding:13px;color:#d8e5ff;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
 .section-editor[readonly]{opacity:.62;cursor:not-allowed;border-style:dashed}
 .preview-editor{min-height:360px}
+.editor-mode-switch{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0;padding:6px;background:#091523;border:1px solid #243750;border-radius:12px}.editor-mode-actions{display:flex;gap:6px}.editor-mode-button{border:0;background:transparent;color:#91a2bb;border-radius:8px;padding:9px 13px;cursor:pointer;font-weight:650}.editor-mode-button.active{color:#f4f7ff;background:linear-gradient(135deg,#294b91,#3e61ad)}.visual-builder[hidden],.yaml-builder[hidden]{display:none}.visual-builder{display:grid;gap:14px}.visual-toolbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;padding:14px;border:1px solid #243750;border-radius:10px;background:#091523}.visual-toolbar label{display:grid;gap:6px;color:var(--muted);font-size:12px}.visual-toolbar .visual-add{align-self:end}.visual-pipelines{display:grid;gap:12px}.visual-pipeline{padding:15px;border:1px solid #29405f;border-radius:10px;background:#07111e}.visual-pipeline-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.visual-flow{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr);gap:10px;align-items:stretch}.visual-node{padding:12px;border:1px solid #2b4568;border-radius:9px;background:#0d1b2d}.visual-node-title{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}.visual-node-items{display:flex;gap:6px;flex-wrap:wrap}.visual-arrow{display:flex;align-items:center;color:#6f91c5;font-size:22px}.visual-empty{padding:18px;border:1px dashed #365071;border-radius:10px;color:var(--muted);text-align:center}.visual-warning{color:#ffd08a;font-size:12px}@media(max-width:1050px){.visual-toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.editor-mode-switch{align-items:flex-start;flex-direction:column}.visual-toolbar{grid-template-columns:1fr}.visual-flow{grid-template-columns:1fr}.visual-arrow{justify-content:center;transform:rotate(90deg)}}
 `
 
 const sectionPolicyHTML = `<!doctype html><html><head><meta charset="utf-8">
@@ -200,11 +203,21 @@ func registerSectionEditorRoutes(mux *http.ServeMux, policyStore storage.Section
 			return
 		}
 		validation := validator.Validate(r.Context(), validationContent)
+		pipeline, pipelineErr := configs.ParsePipelineModel(content)
+		components, componentErr := configs.ParseComponentCatalog(content)
+		if validation.Valid && pipelineErr != nil {
+			validation.Valid = false
+			validation.Error = pipelineErr.Error()
+		}
+		if validation.Valid && componentErr != nil {
+			validation.Valid = false
+			validation.Error = componentErr.Error()
+		}
 		status := http.StatusOK
 		if !validation.Valid {
 			status = http.StatusUnprocessableEntity
 		}
-		writeJSON(w, status, composeSectionsResponse{Content: content, Validation: validation})
+		writeJSON(w, status, composeSectionsResponse{Content: content, Validation: validation, Pipeline: pipeline, Components: components})
 	})
 
 	mux.HandleFunc("/settings/configuration-sections", func(w http.ResponseWriter, r *http.Request) {
