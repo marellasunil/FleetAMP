@@ -149,6 +149,10 @@ func TestConfigurationEditorJavaScriptIsServed(t *testing.T) {
 		"configuration-topology-canvas",
 		"topology-signal-filter",
 		"renderTopology",
+		"yamlCompletions",
+		"data-completion-index",
+		"Ctrl+Space show all",
+		"sectionComponentNames",
 		"form.requestSubmit",
 	} {
 		if !strings.Contains(script, expected) {
@@ -176,6 +180,8 @@ func TestConfigurationAuthoringIsOnlyShownOnGroupDetail(t *testing.T) {
 		`id="configuration-visual-builder"`,
 		`id="configuration-topology"`,
 		`id="configuration-topology-summary"`,
+		`Ctrl+Space`,
+		`Tab</span> or <span class="code">Enter`,
 		`src="/assets/configuration-editor.js"`,
 	} {
 		if !strings.Contains(groupDetailHTML, expected) {
