@@ -142,7 +142,11 @@ func TestConfigurationEditorJavaScriptIsServed(t *testing.T) {
 	for _, expected := range []string{
 		"configuration-editor-form",
 		"configuration-validation-error",
+		"configuration-reference-status",
 		"/api/v1/configurations/sections/compose",
+		"/api/v1/configurations/sections/references",
+		"scheduleReferenceValidation",
+		"All pipeline and service references resolve",
 		"visual-pipeline-list",
 		"visual-add-pipeline",
 		"pipelineYAML",
