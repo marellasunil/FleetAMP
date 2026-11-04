@@ -26,11 +26,22 @@ type Pipeline struct {
 	Exporters  []string `json:"exporters"`
 }
 
+// ComponentCatalog lists component identifiers that the visual builder may
+// connect. Settings and credentials remain in the section-aware YAML editor.
+type ComponentCatalog struct {
+	Receivers  []string `json:"receivers"`
+	Processors []string `json:"processors"`
+	Exporters  []string `json:"exporters"`
+	Extensions []string `json:"extensions"`
+	Connectors []string `json:"connectors"`
+}
+
 type collectorPipelineDocument struct {
 	Receivers  map[string]yaml.Node `yaml:"receivers"`
 	Processors map[string]yaml.Node `yaml:"processors"`
 	Exporters  map[string]yaml.Node `yaml:"exporters"`
 	Extensions map[string]yaml.Node `yaml:"extensions"`
+	Connectors map[string]yaml.Node `yaml:"connectors"`
 	Service    struct {
 		Extensions []string                        `yaml:"extensions"`
 		Pipelines  map[string]collectorRawPipeline `yaml:"pipelines"`
@@ -41,6 +52,20 @@ type collectorRawPipeline struct {
 	Receivers  []string `yaml:"receivers"`
 	Processors []string `yaml:"processors"`
 	Exporters  []string `yaml:"exporters"`
+}
+
+// ParseComponentCatalog returns sorted component identifiers for the visual
+// builder without exposing component settings, endpoints, or credentials.
+func ParseComponentCatalog(content string) (*ComponentCatalog, error) {
+	var document collectorPipelineDocument
+	if err := yaml.Unmarshal([]byte(content), &document); err != nil {
+		return nil, fmt.Errorf("parse Collector component catalog: %w", err)
+	}
+	return &ComponentCatalog{
+		Receivers: sortedUnionKeys(document.Receivers, document.Connectors), Processors: sortedKeys(document.Processors),
+		Exporters: sortedUnionKeys(document.Exporters, document.Connectors), Extensions: sortedKeys(document.Extensions),
+		Connectors: sortedKeys(document.Connectors),
+	}, nil
 }
 
 // ParsePipelineModel parses Collector YAML into the relationship-only model
@@ -56,6 +81,7 @@ func ParsePipelineModel(content string) (*PipelineModel, error) {
 	usedProcessors := make(map[string]bool)
 	usedExporters := make(map[string]bool)
 	usedExtensions := make(map[string]bool)
+	usedConnectors := make(map[string]bool)
 
 	for _, name := range sortedKeys(document.Service.Pipelines) {
 		raw := document.Service.Pipelines[name]
@@ -69,13 +95,13 @@ func ParsePipelineModel(content string) (*PipelineModel, error) {
 		if len(raw.Exporters) == 0 {
 			return nil, fmt.Errorf("pipeline %q has no exporters", name)
 		}
-		if err := validateReferences(name, "receiver", raw.Receivers, document.Receivers, usedReceivers); err != nil {
+		if err := validatePipelineEndpoints(name, "receiver", raw.Receivers, document.Receivers, document.Connectors, usedReceivers, usedConnectors); err != nil {
 			return nil, err
 		}
 		if err := validateReferences(name, "processor", raw.Processors, document.Processors, usedProcessors); err != nil {
 			return nil, err
 		}
-		if err := validateReferences(name, "exporter", raw.Exporters, document.Exporters, usedExporters); err != nil {
+		if err := validatePipelineEndpoints(name, "exporter", raw.Exporters, document.Exporters, document.Connectors, usedExporters, usedConnectors); err != nil {
 			return nil, err
 		}
 		model.Pipelines = append(model.Pipelines, Pipeline{Name: name, Signal: signal,
@@ -95,6 +121,7 @@ func ParsePipelineModel(content string) (*PipelineModel, error) {
 	model.Warnings = append(model.Warnings, unusedWarnings("processor", document.Processors, usedProcessors)...)
 	model.Warnings = append(model.Warnings, unusedWarnings("exporter", document.Exporters, usedExporters)...)
 	model.Warnings = append(model.Warnings, unusedWarnings("extension", document.Extensions, usedExtensions)...)
+	model.Warnings = append(model.Warnings, unusedWarnings("connector", document.Connectors, usedConnectors)...)
 	return model, nil
 }
 
@@ -105,6 +132,21 @@ func supportedSignal(signal string) bool {
 	default:
 		return false
 	}
+}
+
+func validatePipelineEndpoints(pipelineName, kind string, references []string, defined, connectors map[string]yaml.Node, used, usedConnectors map[string]bool) error {
+	for _, name := range references {
+		if _, ok := defined[name]; ok {
+			used[name] = true
+			continue
+		}
+		if _, ok := connectors[name]; ok {
+			usedConnectors[name] = true
+			continue
+		}
+		return fmt.Errorf("pipeline %q references undefined %s %q", pipelineName, kind, name)
+	}
+	return nil
 }
 
 func validateReferences(pipelineName, kind string, references []string, defined map[string]yaml.Node, used map[string]bool) error {
@@ -134,4 +176,15 @@ func sortedKeys[T any](values map[string]T) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func sortedUnionKeys(first, second map[string]yaml.Node) []string {
+	keys := make(map[string]struct{}, len(first)+len(second))
+	for key := range first {
+		keys[key] = struct{}{}
+	}
+	for key := range second {
+		keys[key] = struct{}{}
+	}
+	return sortedKeys(keys)
 }
