@@ -145,6 +145,19 @@ func TestConfigurationTabsUseSegmentedNavigation(t *testing.T) {
 	}
 }
 
+func TestYAMLCompletionHasKeyboardAndResponsiveStyling(t *testing.T) {
+	for _, expected := range []string{
+		`.yaml-completion{`,
+		`.yaml-completion-item.active`,
+		`.section-editor.completion-open`,
+		`.yaml-completion-hint`,
+	} {
+		if !strings.Contains(sectionEditorCSS, expected) {
+			t.Fatalf("YAML completion styling is missing %q", expected)
+		}
+	}
+}
+
 func TestConfigurationTopologyHasResponsiveComponentStyling(t *testing.T) {
 	for _, expected := range []string{
 		`.topology-view{display:grid`,

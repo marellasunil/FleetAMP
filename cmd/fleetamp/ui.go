@@ -183,6 +183,174 @@ const configurationEditorJS = `(() => {
   tabs.forEach((tab) => tab.addEventListener("click", () => selectTab(tab.dataset.sectionTab)));
 
   const escapeHTML = (value) => String(value).replace(/[&<>\"']/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"})[character]);
+  const yamlCompletions = {
+    receivers: [
+      ["otlp:\n  protocols:\n    grpc:\n      endpoint: 0.0.0.0:4317\n    http:\n      endpoint: 0.0.0.0:4318", "OTLP gRPC and HTTP receiver"],
+      ["hostmetrics:", "Host CPU, memory, disk and network metrics"],
+      ["filelog:", "Tail and parse log files"],
+      ["prometheus:", "Scrape Prometheus metrics"],
+      ["zipkin:", "Receive Zipkin traces"]
+    ],
+    processors: [
+      ["batch:", "Batch telemetry before export"],
+      ["memory_limiter:", "Protect the Collector from memory exhaustion"],
+      ["resource:", "Add, update or remove resource attributes"],
+      ["attributes:", "Transform span, metric or log attributes"],
+      ["filter:", "Drop telemetry using OTTL conditions"],
+      ["transform:", "Transform telemetry using OTTL"],
+      ["tail_sampling:", "Make trace sampling decisions after collection"]
+    ],
+    exporters: [
+      ["otlp:", "Export telemetry using OTLP/gRPC"],
+      ["otlphttp:", "Export telemetry using OTLP/HTTP"],
+      ["debug:", "Write telemetry summaries to Collector logs"],
+      ["prometheusremotewrite:", "Export metrics using Prometheus remote write"],
+      ["file:", "Write telemetry to a local file"]
+    ],
+    connectors: [
+      ["forward:", "Forward telemetry between pipelines"],
+      ["routing:", "Route telemetry to selected pipelines"],
+      ["count:", "Generate metrics by counting telemetry"],
+      ["spanmetrics:", "Generate RED metrics from spans"],
+      ["servicegraph:", "Generate service graph metrics from spans"]
+    ],
+    extensions: [
+      ["health_check:", "Expose Collector health status"],
+      ["pprof:", "Expose Go performance profiles"],
+      ["zpages:", "Expose live diagnostic pages"]
+    ],
+    service_pipelines: [
+      ["receivers: []", "Components that feed this pipeline"],
+      ["processors: []", "Ordered processors applied to telemetry"],
+      ["exporters: []", "Components that receive pipeline output"]
+    ],
+    service_extensions: [
+      ["extensions: []", "Extensions enabled by the Collector service"]
+    ],
+    service_telemetry: [
+      ["logs:", "Collector internal log settings"],
+      ["metrics:", "Collector internal metrics settings"],
+      ["traces:", "Collector internal trace settings"]
+    ]
+  };
+  const sectionComponentNames = (sectionKeys) => {
+    const names = [];
+    editors.filter((editor) => sectionKeys.includes(editor.dataset.sectionKey)).forEach((editor) => {
+      editor.value.split("\n").forEach((line) => {
+        const match = line.match(/^ {0,2}([A-Za-z0-9_.\/-]+):(?:\s|$)/);
+        if (match && !names.includes(match[1])) names.push(match[1]);
+      });
+    });
+    return names.sort().map((name) => [name, "Defined component"]);
+  };
+  const completionOptions = (editor, lineBeforeCaret) => {
+    if (editor.dataset.sectionKey === "service_pipelines") {
+      if (/receivers:\s*\[[^\]]*$/.test(lineBeforeCaret)) return sectionComponentNames(["receivers", "connectors"]);
+      if (/processors:\s*\[[^\]]*$/.test(lineBeforeCaret)) return sectionComponentNames(["processors"]);
+      if (/exporters:\s*\[[^\]]*$/.test(lineBeforeCaret)) return sectionComponentNames(["exporters", "connectors"]);
+    }
+    if (editor.dataset.sectionKey === "service_extensions" && /extensions:\s*\[[^\]]*$/.test(lineBeforeCaret)) {
+      return sectionComponentNames(["extensions"]);
+    }
+    return yamlCompletions[editor.dataset.sectionKey] || [];
+  };
+  const completionStates = new WeakMap();
+  const closeCompletion = (editor) => {
+    const state = completionStates.get(editor);
+    if (!state) return;
+    state.panel.hidden = true;
+    editor.classList.remove("completion-open");
+    state.options = [];
+    state.active = 0;
+  };
+  const acceptCompletion = (editor, index) => {
+    const state = completionStates.get(editor);
+    const option = state && state.options[index];
+    if (!option) return;
+    const start = editor.selectionStart;
+    const before = editor.value.slice(0, start);
+    const after = editor.value.slice(editor.selectionEnd);
+    const token = (before.match(/[A-Za-z0-9_.\/-]*$/) || [""])[0];
+    const lineStart = before.lastIndexOf("\n") + 1;
+    const indent = (before.slice(lineStart).match(/^\s*/) || [""])[0];
+    const inserted = option[0].replace(/\n/g, "\n" + indent);
+    const replaceStart = start - token.length;
+    editor.value = editor.value.slice(0, replaceStart) + inserted + after;
+    const caret = replaceStart + inserted.length;
+    editor.setSelectionRange(caret, caret);
+    editor.dispatchEvent(new Event("input", {bubbles: true}));
+    closeCompletion(editor);
+    editor.focus();
+  };
+  const renderCompletion = (editor, showAll) => {
+    const state = completionStates.get(editor);
+    if (!state || editor.readOnly) return;
+    const before = editor.value.slice(0, editor.selectionStart);
+    const lineBeforeCaret = before.slice(before.lastIndexOf("\n") + 1);
+    const token = (before.match(/[A-Za-z0-9_.\/-]*$/) || [""])[0].toLowerCase();
+    if (!showAll && !token) {
+      closeCompletion(editor);
+      return;
+    }
+    state.options = completionOptions(editor, lineBeforeCaret).filter((option) =>
+      showAll || option[0].toLowerCase().startsWith(token)
+    ).slice(0, 8);
+    state.active = 0;
+    if (!state.options.length) {
+      closeCompletion(editor);
+      return;
+    }
+    state.list.innerHTML = state.options.map((option, index) =>
+      '<button class="yaml-completion-item' + (index === 0 ? ' active' : '') + '" type="button" data-completion-index="' + index + '"><span class="yaml-completion-value">' + escapeHTML(option[0].split("\n")[0]) + '</span><span class="yaml-completion-description">' + escapeHTML(option[1]) + '</span></button>'
+    ).join("");
+    state.list.querySelectorAll("[data-completion-index]").forEach((button) =>
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        acceptCompletion(editor, Number(button.dataset.completionIndex));
+      })
+    );
+    state.panel.hidden = false;
+    editor.classList.add("completion-open");
+  };
+  const selectCompletion = (editor, direction) => {
+    const state = completionStates.get(editor);
+    if (!state || state.panel.hidden || !state.options.length) return;
+    state.active = (state.active + direction + state.options.length) % state.options.length;
+    state.list.querySelectorAll("[data-completion-index]").forEach((button, index) =>
+      button.classList.toggle("active", index === state.active)
+    );
+  };
+  editors.forEach((editor) => {
+    if (editor.readOnly) return;
+    const panel = document.createElement("div");
+    panel.className = "yaml-completion";
+    panel.hidden = true;
+    panel.innerHTML = '<div class="yaml-completion-head"><span>Suggestions</span><span class="yaml-completion-hint">↑↓ select · Tab/Enter complete · Esc close · Ctrl+Space show all</span></div><div class="yaml-completion-list"></div>';
+    editor.insertAdjacentElement("afterend", panel);
+    completionStates.set(editor, {panel: panel, list: panel.querySelector(".yaml-completion-list"), options: [], active: 0});
+    editor.addEventListener("input", () => renderCompletion(editor, false));
+    editor.addEventListener("click", () => renderCompletion(editor, false));
+    editor.addEventListener("blur", () => window.setTimeout(() => closeCompletion(editor), 120));
+    editor.addEventListener("keydown", (event) => {
+      const state = completionStates.get(editor);
+      if ((event.ctrlKey || event.metaKey) && event.code === "Space") {
+        event.preventDefault();
+        renderCompletion(editor, true);
+        return;
+      }
+      if (!state || state.panel.hidden) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        selectCompletion(editor, event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Tab" || event.key === "Enter") {
+        event.preventDefault();
+        acceptCompletion(editor, state.active);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeCompletion(editor);
+      }
+    });
+  });
   const chips = (values, empty) => values && values.length
     ? values.map((value) => '<span class="chip">' + escapeHTML(value) + '</span>').join("")
     : '<span class="tiny">' + empty + '</span>';
@@ -475,7 +643,7 @@ const groupDetailBaseHTML = `<!doctype html><html><head><meta charset="utf-8"><m
 <div class="sectionhead"><div><div class="eyebrow">Group identity</div><div class="sectiontitle">{{.Group.Name}}</div><div class="subtitle">Selector-driven membership managed by FleetAMP.</div></div><div>{{if .Group.Enabled}}<span class="badge ok">● Active</span>{{else}}<span class="badge off">Disabled</span>{{end}}</div></div>
 <div class="detailgrid">
 {{if and .CanManage .ShowEdit}}<section class="card wide" id="edit-group"><div class="cardhead"><div><div class="cardtitle">Edit ownership group</div><div class="cardsub">Change the display name or exact-match managed metadata conditions</div></div><a href="/groups/{{.Group.ID}}" class="btn">Close</a></div><div class="cardbody"><form method="post" action="/groups/{{.Group.ID}}" data-selector-form data-group-id="{{.Group.ID}}"><input type="hidden" name="action" value="update"><div class="detailform"><label>Group name<input class="input" name="name" value="{{.Group.Name}}" required maxlength="120"></label></div><div class="selector-rows" data-selector-rows>{{range $key,$value := .Group.Selector}}<div class="detailform selector-row"><input class="input" name="selector_key" value="{{$key}}" aria-label="Selector key" required><input class="input" name="selector_value" value="{{$value}}" aria-label="Selector value" required><button class="btn" type="button" data-remove-selector aria-label="Remove condition">−</button></div>{{end}}</div><div class="detailactions" style="margin-top:12px"><button class="btn" type="button" data-add-selector>＋ Add condition</button><button class="btn" type="button" data-preview-selector>Preview membership</button><button class="btn primary" type="submit">Validate and save</button></div><div class="tiny" data-selector-preview aria-live="polite"></div><p class="tiny">Changing a selector immediately recalculates membership. FleetAMP rejects overlap with another active ownership group.</p></form></div></section>{{end}}
-<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">The latest successfully deployed version is loaded by default</div></div><div class="topactions"><a class="btn" href="/blueprints/templates">Use Template</a><a class="btn" href="/blueprints?group_id={{.Group.ID}}">Use Blueprint</a><a class="btn" href="/migration?group_id={{.Group.ID}}">Import existing configuration</a></div></div><div class="cardbody">{{if .EditorError}}<div class="configerror" role="alert">{{.EditorError}}</div>{{end}}<div id="configuration-validation-error" class="configerror" role="alert" aria-live="polite" hidden></div>{{if .EditorVersions}}<form class="detailform" method="get" action="/groups/{{.Group.ID}}"><label>Base configuration version<select class="select" name="editor_base" onchange="this.form.submit()">{{range .EditorVersions}}<option value="{{.ID}}" {{if eq .ID $.EditorBaseID}}selected{{end}}>{{.Name}} v{{.Version}}{{if eq .ID $.EditorBaseID}} · selected{{end}}</option>{{end}}</select></label><noscript><button class="btn" type="submit">Load version</button></noscript></form><p class="tiny">FleetAMP selects the latest successfully deployed version. Choose an older saved version only when intentionally creating from that baseline.</p>{{end}}<form id="configuration-editor-form" class="configeditor" method="post" action="/groups/{{.Group.ID}}" data-has-baseline="{{if .EditorBaseID}}true{{else}}false{{end}}"><input type="hidden" name="action" value="create_configuration"><input type="hidden" name="base_configuration_id" value="{{.EditorBaseID}}"><textarea id="configuration-baseline" hidden>{{.EditorBaseline}}</textarea><input type="hidden" id="configuration-content" name="content"><div class="detailform"><label>Configuration name<input class="input" name="name" value="{{.EditorName}}" required maxlength="160"></label><label>New version<input class="input" id="configuration-new-version" name="version" value="{{.EditorVersion}}" data-baseline-version="{{.EditorVersion}}" placeholder="Enter a new version after changing configuration" required maxlength="80"></label></div>{{if .EditorSections}}<div class="editor-mode-switch"><div><strong>Configuration editing mode</strong><div class="tiny">Build pipelines visually, inspect the validated topology, or use YAML for advanced Collector settings.</div></div><div class="editor-mode-actions" role="tablist" aria-label="Configuration editing mode"><button class="editor-mode-button active" type="button" role="tab" aria-selected="true" data-editor-mode-button="yaml">YAML Editor</button><button class="editor-mode-button" type="button" role="tab" aria-selected="false" data-editor-mode-button="visual">Visual Builder</button><button class="editor-mode-button" type="button" role="tab" aria-selected="false" data-editor-mode-button="topology">Topology</button></div></div><div class="yaml-builder" data-editor-mode-panel="yaml"><p class="tiny">Each tab displays the selected baseline section. FleetAMP adds its Collector key. A matching wrapper such as <span class="code">receivers:</span> is accepted and normalized, while a section pasted into the wrong tab is rejected.</p><div class="section-tabs" role="tablist">{{range $index,$section := .EditorSections}}<button class="section-tab {{if eq $index 0}}active{{end}}" type="button" role="tab" data-section-tab="{{$section.Key}}">{{$section.Title}}</button>{{end}}<button class="section-tab" type="button" role="tab" data-section-tab="complete_preview">Complete YAML</button></div>{{range $index,$section := .EditorSections}}<section class="section-panel {{if eq $index 0}}active{{end}}" data-section-panel="{{$section.Key}}"><div class="section-heading"><div><strong>{{$section.Title}}</strong><div class="tiny">{{$section.Description}}</div></div>{{if $section.Editable}}<span class="badge ok">Editable</span>{{else}}<span class="badge off">Read-only by Admin policy</span>{{end}}</div><textarea class="section-editor" name="section_{{$section.Key}}" data-section-key="{{$section.Key}}" spellcheck="false" {{if not $section.Editable}}readonly{{end}}>{{$section.Content}}</textarea></section>{{end}}<section class="section-panel" data-section-panel="complete_preview"><div class="section-heading"><div><strong>Complete Collector YAML</strong><div class="tiny">Generated and validated from all configuration sections.</div></div><span class="badge off">Generated preview</span></div><textarea id="configuration-preview" class="section-editor preview-editor" readonly spellcheck="false">{{.EditorBaseline}}</textarea></section></div><div id="configuration-visual-builder" class="visual-builder" data-editor-mode-panel="visual" hidden><div class="visual-toolbar"><label>Signal<select class="select" id="visual-signal"><option value="traces">Traces</option><option value="metrics">Metrics</option><option value="logs">Logs</option><option value="profiles">Profiles</option></select></label><label>Pipeline name<input class="input" id="visual-pipeline-name" maxlength="80" placeholder="application"></label><label>Receiver<select class="select" id="visual-receiver"></select></label><label>Processors<select class="select" id="visual-processors" multiple size="3"></select></label><label>Exporter<select class="select" id="visual-exporter"></select></label><button class="btn visual-add" id="visual-add-pipeline" type="button">＋ Add pipeline</button></div><div class="tiny">Component settings remain in YAML Editor. The visual builder connects components that are already defined and permitted by configuration policy.</div><div id="visual-pipeline-list" class="visual-pipelines" aria-live="polite"></div><div id="visual-builder-warnings" class="visual-warning"></div></div><div id="configuration-topology" class="topology-view" data-editor-mode-panel="topology" hidden><div class="topology-toolbar"><label>Filter by signal<select class="select" id="topology-signal-filter"><option value="all">All signals</option><option value="traces">Traces</option><option value="metrics">Metrics</option><option value="logs">Logs</option><option value="profiles">Profiles</option></select></label><div class="topology-legend" aria-label="Topology legend"><span class="topology-legend-item"><span class="topology-legend-dot receiver"></span>Receiver</span><span class="topology-legend-item"><span class="topology-legend-dot processor"></span>Processor</span><span class="topology-legend-item"><span class="topology-legend-dot exporter"></span>Exporter</span><span class="topology-legend-item"><span class="topology-legend-dot connector"></span>Connector</span></div></div><div id="configuration-topology-summary" class="topology-summary"></div><div class="tiny">Read-only topology generated from the validated Collector YAML. Switch to Visual Builder or YAML Editor to make changes.</div><div id="configuration-topology-canvas" class="topology-canvas" aria-live="polite"></div><div id="configuration-topology-warnings" class="visual-warning"></div></div><div class="detailactions"><button class="btn" id="configuration-preview-button" type="button">Validate and preview</button>{{if .CanEditConfiguration}}<button class="btn primary" type="submit">Validate and save version</button>{{end}}</div>{{end}}<p class="tiny">Change at least one editable section and enter a new version. Unchanged content or a reused version is rejected.</p></form></div></section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">The latest successfully deployed version is loaded by default</div></div><div class="topactions"><a class="btn" href="/blueprints/templates">Use Template</a><a class="btn" href="/blueprints?group_id={{.Group.ID}}">Use Blueprint</a><a class="btn" href="/migration?group_id={{.Group.ID}}">Import existing configuration</a></div></div><div class="cardbody">{{if .EditorError}}<div class="configerror" role="alert">{{.EditorError}}</div>{{end}}<div id="configuration-validation-error" class="configerror" role="alert" aria-live="polite" hidden></div>{{if .EditorVersions}}<form class="detailform" method="get" action="/groups/{{.Group.ID}}"><label>Base configuration version<select class="select" name="editor_base" onchange="this.form.submit()">{{range .EditorVersions}}<option value="{{.ID}}" {{if eq .ID $.EditorBaseID}}selected{{end}}>{{.Name}} v{{.Version}}{{if eq .ID $.EditorBaseID}} · selected{{end}}</option>{{end}}</select></label><noscript><button class="btn" type="submit">Load version</button></noscript></form><p class="tiny">FleetAMP selects the latest successfully deployed version. Choose an older saved version only when intentionally creating from that baseline.</p>{{end}}<form id="configuration-editor-form" class="configeditor" method="post" action="/groups/{{.Group.ID}}" data-has-baseline="{{if .EditorBaseID}}true{{else}}false{{end}}"><input type="hidden" name="action" value="create_configuration"><input type="hidden" name="base_configuration_id" value="{{.EditorBaseID}}"><textarea id="configuration-baseline" hidden>{{.EditorBaseline}}</textarea><input type="hidden" id="configuration-content" name="content"><div class="detailform"><label>Configuration name<input class="input" name="name" value="{{.EditorName}}" required maxlength="160"></label><label>New version<input class="input" id="configuration-new-version" name="version" value="{{.EditorVersion}}" data-baseline-version="{{.EditorVersion}}" placeholder="Enter a new version after changing configuration" required maxlength="80"></label></div>{{if .EditorSections}}<div class="editor-mode-switch"><div><strong>Configuration editing mode</strong><div class="tiny">Build pipelines visually, inspect the validated topology, or use YAML for advanced Collector settings.</div></div><div class="editor-mode-actions" role="tablist" aria-label="Configuration editing mode"><button class="editor-mode-button active" type="button" role="tab" aria-selected="true" data-editor-mode-button="yaml">YAML Editor</button><button class="editor-mode-button" type="button" role="tab" aria-selected="false" data-editor-mode-button="visual">Visual Builder</button><button class="editor-mode-button" type="button" role="tab" aria-selected="false" data-editor-mode-button="topology">Topology</button></div></div><div class="yaml-builder" data-editor-mode-panel="yaml"><p class="tiny">Each tab displays the selected baseline section. FleetAMP adds its Collector key. A matching wrapper such as <span class="code">receivers:</span> is accepted and normalized, while a section pasted into the wrong tab is rejected. Start typing for suggestions, or press <span class="code">Ctrl+Space</span>; use <span class="code">Tab</span> or <span class="code">Enter</span> to complete.</p><div class="section-tabs" role="tablist">{{range $index,$section := .EditorSections}}<button class="section-tab {{if eq $index 0}}active{{end}}" type="button" role="tab" data-section-tab="{{$section.Key}}">{{$section.Title}}</button>{{end}}<button class="section-tab" type="button" role="tab" data-section-tab="complete_preview">Complete YAML</button></div>{{range $index,$section := .EditorSections}}<section class="section-panel {{if eq $index 0}}active{{end}}" data-section-panel="{{$section.Key}}"><div class="section-heading"><div><strong>{{$section.Title}}</strong><div class="tiny">{{$section.Description}}</div></div>{{if $section.Editable}}<span class="badge ok">Editable</span>{{else}}<span class="badge off">Read-only by Admin policy</span>{{end}}</div><textarea class="section-editor" name="section_{{$section.Key}}" data-section-key="{{$section.Key}}" spellcheck="false" {{if not $section.Editable}}readonly{{end}}>{{$section.Content}}</textarea></section>{{end}}<section class="section-panel" data-section-panel="complete_preview"><div class="section-heading"><div><strong>Complete Collector YAML</strong><div class="tiny">Generated and validated from all configuration sections.</div></div><span class="badge off">Generated preview</span></div><textarea id="configuration-preview" class="section-editor preview-editor" readonly spellcheck="false">{{.EditorBaseline}}</textarea></section></div><div id="configuration-visual-builder" class="visual-builder" data-editor-mode-panel="visual" hidden><div class="visual-toolbar"><label>Signal<select class="select" id="visual-signal"><option value="traces">Traces</option><option value="metrics">Metrics</option><option value="logs">Logs</option><option value="profiles">Profiles</option></select></label><label>Pipeline name<input class="input" id="visual-pipeline-name" maxlength="80" placeholder="application"></label><label>Receiver<select class="select" id="visual-receiver"></select></label><label>Processors<select class="select" id="visual-processors" multiple size="3"></select></label><label>Exporter<select class="select" id="visual-exporter"></select></label><button class="btn visual-add" id="visual-add-pipeline" type="button">＋ Add pipeline</button></div><div class="tiny">Component settings remain in YAML Editor. The visual builder connects components that are already defined and permitted by configuration policy.</div><div id="visual-pipeline-list" class="visual-pipelines" aria-live="polite"></div><div id="visual-builder-warnings" class="visual-warning"></div></div><div id="configuration-topology" class="topology-view" data-editor-mode-panel="topology" hidden><div class="topology-toolbar"><label>Filter by signal<select class="select" id="topology-signal-filter"><option value="all">All signals</option><option value="traces">Traces</option><option value="metrics">Metrics</option><option value="logs">Logs</option><option value="profiles">Profiles</option></select></label><div class="topology-legend" aria-label="Topology legend"><span class="topology-legend-item"><span class="topology-legend-dot receiver"></span>Receiver</span><span class="topology-legend-item"><span class="topology-legend-dot processor"></span>Processor</span><span class="topology-legend-item"><span class="topology-legend-dot exporter"></span>Exporter</span><span class="topology-legend-item"><span class="topology-legend-dot connector"></span>Connector</span></div></div><div id="configuration-topology-summary" class="topology-summary"></div><div class="tiny">Read-only topology generated from the validated Collector YAML. Switch to Visual Builder or YAML Editor to make changes.</div><div id="configuration-topology-canvas" class="topology-canvas" aria-live="polite"></div><div id="configuration-topology-warnings" class="visual-warning"></div></div><div class="detailactions"><button class="btn" id="configuration-preview-button" type="button">Validate and preview</button>{{if .CanEditConfiguration}}<button class="btn primary" type="submit">Validate and save version</button>{{end}}</div>{{end}}<p class="tiny">Change at least one editable section and enter a new version. Unchanged content or a reused version is rejected.</p></form></div></section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Saved configuration versions</div><div class="cardsub">Validated versions available to this group workflow</div></div></div>{{if .Configurations}}<div style="overflow:auto"><table><thead><tr><th>Name</th><th>Version</th><th>Hash</th><th>Created</th></tr></thead><tbody>{{range .Configurations}}<tr><td><a class="agentname" href="/configurations/{{.ID}}">{{.Name}}</a></td><td>{{.Version}}</td><td class="tiny code">{{.Hash}}</td><td>{{.CreatedAt}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No saved configuration versions yet.</div>{{end}}</section>
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Group deployment preview</div><div class="cardsub">Review the group, optional label filter, configuration flow and readiness before approval</div></div><span class="badge warn">Approval required</span></div><div class="cardbody"><form class="detailform" method="get" action="/groups/{{.Group.ID}}"><label>Saved configuration<select class="select" name="configuration_id" required><option value="">Select a version</option>{{range .Configurations}}<option value="{{.ID}}" {{if $.SelectedConfig}}{{if eq .ID $.SelectedConfig.ID}}selected{{end}}{{end}}>{{.Name}} v{{.Version}}</option>{{end}}</select></label><label>Optional label target<input class="input" name="labels" value="{{.LabelSelectorText}}" placeholder="team=payments, tier=backend"></label><button class="btn primary" type="submit">Preview targets</button></form><p class="tiny">Labels narrow this owned group using exact-match AND semantics. FleetAMP-managed labels override reported values. Leave empty to target every group member.</p>{{if not .Configurations}}<p class="tiny">Create and validate a configuration version in this group workspace first.</p>{{end}}
 {{if .SelectedConfig}}<p class="tiny">Selected: <a class="agentname" href="/configurations/{{.SelectedConfig.ID}}">{{.SelectedConfig.Name}} v{{.SelectedConfig.Version}}</a> · hash <code>{{.SelectedConfig.Hash}}</code></p>
