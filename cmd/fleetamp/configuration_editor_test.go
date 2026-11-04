@@ -146,6 +146,9 @@ func TestConfigurationEditorJavaScriptIsServed(t *testing.T) {
 		"visual-pipeline-list",
 		"visual-add-pipeline",
 		"pipelineYAML",
+		"configuration-topology-canvas",
+		"topology-signal-filter",
+		"renderTopology",
 		"form.requestSubmit",
 	} {
 		if !strings.Contains(script, expected) {
@@ -169,7 +172,10 @@ func TestConfigurationAuthoringIsOnlyShownOnGroupDetail(t *testing.T) {
 		`data-section-tab=`,
 		`data-editor-mode-button="yaml"`,
 		`data-editor-mode-button="visual"`,
+		`data-editor-mode-button="topology"`,
 		`id="configuration-visual-builder"`,
+		`id="configuration-topology"`,
+		`id="configuration-topology-summary"`,
 		`src="/assets/configuration-editor.js"`,
 	} {
 		if !strings.Contains(groupDetailHTML, expected) {
