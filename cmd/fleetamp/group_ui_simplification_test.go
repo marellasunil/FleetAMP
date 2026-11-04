@@ -144,3 +144,16 @@ func TestConfigurationTabsUseSegmentedNavigation(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigurationTopologyHasResponsiveComponentStyling(t *testing.T) {
+	for _, expected := range []string{
+		`.topology-view{display:grid`,
+		`.topology-node.connector`,
+		`.topology-summary`,
+		`@media(max-width:760px)`,
+	} {
+		if !strings.Contains(sectionEditorCSS, expected) {
+			t.Fatalf("topology styling is missing %q", expected)
+		}
+	}
+}
