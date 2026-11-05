@@ -23,9 +23,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
@@ -179,7 +181,13 @@ func loadAgentSnapshot(ctx context.Context, store *memory.AgentStore, dataDir st
 	}
 	var items []*agents.ManagedAgent
 	if err := json.Unmarshal(data, &items); err != nil {
-		return err
+		backup, recoveryErr := quarantineAgentSnapshot(dataDir, data)
+		if recoveryErr != nil {
+			return fmt.Errorf("recover invalid agent snapshot: %w", recoveryErr)
+		}
+		slog.Warn("invalid agent snapshot quarantined; starting with reconnectable empty inventory",
+			"component", "agents", "event", "snapshot_recovered", "backup", backup, "error", err)
+		return nil
 	}
 	now := time.Now().UTC()
 	for _, agent := range items {
@@ -194,6 +202,22 @@ func loadAgentSnapshot(ctx context.Context, store *memory.AgentStore, dataDir st
 		}
 	}
 	return nil
+}
+
+func quarantineAgentSnapshot(dataDir string, data []byte) (string, error) {
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	source := filepath.Join(dataDir, "agents.json")
+	backup := filepath.Join(dataDir, "agents.json.corrupt-"+stamp)
+	if err := os.Rename(source, backup); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(source, []byte("[]\n"), 0o640); err != nil {
+		return backup, err
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		slog.Warn("empty agent snapshot preserved", "component", "agents", "event", "snapshot_empty", "backup", backup)
+	}
+	return backup, nil
 }
 
 // saveAgentSnapshot atomically persists latest agent state by writing a temporary
