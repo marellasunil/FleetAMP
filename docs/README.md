@@ -24,6 +24,7 @@ and contributor verification. Start with the section that matches your task.
 | Configure and operate governed repository delivery | [Governed GitOps delivery](gitops.md) |
 | Verify the source, binary, database migration and optional image | [Local release verification](testing-v0.3.0.md) |
 | Validate the complete UI and governance journeys | [v0.3.0 E2E checklist](e2e-v0.3.0.md) |
+| Record test results and screenshots | [v0.3.0 E2E evidence report](e2e-v0.3.0-results.md) |
 
 ## Release documentation
 
@@ -39,9 +40,11 @@ and contributor verification. Start with the section that matches your task.
 2. Run the [local release verification](testing-v0.3.0.md).
 3. Test an upgrade using a copy of a v0.2 database.
 4. Run the [manual E2E checklist](e2e-v0.3.0.md).
-5. Fix only release-blocking defects and rerun the affected checks.
-6. Build the Docker image and release archives.
-7. Merge the release PR, tag `v0.3.0`, and publish the release notes and checksums.
+5. Complete the [E2E evidence report](e2e-v0.3.0-results.md) with sanitized
+   screenshots captured from the final build.
+6. Fix only release-blocking defects and rerun the affected checks.
+7. Build the Docker image and release archives.
+8. Merge the release PR, tag `v0.3.0`, and publish the release notes and checksums.
 
 The automated verification deliberately disables real Git provider writes. Use
 a dedicated test repository when exercising GitHub pull-request delivery.
