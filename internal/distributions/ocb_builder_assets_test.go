@@ -45,7 +45,7 @@ func TestOfflineOCBBuilderWorkflowIsManualAndAttested(t *testing.T) {
 	for _, required := range []string{
 		"workflow_dispatch:",
 		"^docker\\.io/library/golang:1\\.26\\.0-bookworm@sha256:",
-		"actions/attest-build-provenance@v3",
+		"actions/attest-build-provenance@v4",
 		"provenance: mode=max",
 		"sbom: true",
 		"packages: write",
