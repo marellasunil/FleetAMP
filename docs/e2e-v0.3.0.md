@@ -4,6 +4,11 @@ This checklist verifies the user-visible v0.3.0 workflows after the automated
 release gate passes. Record the result and evidence for every scenario before
 tagging the release.
 
+Use the [E2E evidence report](e2e-v0.3.0-results.md) while testing. Save
+sanitized screenshots under `docs/assets/v0.3.0/e2e/` and link them from the
+report. The report is designed to be committed as the release record after all
+scenarios pass.
+
 ## 1. Test boundaries
 
 - Use a disposable FleetAMP database or a copied v0.2 database.
@@ -37,6 +42,15 @@ tagging the release.
 | Database source | Fresh / copied v0.2 |
 | Git provider mode | Dry-run / GitHub PR |
 | Result | Pass / Fail |
+
+Recommended evidence naming:
+
+```text
+NN-area-action-result.png
+```
+
+For example, `04-migration-preview-valid.png`. Use sequential numbers so the
+screenshots remain in the same order as the test journey.
 
 ## 4. Core regression
 
@@ -186,3 +200,7 @@ The release candidate is ready only when:
 
 Attach the completed checklist, relevant screenshots and sanitized logs to the
 release PR. Do not attach tokens, passwords, private keys or raw secret values.
+
+Copy the final decision and any accepted limitations into the
+[E2E evidence report](e2e-v0.3.0-results.md). Create the `v0.3.0` tag only after
+the report records a passing result against the final `main` commit.
