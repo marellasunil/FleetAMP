@@ -143,6 +143,7 @@ func TestConfigurationEditorJavaScriptIsServed(t *testing.T) {
 		"configuration-editor-form",
 		"configuration-validation-error",
 		"configuration-reference-status",
+		"Go to error",
 		"/api/v1/configurations/sections/compose",
 		"/api/v1/configurations/sections/references",
 		"scheduleReferenceValidation",

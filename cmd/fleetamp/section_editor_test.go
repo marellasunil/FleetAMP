@@ -92,6 +92,28 @@ func TestReferenceValidationEndpointRejectsUndefinedComponent(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `references undefined exporter \"missing\"`) {
 		t.Fatalf("response does not identify undefined reference: %s", response.Body.String())
 	}
+	for _, expected := range []string{`"section":"service_pipelines"`, `"section_title":"Service pipelines"`, `"line":3`, `"column":15`, `"severity":"error"`} {
+		if !strings.Contains(response.Body.String(), expected) {
+			t.Fatalf("response is missing diagnostic %s: %s", expected, response.Body.String())
+		}
+	}
+}
+
+func TestReferenceValidationEndpointLocatesInvalidYAMLInEditorSection(t *testing.T) {
+	mux := http.NewServeMux()
+	registerSectionEditorRoutes(mux, nil, configs.NewValidator(""), nil)
+	body := `{"baseline":"","sections":{"receivers":"otlp:\n  protocols: [\n","service_pipelines":"traces:\n  receivers: [otlp]\n  exporters: [debug]\n","exporters":"debug: {}\n"}}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/configurations/sections/references", strings.NewReader(body))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, expected := range []string{`"section":"receivers"`, `"section_title":"Receivers"`, `"line":2`, `"severity":"error"`} {
+		if !strings.Contains(response.Body.String(), expected) {
+			t.Fatalf("response is missing diagnostic %s: %s", expected, response.Body.String())
+		}
+	}
 }
 
 func TestReferenceValidationEndpointAcceptsCompatibleComponents(t *testing.T) {
