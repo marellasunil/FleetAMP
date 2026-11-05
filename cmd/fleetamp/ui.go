@@ -142,6 +142,7 @@ const configurationEditorJS = `(() => {
   const versionInput = document.getElementById("configuration-new-version");
   const errorBox = document.getElementById("configuration-validation-error");
   const referenceStatus = document.getElementById("configuration-reference-status");
+  const distributionProfile = document.getElementById("configuration-distribution-profile");
   if (!form || !content || !baseline || !errorBox) return;
 
   const submitButton = form.querySelector('button[type="submit"]');
@@ -234,6 +235,65 @@ const configurationEditorJS = `(() => {
       ["traces:", "Collector internal trace settings"]
     ]
   };
+  const componentProperties = {
+    "receivers:otlp": [["protocols:", "Enabled OTLP transports"]],
+    "receivers:hostmetrics": [["collection_interval: 60s", "Host metric collection interval"], ["scrapers:", "Host metric scraper configuration"]],
+    "receivers:filelog": [["include: []", "Files to include"], ["exclude: []", "Files to exclude"], ["start_at: end", "Initial read position"], ["operators: []", "Log parsing operators"]],
+    "receivers:prometheus": [["config:", "Prometheus scrape configuration"]],
+    "processors:batch": [["timeout: 200ms", "Maximum batch wait"], ["send_batch_size: 8192", "Preferred batch size"], ["send_batch_max_size: 0", "Maximum batch size"]],
+    "processors:memory_limiter": [["check_interval: 1s", "Memory check interval"], ["limit_mib: 512", "Hard memory limit"], ["spike_limit_mib: 128", "Allowed memory spike"]],
+    "processors:resource": [["attributes: []", "Resource attribute actions"]],
+    "processors:attributes": [["actions: []", "Telemetry attribute actions"]],
+    "processors:filter": [["error_mode: propagate", "OTTL error handling"], ["traces:", "Trace filter conditions"], ["metrics:", "Metric filter conditions"], ["logs:", "Log filter conditions"]],
+    "processors:transform": [["error_mode: propagate", "OTTL error handling"], ["trace_statements: []", "Trace transformations"], ["metric_statements: []", "Metric transformations"], ["log_statements: []", "Log transformations"]],
+    "exporters:otlp": [["endpoint:", "OTLP/gRPC destination"], ["headers:", "Authentication headers using secret references"], ["tls:", "TLS settings"], ["compression: gzip", "Payload compression"]],
+    "exporters:otlphttp": [["endpoint:", "OTLP/HTTP destination"], ["headers:", "Authentication headers using secret references"], ["tls:", "TLS settings"], ["compression: gzip", "Payload compression"]],
+    "exporters:prometheusremotewrite": [["endpoint:", "Prometheus remote-write destination"], ["headers:", "Authentication headers using secret references"], ["tls:", "TLS settings"]],
+    "exporters:debug": [["verbosity: normal", "Diagnostic output detail"], ["sampling_initial: 2", "Initially logged items"], ["sampling_thereafter: 500", "Later sampling interval"]],
+    "extensions:health_check": [["endpoint: 0.0.0.0:13133", "Health endpoint"]],
+    "extensions:pprof": [["endpoint: 0.0.0.0:1777", "Profiling endpoint"]],
+    "extensions:zpages": [["endpoint: 0.0.0.0:55679", "Diagnostic pages endpoint"]],
+    "connectors:routing": [["default_pipelines: []", "Fallback pipelines"], ["table: []", "Routing rules"]]
+  };
+  const propertyValues = {
+    start_at: [["beginning", "Read existing and new entries"], ["end", "Read only new entries"]],
+    compression: [["gzip", "Gzip compression"], ["none", "No compression"]],
+    error_mode: [["propagate", "Return transformation errors"], ["ignore", "Ignore and continue"], ["silent", "Continue without error logs"]],
+    verbosity: [["basic", "Basic diagnostic output"], ["normal", "Normal diagnostic output"], ["detailed", "Detailed diagnostic output"]],
+    insecure: [["false", "Require TLS"], ["true", "Disable TLS; development only"]],
+    insecure_skip_verify: [["false", "Verify the server certificate"], ["true", "Skip verification; development only"]]
+  };
+  const selectedDistributionComponents = (sectionKey) => {
+    if (!distributionProfile || !distributionProfile.value) return null;
+    const option = distributionProfile.selectedOptions[0];
+    const value = option && option.dataset[sectionKey];
+    return new Set((value || "").split(",").map((item) => item.trim()).filter(Boolean));
+  };
+  const distributionOptions = (sectionKey, options) => {
+    const allowed = selectedDistributionComponents(sectionKey);
+    if (!allowed) return options;
+    return options.filter((option) => {
+      const component = option[0].replace(/^-\s+/, "").split(":", 1)[0].split("/", 1)[0];
+      return allowed.has(component);
+    }).map((option) => [option[0], option[1] + " · included in selected package"]);
+  };
+  const propertyContext = (editor, before) => {
+    const sectionKey = editor.dataset.sectionKey;
+    if (!["receivers", "processors", "exporters", "extensions", "connectors"].includes(sectionKey)) return null;
+    const lines = before.split("\n");
+    const currentLine = lines[lines.length - 1];
+    const indent = (currentLine.match(/^\s*/) || [""])[0].length;
+    if (indent < 2) return null;
+    let component = "";
+    for (let index = lines.length - 2; index >= 0; index -= 1) {
+      const match = lines[index].match(/^ {0,2}([A-Za-z0-9_.\/-]+):(?:\s|$)/);
+      if (match) { component = match[1].split("/", 1)[0]; break; }
+    }
+    if (!component) return null;
+    const valueMatch = currentLine.match(/^\s*([A-Za-z0-9_.-]+):\s+[A-Za-z0-9_.-]*$/);
+    if (valueMatch && propertyValues[valueMatch[1]]) return propertyValues[valueMatch[1]];
+    return componentProperties[sectionKey + ":" + component] || [];
+  };
   const componentTypeLabels = {
     receivers: "Receiver",
     processors: "Processor",
@@ -318,7 +378,9 @@ const configurationEditorJS = `(() => {
     if (reference) {
       return sectionComponentNames(referenceSections(reference.field), reference.used, reference.prefixDash);
     }
-    return yamlCompletions[editor.dataset.sectionKey] || [];
+    const properties = propertyContext(editor, before);
+    if (properties && properties.length) return properties;
+    return distributionOptions(editor.dataset.sectionKey, yamlCompletions[editor.dataset.sectionKey] || []);
   };
   const completionStates = new WeakMap();
   const closeCompletion = (editor) => {
@@ -618,6 +680,43 @@ const configurationEditorJS = `(() => {
     const lineHeight = parseFloat(window.getComputedStyle(editor).lineHeight) || 18;
     editor.scrollTop = Math.max(0, (line - 3) * lineHeight);
   };
+  const referenceSection = (kind) => ({receiver: "receivers", processor: "processors", exporter: "exporters", extension: "extensions"})[kind] || "";
+  const canCreateReference = (diagnostic) => {
+    const section = referenceSection(diagnostic.reference_type);
+    const editor = editors.find((candidate) => candidate.dataset.sectionKey === section);
+    if (!section || !editor || editor.readOnly) return false;
+    const allowed = selectedDistributionComponents(section);
+    return !allowed || allowed.has(String(diagnostic.reference_name || "").split("/", 1)[0]);
+  };
+  const createMissingReference = (diagnostic) => {
+    const section = referenceSection(diagnostic.reference_type);
+    const editor = editors.find((candidate) => candidate.dataset.sectionKey === section);
+    if (!editor || editor.readOnly || !diagnostic.reference_name) return;
+    const suffix = editor.value && !editor.value.endsWith("\n") ? "\n" : "";
+    editor.value += suffix + diagnostic.reference_name + ": {}\n";
+    editor.dispatchEvent(new Event("input", {bubbles: true}));
+    selectTab(section);
+    editor.focus();
+    editor.setSelectionRange(editor.value.length, editor.value.length);
+  };
+  const removeInvalidReference = (diagnostic) => {
+    const editor = editors.find((candidate) => candidate.dataset.sectionKey === diagnostic.section);
+    if (!editor || editor.readOnly || !diagnostic.reference_name) return;
+    const lines = editor.value.split("\n");
+    const index = Math.max(0, Math.min((Number(diagnostic.line) || 1) - 1, lines.length - 1));
+    const name = diagnostic.reference_name;
+    if (/^\s*-\s*/.test(lines[index])) {
+      lines.splice(index, 1);
+    } else if (lines[index].includes("[") && lines[index].includes("]")) {
+      lines[index] = lines[index].replace(/\[([^\]]*)\]/, (_match, values) => "[" + values.split(",").map((value) => value.trim()).filter((value) => value.replace(/^['\"]|['\"]$/g, "") !== name).join(", ") + "]");
+    } else {
+      lines[index] = lines[index].replace(name, "");
+    }
+    editor.value = lines.join("\n");
+    editor.dispatchEvent(new Event("input", {bubbles: true}));
+    selectTab(diagnostic.section);
+    editor.focus();
+  };
   const renderReferenceStatus = (state, message, diagnostics) => {
     if (!referenceStatus) return;
     referenceStatus.hidden = !message;
@@ -627,10 +726,16 @@ const configurationEditorJS = `(() => {
       return;
     }
     referenceStatus.innerHTML = '<div class="diagnostic-list">' + diagnostics.map((diagnostic, index) =>
-      '<div class="diagnostic-item"><div class="diagnostic-message">' + escapeHTML(diagnostic.message || message) + '<span class="diagnostic-location">' + escapeHTML(diagnostic.section_title || diagnostic.section) + ' · line ' + Number(diagnostic.line || 1) + ', column ' + Number(diagnostic.column || 1) + '</span></div><button class="diagnostic-action" type="button" data-diagnostic-index="' + index + '">Go to error</button></div>'
+      '<div class="diagnostic-item"><div class="diagnostic-message">' + escapeHTML(diagnostic.message || message) + '<span class="diagnostic-location">' + escapeHTML(diagnostic.section_title || diagnostic.section) + ' · line ' + Number(diagnostic.line || 1) + ', column ' + Number(diagnostic.column || 1) + '</span></div><div class="diagnostic-actions"><button class="diagnostic-action" type="button" data-diagnostic-index="' + index + '">Go to error</button>' + (diagnostic.code === "undefined_reference" ? '<button class="diagnostic-action secondary" type="button" data-create-reference="' + index + '"' + (canCreateReference(diagnostic) ? '' : ' disabled title="Component is unavailable in the selected package or section is read-only"') + '>Create component</button><button class="diagnostic-action secondary" type="button" data-remove-reference="' + index + '">Remove reference</button>' : '') + '</div></div>'
     ).join("") + '</div>';
     referenceStatus.querySelectorAll("[data-diagnostic-index]").forEach((button) =>
       button.addEventListener("click", () => goToDiagnostic(diagnostics[Number(button.dataset.diagnosticIndex)]))
+    );
+    referenceStatus.querySelectorAll("[data-create-reference]").forEach((button) =>
+      button.addEventListener("click", () => createMissingReference(diagnostics[Number(button.dataset.createReference)]))
+    );
+    referenceStatus.querySelectorAll("[data-remove-reference]").forEach((button) =>
+      button.addEventListener("click", () => removeInvalidReference(diagnostics[Number(button.dataset.removeReference)]))
     );
   };
   const validateReferences = async (requestID) => {
@@ -790,5 +895,9 @@ const groupDetailBaseHTML = `<!doctype html><html><head><meta charset="utf-8"><m
 <section class="card wide"><div class="cardhead"><div><div class="cardtitle">Deployment history</div><div class="cardsub">User-governed deployments and rollbacks across current group members; drift reconciliations remain in Audit logs</div></div></div>{{if .DeploymentHistory}}<div style="overflow:auto"><table><thead><tr><th>Agent</th><th>Configuration</th><th>Action</th><th>Status</th><th>Created</th><th>Applied / Failed</th></tr></thead><tbody>{{range .DeploymentHistory}}<tr><td><a href="/agents/{{.AgentInstanceUID}}" class="code">{{.AgentInstanceUID}}</a></td><td><strong>{{.ConfigurationName}} v{{.ConfigurationVersion}}</strong></td><td>{{.Action}}</td><td>{{.Status}}{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</td><td>{{.CreatedAt}}</td><td>{{if .AppliedAt}}{{.AppliedAt}}{{else if .FailedAt}}{{.FailedAt}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No deployment history exists for current group members.</div>{{end}}</section>
 </div></div></main></div><script src="/assets/configuration-editor.js" defer></script><script src="/assets/group-selectors.js" defer></script></body></html>`
 
-var groupDetailHTML = strings.ReplaceAll(groupDetailBaseHTML, "Use Blueprint", "Open Configuration Builder")
+var groupDetailHTML = strings.ReplaceAll(
+	strings.ReplaceAll(groupDetailBaseHTML, "Use Blueprint", "Open Configuration Builder"),
+	`</div>{{if .EditorSections}}<div class="editor-mode-switch">`,
+	`</div>{{if .EditorSections}}{{if .DistributionProfiles}}<label style="display:block;margin-top:12px">Collector package completion profile<select class="select" id="configuration-distribution-profile"><option value="">General Collector catalog</option>{{range .DistributionProfiles}}<option value="{{.ID}}" data-receivers="{{range .Components.Receivers}}{{.}},{{end}}" data-processors="{{range .Components.Processors}}{{.}},{{end}}" data-exporters="{{range .Components.Exporters}}{{.}},{{end}}" data-extensions="{{range .Components.Extensions}}{{.}},{{end}}" data-connectors="{{range .Components.Connectors}}{{.}},{{end}}">{{.Name}} · Collector {{.Version}}</option>{{end}}</select><span class="tiny">Limits component suggestions to the immutable package inventory. Validation remains authoritative.</span></label>{{end}}<div class="editor-mode-switch">`,
+)
 var groupDetailPage = template.Must(template.New("group-detail-modern").Parse(groupDetailHTML))

@@ -144,6 +144,14 @@ func TestConfigurationEditorJavaScriptIsServed(t *testing.T) {
 		"configuration-validation-error",
 		"configuration-reference-status",
 		"Go to error",
+		"componentProperties",
+		"propertyValues",
+		"selectedDistributionComponents",
+		"distributionOptions",
+		"Create component",
+		"Remove reference",
+		"createMissingReference",
+		"removeInvalidReference",
 		"/api/v1/configurations/sections/compose",
 		"/api/v1/configurations/sections/references",
 		"scheduleReferenceValidation",
@@ -196,6 +204,14 @@ func TestConfigurationAuthoringIsOnlyShownOnGroupDetail(t *testing.T) {
 	} {
 		if !strings.Contains(groupDetailHTML, expected) {
 			t.Fatalf("group detail editor is missing %q", expected)
+		}
+	}
+}
+
+func TestGroupConfigurationEditorOffersDistributionCompletionProfile(t *testing.T) {
+	for _, expected := range []string{"configuration-distribution-profile", "General Collector catalog", "Limits component suggestions to the immutable package inventory"} {
+		if !strings.Contains(groupDetailHTML, expected) {
+			t.Fatalf("group editor is missing %q", expected)
 		}
 	}
 }

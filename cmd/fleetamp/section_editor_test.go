@@ -92,7 +92,7 @@ func TestReferenceValidationEndpointRejectsUndefinedComponent(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `references undefined exporter \"missing\"`) {
 		t.Fatalf("response does not identify undefined reference: %s", response.Body.String())
 	}
-	for _, expected := range []string{`"section":"service_pipelines"`, `"section_title":"Service pipelines"`, `"line":3`, `"column":15`, `"severity":"error"`} {
+	for _, expected := range []string{`"section":"service_pipelines"`, `"section_title":"Service pipelines"`, `"line":3`, `"column":15`, `"severity":"error"`, `"code":"undefined_reference"`, `"reference_type":"exporter"`, `"reference_name":"missing"`} {
 		if !strings.Contains(response.Body.String(), expected) {
 			t.Fatalf("response is missing diagnostic %s: %s", expected, response.Body.String())
 		}
