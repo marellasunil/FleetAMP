@@ -601,11 +601,37 @@ const configurationEditorJS = `(() => {
     if (preview) preview.value = result.content;
     return result;
   };
-  const renderReferenceStatus = (state, message) => {
+  const goToDiagnostic = (diagnostic) => {
+    const editor = editors.find((candidate) => candidate.dataset.sectionKey === diagnostic.section);
+    if (!editor) return;
+    setMode("yaml");
+    selectTab(diagnostic.section);
+    const lines = editor.value.split("\n");
+    const line = Math.max(1, Math.min(Number(diagnostic.line) || 1, lines.length));
+    const column = Math.max(1, Number(diagnostic.column) || 1);
+    let lineStart = 0;
+    for (let index = 0; index < line - 1; index += 1) lineStart += lines[index].length + 1;
+    const start = Math.min(lineStart + column - 1, lineStart + lines[line - 1].length);
+    const end = lineStart + lines[line - 1].length;
+    editor.focus();
+    editor.setSelectionRange(start, end);
+    const lineHeight = parseFloat(window.getComputedStyle(editor).lineHeight) || 18;
+    editor.scrollTop = Math.max(0, (line - 3) * lineHeight);
+  };
+  const renderReferenceStatus = (state, message, diagnostics) => {
     if (!referenceStatus) return;
     referenceStatus.hidden = !message;
     referenceStatus.dataset.state = state;
-    referenceStatus.textContent = message;
+    if (!diagnostics || !diagnostics.length) {
+      referenceStatus.textContent = message;
+      return;
+    }
+    referenceStatus.innerHTML = '<div class="diagnostic-list">' + diagnostics.map((diagnostic, index) =>
+      '<div class="diagnostic-item"><div class="diagnostic-message">' + escapeHTML(diagnostic.message || message) + '<span class="diagnostic-location">' + escapeHTML(diagnostic.section_title || diagnostic.section) + ' · line ' + Number(diagnostic.line || 1) + ', column ' + Number(diagnostic.column || 1) + '</span></div><button class="diagnostic-action" type="button" data-diagnostic-index="' + index + '">Go to error</button></div>'
+    ).join("") + '</div>';
+    referenceStatus.querySelectorAll("[data-diagnostic-index]").forEach((button) =>
+      button.addEventListener("click", () => goToDiagnostic(diagnostics[Number(button.dataset.diagnosticIndex)]))
+    );
   };
   const validateReferences = async (requestID) => {
     const response = await fetch("/api/v1/configurations/sections/references", {
@@ -627,7 +653,7 @@ const configurationEditorJS = `(() => {
     }
     const message = result.error || "Reference validation is unavailable.";
     if (/references undefined (receiver|processor|exporter|extension)/i.test(message)) {
-      renderReferenceStatus("invalid", message);
+      renderReferenceStatus("invalid", message, result.diagnostics || []);
     } else {
       renderReferenceStatus("paused", "Reference check paused until the current YAML is complete.");
     }
