@@ -329,7 +329,7 @@ func main() {
 	registerSectionEditorRoutes(mux, sectionPolicyStore, configValidator, auth)
 	registerDriftPolicyRoutes(mux, driftPolicyStore, auth)
 	registerAuditRoutes(mux, auditStore)
-	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
+	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, distributionStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 	registerMembershipRoutes(mux, membershipChangeStore, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, adapter, auth, dataDir)
 	registerOwnershipLifecycleRoutes(mux, membershipChangeStore, groupStore, auth)
 	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)

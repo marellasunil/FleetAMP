@@ -21,6 +21,7 @@ import (
 
 	"github.com/marellasunil/FleetAMP/internal/agents"
 	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/FleetAMP/internal/distributions"
 	"github.com/marellasunil/FleetAMP/internal/groups"
 	fleetopamp "github.com/marellasunil/FleetAMP/internal/opamp"
 	"github.com/marellasunil/FleetAMP/internal/storage"
@@ -120,6 +121,14 @@ type groupDetailView struct {
 	CanEditConfiguration bool
 	CanDeleteAgents      bool
 	EligibleReviewers    []reviewerOption
+	DistributionProfiles []distributionCompletionProfile
+}
+
+type distributionCompletionProfile struct {
+	ID         string
+	Name       string
+	Version    string
+	Components distributions.ComponentSet
 }
 
 const defaultGroupConfiguration = `receivers:
@@ -582,7 +591,7 @@ func groupNamesForAgent(ctx context.Context, store storage.GroupStore, agent *ag
 }
 
 // registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
-func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
+func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, distributionStore storage.DistributionStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
 	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
 	mux.HandleFunc("/agents/{uid}/group", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -890,7 +899,7 @@ func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agen
 		}
 	})
 
-	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, validator, adapter, sectionPolicyStore, auth, notifier, dataDir)
+	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, distributionStore, validator, adapter, sectionPolicyStore, auth, notifier, dataDir)
 }
 
 // newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
@@ -1082,7 +1091,7 @@ func groupLabelCatalog(items []*groups.Group) []labelCatalogItem {
 }
 
 // registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
-func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
+func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, distributionStore storage.DistributionStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
 	// /groups displays all groups and accepts creation form submissions.
 	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/groups" {
@@ -1741,6 +1750,25 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 		editorBaseID := ""
 		editorName := group.Name + ".yaml"
 		editorVersion := ""
+		distributionProfiles := []distributionCompletionProfile{}
+		if distributionStore != nil {
+			published, distributionErr := distributionStore.List(r.Context())
+			if distributionErr != nil {
+				internalServerError(w, distributionErr)
+				return
+			}
+			for _, item := range published {
+				distributionProfiles = append(distributionProfiles, distributionCompletionProfile{
+					ID: item.ID, Name: item.Name, Version: item.CollectorVersion, Components: item.Components,
+				})
+			}
+			sort.Slice(distributionProfiles, func(i, j int) bool {
+				if distributionProfiles[i].Name == distributionProfiles[j].Name {
+					return distributionProfiles[i].Version > distributionProfiles[j].Version
+				}
+				return distributionProfiles[i].Name < distributionProfiles[j].Name
+			})
+		}
 		if len(available) > 0 {
 			selectedBase := preferredGroupConfiguration(available, deploymentHistory, strings.TrimSpace(r.URL.Query().Get("editor_base")))
 			editorBaseline = selectedBase.Content
@@ -1763,6 +1791,7 @@ func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentSto
 			EditorName:           editorName,
 			EditorVersion:        editorVersion,
 			EditorVersions:       available,
+			DistributionProfiles: distributionProfiles,
 			CanEditConfiguration: true,
 			CanDeleteAgents:      currentRole(auth, r) == roleAdmin || currentRole(auth, r) == roleGroupOwner,
 		}
