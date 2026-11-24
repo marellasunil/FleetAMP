@@ -9,7 +9,7 @@ OTelPlane is a lightweight, self-hosted, open-source fleet management control pl
 OTelPlane is an independent community project and is not an official OpenTelemetry or Grafana project.
 
 Documentation: [documentation index](docs/README.md) and
-[docs.otelplane.com](https://docs.otelplane.com).
+[otelplane.com](https://otelplane.com).
 
 For local evaluation, use the [Compose lab](deploy/compose/README.md). Before
 publishing v0.3.0, run the [automated release verification](docs/testing-v0.3.0.md)
@@ -75,7 +75,7 @@ opamp-go / OpAMP protobufs
 
 Only the OpAMP adapter should understand OpAMP-specific wire types. The rest of OTelPlane uses protocol-independent domain models.
 
-See the [detailed architecture documentation](https://docs.otelplane.com/docs/development/internal-architecture).
+See the [detailed architecture documentation](https://otelplane.com/docs/development/internal-architecture).
 
 ## Managed agent model
 
@@ -311,15 +311,15 @@ environment. Protect the web UI/API and OpAMP traffic with OTelPlane native
 TLS or explicit TLS termination at a trusted proxy/load balancer. Optional
 OpAMP mTLS verifies agent client certificates. Never commit credentials or
 private keys. See the
-[security hardening guide](https://docs.otelplane.com/docs/operations/security-hardening)
-and [TLS guide](https://docs.otelplane.com/docs/operations/transport-tls).
+[security hardening guide](https://otelplane.com/docs/operations/security-hardening)
+and [TLS guide](https://otelplane.com/docs/operations/transport-tls).
 
 Security checks run tests, the race detector, `go vet`, and `govulncheck` in
 GitHub Actions. Dependabot monitors Go modules and workflow actions.
 
-For upgrading the upstream OpAMP Go dependency, see the [OpAMP upgrade guide](https://docs.otelplane.com/docs/operations/opamp-upgrade).
+For upgrading the upstream OpAMP Go dependency, see the [OpAMP upgrade guide](https://otelplane.com/docs/operations/opamp-upgrade).
 
-For OS-specific deployment models and initial sizing requirements, see the [OS deployment guide](https://docs.otelplane.com/docs/operations/os-deployment). Linux/systemd is currently validated; macOS/Windows guidance is documented but not yet release-tested.
+For OS-specific deployment models and initial sizing requirements, see the [OS deployment guide](https://otelplane.com/docs/operations/os-deployment). Linux/systemd is currently validated; macOS/Windows guidance is documented but not yet release-tested.
 
 ## Roadmap
 
@@ -359,4 +359,4 @@ OTelPlane intends to build on and interoperate with the OpenTelemetry ecosystem,
 
 ## Program structure
 
-For a source-code map and explanation of how OTelPlane components fit together, see the [program structure guide](https://docs.otelplane.com/docs/development/program-structure).
+For a source-code map and explanation of how OTelPlane components fit together, see the [program structure guide](https://otelplane.com/docs/development/program-structure).

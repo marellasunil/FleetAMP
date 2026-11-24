@@ -14,6 +14,7 @@ CREDENTIAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/otelplane/credentials"
 TLS_DIR="${OTELPLANE_TLS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/otelplane/tls}"
 PEPPER_CREDENTIAL="$CREDENTIAL_DIR/otelplane-server-pepper.cred"
 BACKUP_ROOT="$STATE_DIR/backups"
+PACKAGED_BINARY="$REPO_ROOT/otelplane"
 HEALTH_URL="${OTELPLANE_HEALTH_URL:-http://127.0.0.1:8080/health}"
 HEALTH_TIMEOUT="${OTELPLANE_HEALTH_TIMEOUT:-30}"
 ACTION="${1:-upgrade}"
@@ -90,7 +91,6 @@ fi
 [[ "$ACTION" == "install" || "$ACTION" == "upgrade" ]] ||
   fail "usage: $0 [install|upgrade|rollback [backup-directory]]"
 
-require_command go
 require_command curl
 require_command systemctl
 require_command install
@@ -100,17 +100,29 @@ require_command systemd-creds
 
 ensure_server_pepper
 
-BUILD_DIR="$(mktemp -d)"
-trap 'rm -rf "$BUILD_DIR"' EXIT
+INSTALL_SOURCE="$PACKAGED_BINARY"
+WORKING_DIR="$STATE_DIR"
+DATA_DIR="$STATE_DIR/data"
 
-log "Running Go tests"
-(cd "$REPO_ROOT" && go test ./...)
+if [[ -x "$PACKAGED_BINARY" ]]; then
+  log "Using packaged OTelPlane binary"
+else
+  require_command go
+  BUILD_DIR="$(mktemp -d)"
+  trap 'rm -rf "$BUILD_DIR"' EXIT
 
-log "Building OTelPlane"
-(cd "$REPO_ROOT" && go build -trimpath -o "$BUILD_DIR/otelplane" ./cmd/otelplane)
+  log "Running Go tests"
+  (cd "$REPO_ROOT" && go test ./...)
+
+  log "Building OTelPlane from source"
+  (cd "$REPO_ROOT" && go build -trimpath -o "$BUILD_DIR/otelplane" ./cmd/otelplane)
+  INSTALL_SOURCE="$BUILD_DIR/otelplane"
+  WORKING_DIR="$REPO_ROOT"
+  DATA_DIR="$REPO_ROOT/data"
+fi
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="$BACKUP_ROOT/$TIMESTAMP"
-mkdir -p "$BACKUP_DIR" "$UNIT_DIR" "$OVERRIDE_DIR" "$STATE_DIR/log" "$TLS_DIR"
+mkdir -p "$BACKUP_DIR" "$UNIT_DIR" "$OVERRIDE_DIR" "$STATE_DIR/log" "$DATA_DIR" "$TLS_DIR"
 chmod 0700 "$TLS_DIR"
 
 SERVICE_WAS_ACTIVE=false
@@ -125,17 +137,17 @@ systemctl_user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
 [[ -f "$UNIT_PATH" ]] && cp -a "$UNIT_PATH" "$BACKUP_DIR/otelplane.service"
 [[ -f "$OVERRIDE_PATH" ]] &&
   cp -a "$OVERRIDE_PATH" "$BACKUP_DIR/10-local-paths.conf"
-if [[ -d "$REPO_ROOT/data" ]]; then
-  tar -C "$REPO_ROOT" -czf "$BACKUP_DIR/data.tar.gz" data
+if [[ -d "$DATA_DIR" ]]; then
+  tar -C "$WORKING_DIR" -czf "$BACKUP_DIR/data.tar.gz" data
 fi
 
-install -D -m 0755 "$BUILD_DIR/otelplane" "$BINARY_PATH"
+install -D -m 0755 "$INSTALL_SOURCE" "$BINARY_PATH"
 install -D -m 0644 "$REPO_ROOT/deploy/systemd/otelplane-user.service" "$UNIT_PATH"
 printf '%s\n' \
   '[Service]' \
-  "WorkingDirectory=$REPO_ROOT" \
-  "Environment=OTELPLANE_DATA_DIR=$REPO_ROOT/data" \
-  "Environment=OTELPLANE_DATABASE_PATH=$REPO_ROOT/data/otelplane.db" \
+  "WorkingDirectory=$WORKING_DIR" \
+  "Environment=OTELPLANE_DATA_DIR=$DATA_DIR" \
+  "Environment=OTELPLANE_DATABASE_PATH=$DATA_DIR/otelplane.db" \
   >"$OVERRIDE_PATH"
 
 systemctl_user daemon-reload
