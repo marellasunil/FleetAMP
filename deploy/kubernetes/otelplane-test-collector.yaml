@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelplane-test-collector-config
+  namespace: observability
+data:
+  base.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: {endpoint: '127.0.0.1:14317'}
+          http: {endpoint: '127.0.0.1:14318'}
+    processors:
+      batch: {}
+    exporters:
+      debug: {verbosity: basic}
+    service:
+      pipelines:
+        traces: {receivers: [otlp], processors: [batch], exporters: [debug]}
+        metrics: {receivers: [otlp], processors: [batch], exporters: [debug]}
+        logs: {receivers: [otlp], processors: [batch], exporters: [debug]}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: otelplane-test-collector-data
+  namespace: observability
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests: {storage: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelplane-test-collector
+  namespace: observability
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: otelplane-test-collector}
+  template:
+    metadata:
+      labels: {app: otelplane-test-collector}
+    spec:
+      initContainers:
+      - name: prepare-supervisor-config
+        image: docker.io/library/alpine:3.22
+        command: [sh, -ec]
+        args:
+        - |
+          printf 'server:\n  endpoint: ws://otelplane-lab.observability.svc.cluster.local:4320/v1/opamp\n  headers:\n    Authorization: "Bearer %s"\ncapabilities:\n  reports_effective_config: true\n  reports_health: true\n  reports_remote_config: true\n  accepts_remote_config: false\n  reports_available_components: true\nagent:\n  executable: /otelcol-contrib\n  config_files:\n    - /etc/otelcol/base.yaml\n  description:\n    non_identifying_attributes:\n      otelplane.agent.id: otelplane-test-collector-lab\nstorage:\n  directory: /var/lib/otel-supervisor\nhealthcheck:\n  endpoint: 127.0.0.1:13133\n' "$(cat /secrets/opamp-token)" > /generated/supervisor.yaml
+          chmod 0600 /generated/supervisor.yaml
+        volumeMounts:
+        - {name: credentials, mountPath: /secrets, readOnly: true}
+        - {name: generated, mountPath: /generated}
+      containers:
+      - name: supervisor
+        image: localhost/otelplane-opamp-supervisor:lab-0.149.0
+        imagePullPolicy: Never
+        volumeMounts:
+        - {name: generated, mountPath: /etc/otelplane-supervisor, readOnly: true}
+        - {name: base, mountPath: /etc/otelcol, readOnly: true}
+        - {name: state, mountPath: /var/lib/otel-supervisor}
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {cpu: '1', memory: 512Mi}
+      volumes:
+      - name: credentials
+        secret: {secretName: otelplane-lab-secrets}
+      - name: generated
+        emptyDir: {medium: Memory}
+      - name: base
+        configMap: {name: otelplane-test-collector-config}
+      - name: state
+        persistentVolumeClaim: {claimName: otelplane-test-collector-data}
