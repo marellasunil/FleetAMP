@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/blueprints"
+	"github.com/marellasunil/OTelPlane/internal/blueprints"
 )
 
 func TestBlueprintCatalogStoresPatternsAndBlocks(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, filepath.Join(t.TempDir(), "fleetamp.db"))
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "otelplane.db"))
 	if err != nil { t.Fatal(err) }
 	defer db.Close()
 	store := db.DestinationProfiles()

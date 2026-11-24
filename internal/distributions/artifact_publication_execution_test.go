@@ -7,7 +7,7 @@ import (
 )
 
 func publicationExecutionFixture() (*ArtifactPublication, *ArtifactPublicationPreflight) {
-	publication := &ArtifactPublication{ID: "publication-1", ArtifactID: "artifact-1", ArtifactSHA256: strings.Repeat("a", 64), DestinationRef: "oci://registry.example.test/fleetamp/collector:v1", CredentialRef: "secret://registry", Status: ArtifactPublicationQueued, EvidenceHash: strings.Repeat("b", 64)}
+	publication := &ArtifactPublication{ID: "publication-1", ArtifactID: "artifact-1", ArtifactSHA256: strings.Repeat("a", 64), DestinationRef: "oci://registry.example.test/otelplane/collector:v1", CredentialRef: "secret://registry", Status: ArtifactPublicationQueued, EvidenceHash: strings.Repeat("b", 64)}
 	preflight := &ArtifactPublicationPreflight{ID: "preflight-1", PublicationID: publication.ID, PublicationEvidenceHash: publication.EvidenceHash, ArtifactID: publication.ArtifactID, ArtifactSHA256: publication.ArtifactSHA256, DestinationRef: publication.DestinationRef, CredentialRef: publication.CredentialRef, Status: ArtifactPublicationPreflightPassed, EvidenceHash: strings.Repeat("c", 64)}
 	return publication, preflight
 }

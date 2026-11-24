@@ -1,4 +1,4 @@
-// Append-only FleetAMP configuration deployment history model.
+// Append-only OTelPlane configuration deployment history model.
 //
 // Purpose:
 //

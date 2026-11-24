@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/runtimes"
+	"github.com/marellasunil/OTelPlane/internal/runtimes"
 )
 
 func TestNewRequestValidatesOperationsAndProducesStableSpecHash(t *testing.T) {

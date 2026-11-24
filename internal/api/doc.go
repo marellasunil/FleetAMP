@@ -1,2 +1,2 @@
-// Package api is reserved for reusable FleetAMP HTTP and REST API components.
+// Package api is reserved for reusable OTelPlane HTTP and REST API components.
 package api

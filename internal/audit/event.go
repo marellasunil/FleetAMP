@@ -1,4 +1,4 @@
-// Package audit defines append-only FleetAMP control-plane audit events.
+// Package audit defines append-only OTelPlane control-plane audit events.
 package audit
 
 import (

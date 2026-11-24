@@ -1,15 +1,15 @@
-<p align="center"><img src="docs/assets/fleetamp-logo.png" width="233" alt="FleetAMP — Telemetry Control Plane"></p>
+<p align="center"><img src="docs/assets/otelplane-logo.png" width="233" alt="OTelPlane — Telemetry Control Plane"></p>
 
-# FleetAMP
+# OTelPlane
 
-FleetAMP is a lightweight, self-hosted, open-source fleet management control plane for telemetry agents, with OpenTelemetry Collector and OpAMP as the first implementation target.
+OTelPlane is a lightweight, self-hosted, open-source fleet management control plane for telemetry agents, with OpenTelemetry Collector and OpAMP as the first implementation target.
 
 > Status: early development / community preview.
 
-FleetAMP is an independent community project and is not an official OpenTelemetry or Grafana project.
+OTelPlane is an independent community project and is not an official OpenTelemetry or Grafana project.
 
 Documentation: [documentation index](docs/README.md) and
-[fleetamp.marellasunil.com](https://fleetamp.marellasunil.com).
+[docs.otelplane.com](https://docs.otelplane.com).
 
 For local evaluation, use the [Compose lab](deploy/compose/README.md). Before
 publishing v0.3.0, run the [automated release verification](docs/testing-v0.3.0.md)
@@ -17,18 +17,18 @@ and complete the [v0.3.0 E2E checklist](docs/e2e-v0.3.0.md).
 
 ## Vision
 
-FleetAMP aims to provide a vendor-neutral management layer for telemetry-agent fleets while keeping protocol, storage, source-control, CMDB, identity, and UI concerns isolated behind stable interfaces.
+OTelPlane aims to provide a vendor-neutral management layer for telemetry-agent fleets while keeping protocol, storage, source-control, CMDB, identity, and UI concerns isolated behind stable interfaces.
 
 Initial capabilities are focused on OpenTelemetry Collector through OpAMP. The architecture is intentionally extensible so additional telemetry agents and providers can be added later without rewriting the core platform.
 
 ## Goals
 
-FleetAMP aims to provide a simple community-oriented way to:
+OTelPlane aims to provide a simple community-oriented way to:
 
 - discover and inventory managed telemetry agents
 - track health, connectivity, version and last-seen status
 - identify agents by stable instance identity and useful metadata
-- group agents using FleetAMP-owned labels and selectors
+- group agents using OTelPlane-owned labels and selectors
 - manage versioned configurations
 - deploy remote configuration through management adapters
 - compare desired and effective configuration
@@ -70,16 +70,16 @@ opamp-go / OpAMP protobufs
           v
        ManagedAgent
           |
- FleetAMP core / API / UI / storage
+ OTelPlane core / API / UI / storage
 ```
 
-Only the OpAMP adapter should understand OpAMP-specific wire types. The rest of FleetAMP uses protocol-independent domain models.
+Only the OpAMP adapter should understand OpAMP-specific wire types. The rest of OTelPlane uses protocol-independent domain models.
 
-See the [detailed architecture documentation](https://fleetamp.marellasunil.com/docs/development/internal-architecture).
+See the [detailed architecture documentation](https://docs.otelplane.com/docs/development/internal-architecture).
 
 ## Managed agent model
 
-FleetAMP's core model is `ManagedAgent` rather than a Collector-only type.
+OTelPlane's core model is `ManagedAgent` rather than a Collector-only type.
 
 Initial and planned agent types include:
 
@@ -91,19 +91,19 @@ A compatibility alias named `Collector` remains while the codebase evolves.
 
 ## Attributes, ownership identity, and labels
 
-FleetAMP deliberately separates reported metadata from management metadata:
+OTelPlane deliberately separates reported metadata from management metadata:
 
 - **Attributes** — reported by the agent/protocol, such as `host.name`, `os.type`, `service.version`, or `cloud.region`
 - **Ownership identity** — managed or approved `key=value` metadata used by an exact-match group selector; a Collector can belong to only one active ownership group
-- **Labels** — optional FleetAMP/operator metadata used to narrow a deployment inside an ownership group, such as `role=agent` or `release-ring=canary`
+- **Labels** — optional OTelPlane/operator metadata used to narrow a deployment inside an ownership group, such as `role=agent` or `release-ring=canary`
 
-The **Groups & Labels** UI provides an **Add condition** control for flexible selectors. Groups are built from centrally managed ownership labels: `application`, `environment`, and `place` are suggested starting keys rather than mandatory fields. FleetAMP rejects active selectors whose rules could overlap. Optional deployment labels narrow a rollout inside its ownership group. Future CMDB/CSDM and platform imports can populate approved ownership metadata without overwriting raw reported attributes.
+The **Groups & Labels** UI provides an **Add condition** control for flexible selectors. Groups are built from centrally managed ownership labels: `application`, `environment`, and `place` are suggested starting keys rather than mandatory fields. OTelPlane rejects active selectors whose rules could overlap. Optional deployment labels narrow a rollout inside its ownership group. Future CMDB/CSDM and platform imports can populate approved ownership metadata without overwriting raw reported attributes.
 
 New groups receive a readable immutable backend ID derived from their display name—for example, **Payment API NL Prod** becomes `payment-api-nl-prod`. Existing group IDs remain unchanged during upgrades so configuration, approval, deployment, and audit relationships are not broken.
 
 ## Provider model
 
-FleetAMP uses provider interfaces rather than hard-coding vendors.
+OTelPlane uses provider interfaces rather than hard-coding vendors.
 
 Configuration providers can eventually include:
 
@@ -120,9 +120,9 @@ Enrichment providers can eventually include:
 
 ## v0.2.0 community preview
 
-[Download FleetAMP v0.2.0](https://github.com/marellasunil/FleetAMP/releases/tag/v0.2.0).
+[Download OTelPlane v0.2.0](https://github.com/marellasunil/OTelPlane/releases/tag/v0.2.0).
 
-FleetAMP v0.2.0 is the governed fleet-management community preview. It is suitable for
+OTelPlane v0.2.0 is the governed fleet-management community preview. It is suitable for
 evaluation and a controlled single-server pilot, but it is not yet a supported
 production release.
 
@@ -139,9 +139,9 @@ certification. These remain pre-v1.0 work.
 
 ## v0.3.0 development target
 
-FleetAMP v0.3.0 introduces guided [Telemetry Blueprints](docs/blueprints.md).
+OTelPlane v0.3.0 introduces guided [Telemetry Blueprints](docs/blueprints.md).
 Users choose a pattern, an accessible ownership group, signals, and an
-administrator-approved Destination Profile. FleetAMP generates explicit
+administrator-approved Destination Profile. OTelPlane generates explicit
 Collector YAML, validates it, saves an immutable group version, and can submit
 the same artifact into the existing approval and OpAMP deployment workflow.
 The first patterns are OTLP application services and host observability.
@@ -171,8 +171,8 @@ container lifecycle executors remain future work.
 ## Project structure
 
 ```text
-FleetAMP/
-├── cmd/fleetamp/          # application entry point
+OTelPlane/
+├── cmd/otelplane/          # application entry point
 ├── internal/agents/       # protocol-independent managed-agent domain model
 ├── internal/management/   # management-adapter contracts
 ├── internal/opamp/        # OpAMP adapter; opamp-go types stay here
@@ -191,14 +191,14 @@ FleetAMP/
 
 End users do not need to clone this repository or install Go. Download the archive
 for the laptop or server architecture from
-[GitHub Releases](https://github.com/marellasunil/FleetAMP/releases), download
+[GitHub Releases](https://github.com/marellasunil/OTelPlane/releases), download
 `SHA256SUMS`, and verify the archive before extracting it:
 
 ```bash
-grep -F '  fleetamp_0.2.0_linux_amd64.tar.gz' SHA256SUMS | sha256sum -c -
-tar -xzf fleetamp_0.2.0_linux_amd64.tar.gz
-cd fleetamp_0.2.0_linux_amd64
-./fleetamp --version
+grep -F '  otelplane_0.2.0_linux_amd64.tar.gz' SHA256SUMS | sha256sum -c -
+tar -xzf otelplane_0.2.0_linux_amd64.tar.gz
+cd otelplane_0.2.0_linux_amd64
+./otelplane --version
 ```
 
 Use `linux_arm64` instead on a 64-bit ARM system. The archive includes the
@@ -210,7 +210,7 @@ systemd examples and `scripts/install-user.sh`; read
 Building from source requires Go 1.26+.
 
 ```bash
-go run ./cmd/fleetamp
+go run ./cmd/otelplane
 ```
 
 Then check:
@@ -222,28 +222,28 @@ curl http://localhost:8080/health
 Expected response:
 
 ```json
-{"status":"ok","service":"fleetamp"}
+{"status":"ok","service":"otelplane"}
 ```
 
 ## Running as a Linux service
 
-FleetAMP includes a reference systemd deployment under [`deploy/systemd/`](deploy/systemd/). The service uses a dedicated `fleetamp` account, `/opt/fleetamp/bin/fleetamp` for the binary, `/etc/fleetamp/fleetamp.env` for environment configuration, and `/var/lib/fleetamp` for persistent state.
+OTelPlane includes a reference systemd deployment under [`deploy/systemd/`](deploy/systemd/). The service uses a dedicated `otelplane` account, `/opt/otelplane/bin/otelplane` for the binary, `/etc/otelplane/otelplane.env` for environment configuration, and `/var/lib/otelplane` for persistent state.
 
-FleetAMP writes operational logs to stdout/stderr. When run with systemd these logs are captured by journald:
+OTelPlane writes operational logs to stdout/stderr. When run with systemd these logs are captured by journald:
 
 ```bash
-journalctl -u fleetamp
-journalctl -u fleetamp -f
+journalctl -u otelplane
+journalctl -u otelplane -f
 ```
 
 See [`deploy/systemd/README.md`](deploy/systemd/README.md) for build, installation, verification, upgrade, and log-retention guidance.
 
 ## Configuration validation
 
-FleetAMP validates Collector YAML before saving an immutable configuration
+OTelPlane validates Collector YAML before saving an immutable configuration
 version and revalidates the selected version before creating a group deployment
 approval request. YAML syntax validation is always enforced. Set
-`FLEETAMP_OTELCOL_BINARY` to the installed Collector executable to additionally
+`OTELPLANE_OTELCOL_BINARY` to the installed Collector executable to additionally
 validate component names, pipelines, and distribution-specific settings with
 `otelcol validate`.
 
@@ -270,34 +270,34 @@ configuration with the proposed immutable version and highlights additions and
 removals. Approval revalidates the configuration and target readiness before
 delivery. Every deployment records its approval request and the previous
 working configuration per agent. If OpAMP reports a failed or unsupported
-deployment, FleetAMP claims a single automatic rollback attempt and sends that
+deployment, OTelPlane claims a single automatic rollback attempt and sends that
 agent its previous working version. The deployment history records both the
 failed rollout and the rollback attempt.
 
 Agent details show the central desired configuration and the effective
 agent-reported configuration side by side. With drift enforcement enabled,
-FleetAMP sends the approved central version again and records the reconciliation
+OTelPlane sends the approved central version again and records the reconciliation
 in the drift audit log.
 
 Approval email notifications are optional. Configure an email address on each
 Admin and group-owner account, then set:
 
 ```bash
-FLEETAMP_SMTP_ADDR=smtp.example.com:587
-FLEETAMP_SMTP_USERNAME=fleetamp@example.com
-FLEETAMP_SMTP_PASSWORD=replace-with-a-secret
-FLEETAMP_SMTP_FROM=fleetamp@example.com
-FLEETAMP_PUBLIC_URL=https://fleetamp.example.com
+OTELPLANE_SMTP_ADDR=smtp.example.com:587
+OTELPLANE_SMTP_USERNAME=otelplane@example.com
+OTELPLANE_SMTP_PASSWORD=replace-with-a-secret
+OTELPLANE_SMTP_FROM=otelplane@example.com
+OTELPLANE_PUBLIC_URL=https://otelplane.example.com
 ```
 
-Anonymous SMTP relays may omit the username and password. FleetAMP emails all
+Anonymous SMTP relays may omit the username and password. OTelPlane emails all
 enabled Admins and the affected group's enabled owners when a request is
 submitted, approved, rejected, or expired. Email failures are logged and do not
 block approval or deployment operations.
 
 ## Security
 
-FleetAMP listens on localhost by default. The first administrator is created
+OTelPlane listens on localhost by default. The first administrator is created
 through a one-time `/setup` flow. Passwords are stored as Argon2id verifiers
 bound to a per-server pepper, which can be protected by TPM-backed systemd
 credentials. Self-service password changes require the current password.
@@ -306,20 +306,20 @@ sessions, and force a password change at next sign-in. A short-lived,
 single-use break-glass token supports account recovery without exposing or
 replacing the server pepper. See [password management and recovery](docs/password-recovery.md).
 Remote OpAMP access requires a bearer token unless
-`FLEETAMP_ALLOW_INSECURE=true` is explicitly set for an isolated development
-environment. Protect the web UI/API and OpAMP traffic with FleetAMP native
+`OTELPLANE_ALLOW_INSECURE=true` is explicitly set for an isolated development
+environment. Protect the web UI/API and OpAMP traffic with OTelPlane native
 TLS or explicit TLS termination at a trusted proxy/load balancer. Optional
 OpAMP mTLS verifies agent client certificates. Never commit credentials or
 private keys. See the
-[security hardening guide](https://fleetamp.marellasunil.com/docs/operations/security-hardening)
-and [TLS guide](https://fleetamp.marellasunil.com/docs/operations/transport-tls).
+[security hardening guide](https://docs.otelplane.com/docs/operations/security-hardening)
+and [TLS guide](https://docs.otelplane.com/docs/operations/transport-tls).
 
 Security checks run tests, the race detector, `go vet`, and `govulncheck` in
 GitHub Actions. Dependabot monitors Go modules and workflow actions.
 
-For upgrading the upstream OpAMP Go dependency, see the [OpAMP upgrade guide](https://fleetamp.marellasunil.com/docs/operations/opamp-upgrade).
+For upgrading the upstream OpAMP Go dependency, see the [OpAMP upgrade guide](https://docs.otelplane.com/docs/operations/opamp-upgrade).
 
-For OS-specific deployment models and initial sizing requirements, see the [OS deployment guide](https://fleetamp.marellasunil.com/docs/operations/os-deployment). Linux/systemd is currently validated; macOS/Windows guidance is documented but not yet release-tested.
+For OS-specific deployment models and initial sizing requirements, see the [OS deployment guide](https://docs.otelplane.com/docs/operations/os-deployment). Linux/systemd is currently validated; macOS/Windows guidance is documented but not yet release-tested.
 
 ## Roadmap
 
@@ -341,7 +341,7 @@ For OS-specific deployment models and initial sizing requirements, see the [OS d
 
 ## License
 
-FleetAMP is licensed under the [Apache License 2.0](LICENSE). The license allows
+OTelPlane is licensed under the [Apache License 2.0](LICENSE). The license allows
 use, modification, distribution, forks and commercial use when its terms are
 followed. It does not require modified or hosted versions to publish their
 source code. See [project governance and licensing](GOVERNANCE.md) for the
@@ -350,7 +350,7 @@ future license change.
 
 ## Upstream projects
 
-FleetAMP intends to build on and interoperate with the OpenTelemetry ecosystem, especially:
+OTelPlane intends to build on and interoperate with the OpenTelemetry ecosystem, especially:
 
 - OpenTelemetry OpAMP specification
 - `open-telemetry/opamp-go`
@@ -359,4 +359,4 @@ FleetAMP intends to build on and interoperate with the OpenTelemetry ecosystem, 
 
 ## Program structure
 
-For a source-code map and explanation of how FleetAMP components fit together, see the [program structure guide](https://fleetamp.marellasunil.com/docs/development/program-structure).
+For a source-code map and explanation of how OTelPlane components fit together, see the [program structure guide](https://docs.otelplane.com/docs/development/program-structure).

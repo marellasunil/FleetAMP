@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/marellasunil/FleetAMP/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
 	"time"
 )
 

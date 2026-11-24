@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type ComponentGitOpsPreviewStore struct{ db *sql.DB }

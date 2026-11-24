@@ -1,0 +1,137 @@
+package main
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/marellasunil/OTelPlane/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/storage/memory"
+)
+
+func TestValidateConfigurationForApproval(t *testing.T) {
+	validator := configs.NewValidator("")
+	valid := configs.NewConfiguration("gateway.yaml", "1", "receivers:\n  otlp:\nservice:\n  pipelines: {}\n", "text/yaml")
+	if err := validateConfigurationForApproval(context.Background(), validator, valid); err != nil {
+		t.Fatalf("valid configuration rejected: %v", err)
+	}
+
+	invalid := configs.NewConfiguration("gateway.yaml", "2", "service:\n  pipelines: [\n", "text/yaml")
+	if err := validateConfigurationForApproval(context.Background(), validator, invalid); err == nil {
+		t.Fatal("invalid configuration accepted for approval")
+	}
+}
+
+func TestNormalizeOwnersAndOwnershipMatch(t *testing.T) {
+	owners := normalizeOwners([]string{" Alice, bob ", "alice", "BOB", "carol"})
+	if len(owners) != 3 || owners[0] != "Alice" || owners[1] != "bob" || owners[2] != "carol" {
+		t.Fatalf("owners=%#v", owners)
+	}
+	group := &groups.Group{Owners: owners}
+	if !isGroupOwner(group, "ALICE") || isGroupOwner(group, "mallory") {
+		t.Fatalf("unexpected ownership match for %#v", owners)
+	}
+}
+
+func TestApprovalExpiryDaysHasNinetyDayMaximum(t *testing.T) {
+	for input, want := range map[string]int{"": 30, "7": 7, "30": 30, "60": 60, "90": 90} {
+		got, err := approvalExpiryDays(input)
+		if err != nil || got != want {
+			t.Errorf("approvalExpiryDays(%q)=%d,%v want %d,nil", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"0", "91", "365"} {
+		if _, err := approvalExpiryDays(input); err == nil {
+			t.Errorf("approvalExpiryDays(%q) accepted a value above the supported policy", input)
+		}
+	}
+}
+
+func TestPreviewGroupMembers(t *testing.T) {
+	members := []*agents.ManagedAgent{
+		{InstanceUID: "ready", Connected: true, Capabilities: []string{"accepts_remote_config"}},
+		{InstanceUID: "offline", Connected: false, Capabilities: []string{"accepts_remote_config"}},
+		{InstanceUID: "unsupported", Connected: true},
+		{InstanceUID: "retired", Connected: false, Status: agents.LifecycleRetired},
+	}
+	result, eligible := previewGroupMembers(members, true)
+	if eligible != 1 {
+		t.Fatalf("eligible = %d, want 1", eligible)
+	}
+	want := []string{"Ready", "Offline", "Remote configuration unsupported", "Retired"}
+	for i, agent := range result {
+		if agent.Agent.InstanceUID != members[i].InstanceUID || agent.Reason != want[i] {
+			t.Errorf("result[%d] = %+v, want %s", i, agent, want[i])
+		}
+	}
+	result, eligible = previewGroupMembers(members, false)
+	if eligible != 0 {
+		t.Fatalf("disabled group eligible = %d, want 0", eligible)
+	}
+	for _, agent := range result {
+		if agent.Reason != "Group disabled" {
+			t.Errorf("disabled group member %q: %q", agent.Agent.InstanceUID, agent.Reason)
+		}
+	}
+}
+
+func TestMembersMatchingLabelsUsesExactAndManagedPrecedence(t *testing.T) {
+	members := []*agents.ManagedAgent{
+		{InstanceUID: "managed-match", ReportedLabels: map[string]string{"team": "other", "tier": "backend"}, Labels: map[string]string{"team": "payments"}},
+		{InstanceUID: "partial-match", Labels: map[string]string{"team": "payments", "tier": "frontend"}},
+		{InstanceUID: "reported-match", ReportedLabels: map[string]string{"team": "payments", "tier": "backend"}},
+	}
+	selector := map[string]string{"team": "payments", "tier": "backend"}
+	matched := membersMatchingLabels(members, selector)
+	if len(matched) != 2 || matched[0].InstanceUID != "managed-match" || matched[1].InstanceUID != "reported-match" {
+		t.Fatalf("matched=%v, want managed-match and reported-match", matched)
+	}
+	if all := membersMatchingLabels(members, nil); len(all) != len(members) {
+		t.Fatalf("empty selector returned %d members, want %d", len(all), len(members))
+	}
+}
+
+func TestParseOptionalLabelSelector(t *testing.T) {
+	selector, err := parseOptionalLabelSelector("team=payments, tier=backend")
+	if err != nil || selector["team"] != "payments" || selector["tier"] != "backend" {
+		t.Fatalf("selector=%v error=%v", selector, err)
+	}
+	if _, err := parseOptionalLabelSelector("team=payments, team=platform"); err == nil {
+		t.Fatal("duplicate label selector was accepted")
+	}
+}
+
+func TestPreviewGroupConfigurationSkipsCurrentButAllowsOlderVersion(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewAssignmentStore()
+	agent := &agents.ManagedAgent{
+		InstanceUID: "agent-1", Connected: true,
+		Capabilities: []string{"accepts_remote_config"},
+	}
+	current := configs.NewConfiguration("collector.yaml", "2", "service: {pipelines: {}}", "text/yaml")
+	older := configs.NewConfiguration("collector.yaml", "1", "service: {}", "text/yaml")
+	if err := store.Upsert(ctx, &configs.Assignment{
+		AgentInstanceUID: agent.InstanceUID, ConfigurationID: current.ID,
+		ConfigurationHash: current.Hash, Status: configs.DeliveryApplied, UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, eligible, err := previewGroupConfiguration(ctx, []*agents.ManagedAgent{agent}, true, current, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eligible != 0 || preview[0].Reason != "Already deployed · Latest" {
+		t.Fatalf("current preview=%+v eligible=%d", preview, eligible)
+	}
+
+	preview, eligible, err = previewGroupConfiguration(ctx, []*agents.ManagedAgent{agent}, true, older, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eligible != 1 || preview[0].Reason != "Ready" {
+		t.Fatalf("rollback preview=%+v eligible=%d", preview, eligible)
+	}
+}

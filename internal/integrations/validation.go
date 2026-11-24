@@ -110,7 +110,7 @@ func (v *ConnectionValidator) validateProviderHost(connection *Connection) error
 			return nil
 		}
 	}
-	return fmt.Errorf("self-hosted provider %q is not present in FLEETAMP_INTEGRATION_ALLOWED_HOSTS", host)
+	return fmt.Errorf("self-hosted provider %q is not present in OTELPLANE_INTEGRATION_ALLOWED_HOSTS", host)
 }
 
 func validateGitHub(ctx context.Context, client *http.Client, c *Connection, token string) (map[string]string, error) {

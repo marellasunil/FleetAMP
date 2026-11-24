@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/configs"
 )
 
 var ErrConfigurationTemplateNotFound = errors.New("configuration template not found")

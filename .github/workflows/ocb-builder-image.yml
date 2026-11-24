@@ -32,8 +32,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/fleetamp-ocb-builder
-      LOCAL_TAG: fleetamp-ocb-builder:verification
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/otelplane-ocb-builder
+      LOCAL_TAG: otelplane-ocb-builder:verification
     steps:
       - name: Validate immutable inputs
         env:
@@ -102,7 +102,7 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
 
-      - name: Record FleetAMP configuration value
+      - name: Record OTelPlane configuration value
         if: ${{ inputs.publish }}
         run: |
-          echo "FLEETAMP_DISTRIBUTION_OCB_IMAGE=${IMAGE_NAME}@${{ steps.publish.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "OTELPLANE_DISTRIBUTION_OCB_IMAGE=${IMAGE_NAME}@${{ steps.publish.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"

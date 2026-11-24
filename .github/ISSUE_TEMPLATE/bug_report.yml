@@ -1,5 +1,5 @@
 name: Bug report
-description: Report unexpected FleetAMP behavior
+description: Report unexpected OTelPlane behavior
 title: "bug: "
 labels:
   - bug
@@ -11,7 +11,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: FleetAMP version
+      label: OTelPlane version
       description: Include the release, commit, or container image tag.
     validations:
       required: true

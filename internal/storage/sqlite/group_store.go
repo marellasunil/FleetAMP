@@ -1,4 +1,4 @@
-// SQLite-backed implementation of the FleetAMP GroupStore.
+// SQLite-backed implementation of the OTelPlane GroupStore.
 //
 // Purpose:
 //
@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/groups"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type GroupStore struct{ db *sql.DB }

@@ -1,4 +1,4 @@
-// Package runtimes defines component types used by FleetAMP lifecycle requests.
+// Package runtimes defines component types used by OTelPlane lifecycle requests.
 package runtimes
 
 // Type identifies a managed OpenTelemetry component kind.

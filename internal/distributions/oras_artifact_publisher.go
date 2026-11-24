@@ -66,7 +66,7 @@ func (p *ORASArtifactPublisher) Publish(ctx context.Context, preflight *Artifact
 	}
 	defer cleanup()
 	target := strings.TrimPrefix(preflight.DestinationRef, "oci://")
-	args := []string{"push", "--username", p.Username, "--password-stdin", target, staged + ":application/vnd.fleetamp.collector.executable"}
+	args := []string{"push", "--username", p.Username, "--password-stdin", target, staged + ":application/vnd.otelplane.collector.executable"}
 	cmd := exec.CommandContext(ctx, p.Executable, args...)
 	cmd.Stdin = strings.NewReader(secret + "\n")
 	output := &limitedBuffer{Limit: 64 << 10}
@@ -96,7 +96,7 @@ func (p *ORASArtifactPublisher) stageExactArtifact(relative, expectedSHA string,
 		return "", func() {}, err
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
-	target := filepath.Join(dir, "fleetamp-collector")
+	target := filepath.Join(dir, "otelplane-collector")
 	f, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o400)
 	if err != nil {
 		cleanup()

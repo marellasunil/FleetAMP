@@ -1,5 +1,5 @@
 // Package migrations models immutable audit metadata for configurations created
-// through FleetAMP's staged migration workspace.
+// through OTelPlane's staged migration workspace.
 package migrations
 
 import "time"

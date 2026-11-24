@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
-	"github.com/marellasunil/FleetAMP/internal/storage/memory"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/storage/memory"
 )
 
 type fixedStatusAdapter struct {

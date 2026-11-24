@@ -1,4 +1,4 @@
-// SQLite-backed append-only FleetAMP audit event store.
+// SQLite-backed append-only OTelPlane audit event store.
 package sqlite
 
 import (
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/audit"
+	"github.com/marellasunil/OTelPlane/internal/audit"
 )
 
 type AuditStore struct{ db *sql.DB }

@@ -4,7 +4,7 @@ package storage
 import (
 	"context"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/configs"
 )
 
 type DriftPolicyStore interface {

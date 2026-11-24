@@ -72,7 +72,7 @@ func (r *ContainerOCBRunner) Build(ctx context.Context, inspection *BuildSourceI
 		return nil, err
 	}
 	uid, gid := strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid())
-	args := []string{"run", "--rm", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=" + strconv.FormatInt(r.PIDsLimit, 10), "--memory=" + r.MemoryLimit, "--cpus=" + r.CPULimit, "--user=" + uid + ":" + gid, "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m", "--env", "HOME=/tmp", "--env", "GOCACHE=/tmp/go-build", "--env", "GOMODCACHE=/opt/fleetamp/gomodcache", "--env", "GOPROXY=off", "--env", "GOSUMDB=off", "--mount", "type=bind,src=" + workspace + ",dst=/workspace,rw", "--workdir", "/workspace", r.BuilderImage, "--config", "/workspace/builder-config.yaml"}
+	args := []string{"run", "--rm", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=" + strconv.FormatInt(r.PIDsLimit, 10), "--memory=" + r.MemoryLimit, "--cpus=" + r.CPULimit, "--user=" + uid + ":" + gid, "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m", "--env", "HOME=/tmp", "--env", "GOCACHE=/tmp/go-build", "--env", "GOMODCACHE=/opt/otelplane/gomodcache", "--env", "GOPROXY=off", "--env", "GOSUMDB=off", "--mount", "type=bind,src=" + workspace + ",dst=/workspace,rw", "--workdir", "/workspace", r.BuilderImage, "--config", "/workspace/builder-config.yaml"}
 	cmd := exec.CommandContext(ctx, r.Runtime, args...)
 	output := &limitedBuffer{Limit: 64 << 10}
 	cmd.Stdout = output
@@ -86,14 +86,14 @@ func (r *ContainerOCBRunner) Build(ctx context.Context, inspection *BuildSourceI
 		return nil, err
 	}
 	defer workspaceRoot.Close()
-	info, err := workspaceRoot.Lstat("_build/fleetamp-collector")
+	info, err := workspaceRoot.Lstat("_build/otelplane-collector")
 	if err != nil {
 		return nil, errors.New("sandboxed OCB build did not produce the expected artifact")
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() <= 0 || info.Size() > r.MaxArtifactBytes {
 		return nil, errors.New("sandboxed OCB artifact is not a bounded regular file")
 	}
-	f, err := workspaceRoot.Open("_build/fleetamp-collector")
+	f, err := workspaceRoot.Open("_build/otelplane-collector")
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func (r *ContainerOCBRunner) Build(ctx context.Context, inspection *BuildSourceI
 	if err := os.MkdirAll(targetDir, 0o750); err != nil {
 		return nil, err
 	}
-	target := filepath.Join(targetDir, "fleetamp-collector")
+	target := filepath.Join(targetDir, "otelplane-collector")
 	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return nil, err
@@ -140,7 +140,7 @@ func (r *ContainerOCBRunner) Build(ctx context.Context, inspection *BuildSourceI
 			return nil, err
 		}
 	}
-	return &OCBRunResult{Runtime: r.Runtime, BuilderImage: r.BuilderImage, ArtifactReference: "artifact-cache://" + sha + "/fleetamp-collector", ArtifactSHA256: sha, ArtifactSize: info.Size()}, nil
+	return &OCBRunResult{Runtime: r.Runtime, BuilderImage: r.BuilderImage, ArtifactReference: "artifact-cache://" + sha + "/otelplane-collector", ArtifactSHA256: sha, ArtifactSize: info.Size()}, nil
 }
 
 type limitedBuffer struct {

@@ -1,6 +1,6 @@
-// Package logging configures FleetAMP structured application logging.
+// Package logging configures OTelPlane structured application logging.
 //
-// FleetAMP writes structured JSON or text logs to stdout for journald/container
+// OTelPlane writes structured JSON or text logs to stdout for journald/container
 // collection and can optionally mirror the same records to a local log file.
 package logging
 
@@ -18,7 +18,7 @@ type Config struct {
 	File   string
 }
 
-// Setup configures FleetAMP's global structured logger and returns a function that flushes and closes file output.
+// Setup configures OTelPlane's global structured logger and returns a function that flushes and closes file output.
 func Setup(cfg Config) (func() error, error) {
 	level, err := parseLevel(cfg.Level)
 	if err != nil {

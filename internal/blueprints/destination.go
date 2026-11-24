@@ -1,4 +1,4 @@
-// Package blueprints contains the governed inputs used by FleetAMP's guided
+// Package blueprints contains the governed inputs used by OTelPlane's guided
 // OpenTelemetry configuration builder.
 package blueprints
 

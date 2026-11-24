@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/distributions"
-	"github.com/marellasunil/FleetAMP/internal/groups"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 func TestDistributionApprovalHandoffCommitsAllRecords(t *testing.T) {

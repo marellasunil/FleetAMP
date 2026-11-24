@@ -23,18 +23,18 @@ func (r publicationSecretResolver) Resolve(context.Context, string) (string, err
 
 func TestArtifactPublicationPreflightVerifiesExactEvidence(t *testing.T) {
 	root := t.TempDir()
-	content := []byte("fleetamp collector artifact")
+	content := []byte("otelplane collector artifact")
 	sum := sha256.Sum256(content)
 	sha := hex.EncodeToString(sum[:])
 	dir := filepath.Join(root, sha)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "fleetamp-collector"), content, 0o500); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "otelplane-collector"), content, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	artifact := &BuildArtifact{ID: "artifact-1", ArtifactReference: "artifact-cache://" + sha + "/fleetamp-collector", ArtifactSHA256: sha, ArtifactSize: int64(len(content)), Status: BuildArtifactGenerated}
-	publication := &ArtifactPublication{ID: "publication-1", ArtifactID: artifact.ID, ArtifactSHA256: sha, DestinationRef: "oci://registry.example.test/fleetamp/collector:v1", CredentialRef: "secret://registry/production", Status: ArtifactPublicationQueued, EvidenceHash: strings.Repeat("a", 64)}
+	artifact := &BuildArtifact{ID: "artifact-1", ArtifactReference: "artifact-cache://" + sha + "/otelplane-collector", ArtifactSHA256: sha, ArtifactSize: int64(len(content)), Status: BuildArtifactGenerated}
+	publication := &ArtifactPublication{ID: "publication-1", ArtifactID: artifact.ID, ArtifactSHA256: sha, DestinationRef: "oci://registry.example.test/otelplane/collector:v1", CredentialRef: "secret://registry/production", Status: ArtifactPublicationQueued, EvidenceHash: strings.Repeat("a", 64)}
 	verifier := &ArtifactPublicationPreflightVerifier{ArtifactRoot: root, AllowedHosts: []string{"registry.example.test"}, Secrets: publicationSecretResolver{}}
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	receipt, err := verifier.Verify(context.Background(), publication, artifact, "admin", now)
@@ -58,11 +58,11 @@ func TestArtifactPublicationPreflightRejectsUnsafeInputs(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "fleetamp-collector"), content, 0o500); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "otelplane-collector"), content, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	baseArtifact := &BuildArtifact{ID: "artifact-1", ArtifactReference: "artifact-cache://" + sha + "/fleetamp-collector", ArtifactSHA256: sha, ArtifactSize: int64(len(content)), Status: BuildArtifactGenerated}
-	basePublication := &ArtifactPublication{ID: "publication-1", ArtifactID: baseArtifact.ID, ArtifactSHA256: sha, DestinationRef: "oci://registry.example.test/fleetamp/collector:v1", CredentialRef: "secret://registry/production", Status: ArtifactPublicationQueued, EvidenceHash: strings.Repeat("a", 64)}
+	baseArtifact := &BuildArtifact{ID: "artifact-1", ArtifactReference: "artifact-cache://" + sha + "/otelplane-collector", ArtifactSHA256: sha, ArtifactSize: int64(len(content)), Status: BuildArtifactGenerated}
+	basePublication := &ArtifactPublication{ID: "publication-1", ArtifactID: baseArtifact.ID, ArtifactSHA256: sha, DestinationRef: "oci://registry.example.test/otelplane/collector:v1", CredentialRef: "secret://registry/production", Status: ArtifactPublicationQueued, EvidenceHash: strings.Repeat("a", 64)}
 	tests := []struct {
 		name   string
 		mutate func(*ArtifactPublication, *BuildArtifact, *ArtifactPublicationPreflightVerifier)
@@ -77,7 +77,7 @@ func TestArtifactPublicationPreflightRejectsUnsafeInputs(t *testing.T) {
 			a.ArtifactSHA256 = strings.Repeat("c", 64)
 		}},
 		{"host not allowed", func(p *ArtifactPublication, _ *BuildArtifact, _ *ArtifactPublicationPreflightVerifier) {
-			p.DestinationRef = "oci://evil.example.test/fleetamp:v1"
+			p.DestinationRef = "oci://evil.example.test/otelplane:v1"
 		}},
 		{"credential missing", func(_ *ArtifactPublication, _ *BuildArtifact, v *ArtifactPublicationPreflightVerifier) {
 			v.Secrets = publicationSecretResolver{err: errors.New("missing")}
@@ -97,14 +97,14 @@ func TestArtifactPublicationPreflightRejectsUnsafeInputs(t *testing.T) {
 
 func TestArtifactPublicationPreflightRejectsSymlinkEscape(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
-	if err := os.WriteFile(filepath.Join(outside, "fleetamp-collector"), []byte("secret"), 0o500); err != nil {
+	if err := os.WriteFile(filepath.Join(outside, "otelplane-collector"), []byte("secret"), 0o500); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
 		t.Fatal(err)
 	}
-	artifact := &BuildArtifact{ID: "artifact-1", ArtifactReference: "artifact-cache://linked/fleetamp-collector", ArtifactSHA256: strings.Repeat("a", 64), ArtifactSize: 6, Status: BuildArtifactGenerated}
-	publication := &ArtifactPublication{ID: "publication-1", ArtifactID: artifact.ID, ArtifactSHA256: artifact.ArtifactSHA256, DestinationRef: "oci://registry.example.test/fleetamp:v1", CredentialRef: "secret://registry", Status: ArtifactPublicationQueued, EvidenceHash: strings.Repeat("b", 64)}
+	artifact := &BuildArtifact{ID: "artifact-1", ArtifactReference: "artifact-cache://linked/otelplane-collector", ArtifactSHA256: strings.Repeat("a", 64), ArtifactSize: 6, Status: BuildArtifactGenerated}
+	publication := &ArtifactPublication{ID: "publication-1", ArtifactID: artifact.ID, ArtifactSHA256: artifact.ArtifactSHA256, DestinationRef: "oci://registry.example.test/otelplane:v1", CredentialRef: "secret://registry", Status: ArtifactPublicationQueued, EvidenceHash: strings.Repeat("b", 64)}
 	verifier := &ArtifactPublicationPreflightVerifier{ArtifactRoot: root, AllowedHosts: []string{"registry.example.test"}, Secrets: publicationSecretResolver{}}
 	if _, err := verifier.Verify(context.Background(), publication, artifact, "admin", time.Now()); err == nil {
 		t.Fatal("expected symlink escape to be rejected")

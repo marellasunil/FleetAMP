@@ -3,7 +3,7 @@ package lifecycle
 import (
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/runtimes"
+	"github.com/marellasunil/OTelPlane/internal/runtimes"
 )
 
 func TestNewApprovalPinsCompatibleEvidence(t *testing.T) {

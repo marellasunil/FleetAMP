@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
 )
 
 type Result struct {

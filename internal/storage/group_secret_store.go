@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	groupsecrets "github.com/marellasunil/FleetAMP/internal/secrets"
+	groupsecrets "github.com/marellasunil/OTelPlane/internal/secrets"
 )
 
 var ErrGroupSecretNotFound = errors.New("group secret not found")

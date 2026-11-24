@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/groups"
-	"github.com/marellasunil/FleetAMP/internal/migrations"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/migrations"
 )
 
 func TestMigrationStoreAtomicallySavesConfigurationAndHistory(t *testing.T) {

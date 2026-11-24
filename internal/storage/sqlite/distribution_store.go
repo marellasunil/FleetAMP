@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
-	"github.com/marellasunil/FleetAMP/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
 )
 
 type DistributionStore struct{ db *sql.DB }

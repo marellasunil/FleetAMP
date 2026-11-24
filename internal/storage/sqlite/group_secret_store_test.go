@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/groups"
-	groupsecrets "github.com/marellasunil/FleetAMP/internal/secrets"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	groupsecrets "github.com/marellasunil/OTelPlane/internal/secrets"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 func TestGroupSecretStoreLifecycle(t *testing.T) {

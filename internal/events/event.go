@@ -1,4 +1,4 @@
-// FleetAMP managed-agent lifecycle event model.
+// OTelPlane managed-agent lifecycle event model.
 //
 // Purpose:
 //   Provides append-only historical events for connection, disconnection,

@@ -5,7 +5,7 @@
 //   agent UID plus configuration hash reported asynchronously by OpAMP.
 //
 // Limitation:
-//   Assignment state currently resets with the FleetAMP process.
+//   Assignment state currently resets with the OTelPlane process.
 
 package memory
 
@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type AssignmentStore struct {

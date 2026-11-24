@@ -3,12 +3,12 @@ package integrations
 import "testing"
 
 func TestConnectionRejectsRawSecretsAndPathEscape(t *testing.T) {
-	base := Connection{Name: "prod", Provider: GitHub, Organization: "acme", Repository: "telemetry", Branch: "main", AllowedRoot: "fleetamp/groups", Mode: ModePullRequest, CredentialRef: "secret://github/prod", GroupIDs: []string{"payments"}, Enabled: true}
+	base := Connection{Name: "prod", Provider: GitHub, Organization: "acme", Repository: "telemetry", Branch: "main", AllowedRoot: "otelplane/groups", Mode: ModePullRequest, CredentialRef: "secret://github/prod", GroupIDs: []string{"payments"}, Enabled: true}
 	c, e := NewConnection(base, "admin")
 	if e != nil {
 		t.Fatal(e)
 	}
-	if got, e := c.ResolvePath("payments/change.json"); e != nil || got != "fleetamp/groups/payments/change.json" {
+	if got, e := c.ResolvePath("payments/change.json"); e != nil || got != "otelplane/groups/payments/change.json" {
 		t.Fatalf("path=%q err=%v", got, e)
 	}
 	base.CredentialRef = "raw-token"
@@ -21,7 +21,7 @@ func TestConnectionRejectsRawSecretsAndPathEscape(t *testing.T) {
 }
 
 func TestConnectionRejectsUnsafeProviderBaseURL(t *testing.T) {
-	base := Connection{Name: "prod", Provider: GitHub, Organization: "acme", Repository: "telemetry", Branch: "main", AllowedRoot: "fleetamp/groups", Mode: ModePullRequest, CredentialRef: "secret://github/prod", GroupIDs: []string{"payments"}, Enabled: true}
+	base := Connection{Name: "prod", Provider: GitHub, Organization: "acme", Repository: "telemetry", Branch: "main", AllowedRoot: "otelplane/groups", Mode: ModePullRequest, CredentialRef: "secret://github/prod", GroupIDs: []string{"payments"}, Enabled: true}
 	for _, unsafe := range []string{"http://git.example.com", "https://user:password@git.example.com", "https://git.example.com?token=secret", "https://git.example.com#fragment"} {
 		base.BaseURL = unsafe
 		if _, err := NewConnection(base, "admin"); err == nil {

@@ -1,0 +1,368 @@
+package main
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func clearSecurityEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"OTELPLANE_AUTH_USERNAME", "OTELPLANE_AUTH_PASSWORD",
+		"OTELPLANE_OPAMP_TOKEN", "OTELPLANE_ALLOWED_ORIGINS",
+		"OTELPLANE_MAX_REQUEST_BODY_BYTES", "OTELPLANE_ALLOW_INSECURE",
+		"OTELPLANE_HTTP_TLS_ENABLED", "OTELPLANE_HTTP_TLS_TERMINATED",
+		"OTELPLANE_OPAMP_TLS_ENABLED", "OTELPLANE_OPAMP_TLS_TERMINATED",
+		"OTELPLANE_HTTP_TLS_CERT_FILE", "OTELPLANE_HTTP_TLS_KEY_FILE",
+		"OTELPLANE_OPAMP_TLS_CERT_FILE", "OTELPLANE_OPAMP_TLS_KEY_FILE",
+		"OTELPLANE_OPAMP_TLS_CLIENT_CA_FILE", "OTELPLANE_OPAMP_TLS_REQUIRE_CLIENT_CERT",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
+func TestSecurityConfigAllowsLoopbackDefaults(t *testing.T) {
+	clearSecurityEnv(t)
+	cfg, err := loadSecurityConfig("127.0.0.1:8080", "localhost:4320")
+	if err != nil {
+		t.Fatalf("load security config: %v", err)
+	}
+	if cfg.MaxBodyBytes != defaultMaxRequestBodyBytes {
+		t.Fatalf("max body=%d", cfg.MaxBodyBytes)
+	}
+}
+func TestSecurityConfigRequiresRemoteOpAMPToken(t *testing.T) {
+	clearSecurityEnv(t)
+	t.Setenv("OTELPLANE_HTTP_TLS_TERMINATED", "true")
+	if _, err := loadSecurityConfig(":8080", "127.0.0.1:4320"); err != nil {
+		t.Fatalf("terminated TLS and bootstrap authentication should protect remote HTTP: %v", err)
+	}
+
+	t.Setenv("OTELPLANE_AUTH_USERNAME", "operator")
+	t.Setenv("OTELPLANE_AUTH_PASSWORD", "a-strong-password")
+	if _, err := loadSecurityConfig(":8080", ":4320"); err == nil {
+		t.Fatal("expected remote OpAMP listener to require a token")
+	}
+}
+
+func TestSecurityConfigAcceptsProtectedRemoteListeners(t *testing.T) {
+	clearSecurityEnv(t)
+	t.Setenv("OTELPLANE_AUTH_USERNAME", "operator")
+	t.Setenv("OTELPLANE_AUTH_PASSWORD", "a-strong-password")
+	t.Setenv("OTELPLANE_OPAMP_TOKEN", strings.Repeat("t", 32))
+	t.Setenv("OTELPLANE_HTTP_TLS_TERMINATED", "true")
+	t.Setenv("OTELPLANE_OPAMP_TLS_TERMINATED", "true")
+	if _, err := loadSecurityConfig(":8080", ":4320"); err != nil {
+		t.Fatalf("protected remote listeners rejected: %v", err)
+	}
+}
+
+func TestSecurityConfigRejectsWeakSecrets(t *testing.T) {
+	clearSecurityEnv(t)
+	t.Setenv("OTELPLANE_AUTH_USERNAME", "operator")
+	t.Setenv("OTELPLANE_AUTH_PASSWORD", "short")
+	if _, err := loadSecurityConfig("127.0.0.1:8080", "127.0.0.1:4320"); err == nil {
+		t.Fatal("expected weak password rejection")
+	}
+}
+func TestSecurityMiddlewareAuthenticationAndHeaders(t *testing.T) {
+	cfg := securityConfig{
+		HTTPUsername: "operator",
+		HTTPPassword: "a-strong-password",
+		MaxBodyBytes: defaultMaxRequestBodyBytes,
+	}
+	handler := securityMiddleware(cfg, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/agents", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d", unauthorized.Code)
+	}
+	if unauthorized.Header().Get("Content-Security-Policy") == "" {
+		t.Fatal("missing Content-Security-Policy")
+	}
+
+	authorizedRequest := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	authorizedRequest.SetBasicAuth("operator", "a-strong-password")
+	authorized := httptest.NewRecorder()
+	handler.ServeHTTP(authorized, authorizedRequest)
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("authorized status=%d", authorized.Code)
+	}
+
+	health := httptest.NewRecorder()
+	handler.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if health.Code != http.StatusOK {
+		t.Fatalf("health status=%d", health.Code)
+	}
+
+	theme := httptest.NewRecorder()
+	handler.ServeHTTP(theme, httptest.NewRequest(http.MethodGet, "/assets/theme.js", nil))
+	if theme.Code != http.StatusOK {
+		t.Fatalf("public theme asset status=%d", theme.Code)
+	}
+}
+func TestConstantTimeCredentialEqual(t *testing.T) {
+	if !constantTimeCredentialEqual("operator", "operator") {
+		t.Fatal("equal credentials rejected")
+	}
+	if constantTimeCredentialEqual("operator", "Operator") {
+		t.Fatal("different credentials accepted")
+	}
+	if constantTimeCredentialEqual(strings.Repeat("x", maximumCredentialBytes+1), strings.Repeat("x", maximumCredentialBytes+1)) {
+		t.Fatal("oversized credentials accepted")
+	}
+}
+
+func TestSecurityMiddlewareRejectsCrossSiteMutation(t *testing.T) {
+	cfg := securityConfig{MaxBodyBytes: defaultMaxRequestBodyBytes}
+	handler := securityMiddleware(cfg, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	request := httptest.NewRequest(http.MethodPost, "http://otelplane.example/groups", nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("cross-site mutation status=%d", response.Code)
+	}
+}
+
+func TestSecurityMiddlewareLimitsRequestBody(t *testing.T) {
+	cfg := securityConfig{MaxBodyBytes: 1024}
+	handler := securityMiddleware(cfg, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	request := httptest.NewRequest(http.MethodPost, "/groups", strings.NewReader(strings.Repeat("x", 2048)))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized request status=%d", response.Code)
+	}
+}
+
+func TestValidRequestOriginRejectsCrossSiteFetchWithoutOrigin(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "http://otelplane.example/groups", nil)
+	request.Header.Set("Sec-Fetch-Site", "cross-site")
+	if validRequestOrigin(request, nil) {
+		t.Fatal("cross-site browser request without Origin accepted")
+	}
+
+	apiRequest := httptest.NewRequest(http.MethodPost, "http://otelplane.example/api/groups", nil)
+	if !validRequestOrigin(apiRequest, nil) {
+		t.Fatal("non-browser API request without browser origin headers rejected")
+	}
+}
+
+func TestValidRequestOriginAcceptsEquivalentLoopbackAliases(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/setup", nil)
+	request.Host = "127.0.0.1:8080"
+	request.Header.Set("Origin", "http://localhost:8080")
+	if !validRequestOrigin(request, nil) {
+		t.Fatal("equivalent loopback origin rejected")
+	}
+
+	request.Header.Set("Origin", "http://localhost:9090")
+	if validRequestOrigin(request, nil) {
+		t.Fatal("loopback origin with a different port accepted")
+	}
+}
+
+func TestRolePermissionMatrix(t *testing.T) {
+	tests := []struct {
+		name       string
+		role       role
+		permission permission
+		allowed    bool
+	}{
+		{"admin can administer", roleAdmin, permissionAdmin, true},
+		{"admin can approve", roleAdmin, permissionApprove, true},
+		{"operator can edit", roleOperator, permissionEdit, true},
+		{"operator can read", roleOperator, permissionRead, true},
+		{"operator cannot approve", roleOperator, permissionApprove, false},
+		{"operator cannot administer", roleOperator, permissionAdmin, false},
+		{"group owner can edit owned group routes", roleGroupOwner, permissionEdit, true},
+		{"group owner can enter assigned-reviewer route", roleGroupOwner, permissionApprove, true},
+		{"group owner cannot administer", roleGroupOwner, permissionAdmin, false},
+		{"viewer can read", roleViewer, permissionRead, true},
+		{"viewer cannot edit", roleViewer, permissionEdit, false},
+		{"unknown role denied", role("unknown"), permissionRead, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := roleAllows(test.role, test.permission); got != test.allowed {
+				t.Fatalf("roleAllows(%q, %q)=%t, want %t", test.role, test.permission, got, test.allowed)
+			}
+		})
+	}
+}
+
+func TestGroupOwnerRouteScope(t *testing.T) {
+	allowed := []string{"/agents", "/agents/agent-1", "/api/v1/agents", "/groups", "/groups/group-1", "/collector-distributions", "/ownership-lifecycle", "/approvals", "/approvals/request-1", "/api/v1/groups", "/api/v1/groups/group-1/members", "/api/v1/configurations/sections/compose", "/api/v1/configurations/sections/references", "/api/v1/session", "/assets/session.js", "/logout"}
+	for _, path := range allowed {
+		if !groupOwnerRoute(path) {
+			t.Errorf("expected group-owner route %q to be allowed", path)
+		}
+	}
+	for _, path := range []string{"/deployments", "/settings/users", "/audit-log"} {
+		if groupOwnerRoute(path) {
+			t.Errorf("expected non-group route %q to be denied", path)
+		}
+	}
+}
+
+func TestRequiredPermissionProtectsApprovalAndAdministration(t *testing.T) {
+	requestApproval := httptest.NewRequest(http.MethodPost, "/groups/group-1",
+		strings.NewReader("action=request_deployment"))
+	requestApproval.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if got := requiredPermission(requestApproval); got != permissionEdit {
+		t.Fatalf("request deployment permission=%q", got)
+	}
+
+	approve := httptest.NewRequest(http.MethodPost, "/groups/group-1",
+		strings.NewReader("action=approve_deployment"))
+	approve.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if got := requiredPermission(approve); got != permissionApprove {
+		t.Fatalf("approve permission=%q", got)
+	}
+
+	createGroup := httptest.NewRequest(http.MethodPost, "/groups", nil)
+	if got := requiredPermission(createGroup); got != permissionAdmin {
+		t.Fatalf("create group permission=%q", got)
+	}
+
+	saveConfiguration := httptest.NewRequest(http.MethodPost, "/agents/agent-1/configurations", nil)
+	if got := requiredPermission(saveConfiguration); got != permissionEdit {
+		t.Fatalf("save configuration permission=%q", got)
+	}
+}
+
+func TestSecurityMiddlewareEnforcesSessionRole(t *testing.T) {
+	manager := testAuthManager(&memoryAdministratorStore{}, strings.Repeat("p", 32), "bootstrap")
+	handler := securityMiddleware(securityConfig{MaxBodyBytes: defaultMaxRequestBodyBytes}, manager,
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+
+	testRequest := func(principalRole role, method, target, body string) int {
+		t.Helper()
+		token, err := manager.createSessionForRole(string(principalRole), principalRole)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(method, target, strings.NewReader(body))
+		request.AddCookie(&http.Cookie{Name: manager.cookieName(), Value: token})
+		if body != "" {
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response.Code
+	}
+
+	if got := testRequest(roleViewer, http.MethodGet, "/agents", ""); got != http.StatusNoContent {
+		t.Fatalf("viewer read status=%d", got)
+	}
+	if got := testRequest(roleViewer, http.MethodPost, "/agents/a/configurations", "name=test"); got != http.StatusForbidden {
+		t.Fatalf("viewer edit status=%d", got)
+	}
+	if got := testRequest(roleOperator, http.MethodPost, "/agents/a/configurations", "name=test"); got != http.StatusNoContent {
+		t.Fatalf("operator edit status=%d", got)
+	}
+	if got := testRequest(roleOperator, http.MethodPost, "/groups/g", "action=approve_deployment"); got != http.StatusForbidden {
+		t.Fatalf("operator approval status=%d", got)
+	}
+	if got := testRequest(roleAdmin, http.MethodPost, "/groups/g", "action=approve_deployment"); got != http.StatusNoContent {
+		t.Fatalf("admin approval status=%d", got)
+	}
+	if got := testRequest(roleGroupOwner, http.MethodPost, "/groups/g", "action=send_back_deployment"); got != http.StatusNoContent {
+		t.Fatalf("group-owner send-back status=%d", got)
+	}
+	if got := testRequest(roleOperator, http.MethodGet, "/settings/users", ""); got != http.StatusForbidden {
+		t.Fatalf("operator user-management status=%d", got)
+	}
+	if got := testRequest(roleAdmin, http.MethodGet, "/settings/users", ""); got != http.StatusNoContent {
+		t.Fatalf("admin user-management status=%d", got)
+	}
+	if got := testRequest(roleOperator, http.MethodGet, "/audit-log", ""); got != http.StatusForbidden {
+		t.Fatalf("operator audit-log status=%d", got)
+	}
+	if got := testRequest(roleOperator, http.MethodGet, "/approvals", ""); got != http.StatusForbidden {
+		t.Fatalf("operator approvals status=%d", got)
+	}
+	if got := testRequest(roleGroupOwner, http.MethodGet, "/agents", ""); got != http.StatusNoContent {
+		t.Fatalf("group-owner scoped Fleet status=%d", got)
+	}
+	if got := testRequest(roleGroupOwner, http.MethodGet, "/agents/collector-1", ""); got != http.StatusNoContent {
+		t.Fatalf("group-owner scoped Collector status=%d", got)
+	}
+	if got := testRequest(roleGroupOwner, http.MethodGet, "/approvals", ""); got != http.StatusNoContent {
+		t.Fatalf("group-owner approvals status=%d", got)
+	}
+	if got := testRequest(roleGroupOwner, http.MethodGet, "/settings/users", ""); got != http.StatusForbidden {
+		t.Fatalf("group-owner user-management status=%d", got)
+	}
+	if got := testRequest(roleAdmin, http.MethodGet, "/audit-log", ""); got != http.StatusNoContent {
+		t.Fatalf("admin audit-log status=%d", got)
+	}
+}
+
+func TestBrowserAuthorizationDenialRedirectsWithMessage(t *testing.T) {
+	manager := testAuthManager(&memoryAdministratorStore{}, strings.Repeat("p", 32), "bootstrap")
+	handler := securityMiddleware(securityConfig{MaxBodyBytes: defaultMaxRequestBodyBytes}, manager,
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	token, err := manager.createSessionForRole("group-owner", roleGroupOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/deployments", nil)
+	request.Header.Set("Accept", "text/html,application/xhtml+xml")
+	request.AddCookie(&http.Cookie{Name: manager.cookieName(), Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("browser denial status=%d", response.Code)
+	}
+	location := response.Header().Get("Location")
+	if !strings.HasPrefix(location, "/agents?access_denied=") {
+		t.Fatalf("browser denial location=%q", location)
+	}
+}
+
+func TestAPIAuthorizationDenialRemainsForbidden(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin-only", nil)
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+	writeAuthorizationDenied(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("API denial status=%d", response.Code)
+	}
+}
+
+func TestValidRequestOriginAllowsNullOnlyForSameSiteLoopback(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "http://localhost:8080/setup", nil)
+	request.Host = "localhost:8080"
+	request.RemoteAddr = "127.0.0.1:54321"
+	request.Header.Set("Origin", "null")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	if !validRequestOrigin(request, nil) {
+		t.Fatal("same-origin loopback null origin rejected")
+	}
+
+	request.RemoteAddr = "192.0.2.10:54321"
+	if validRequestOrigin(request, nil) {
+		t.Fatal("remote null origin accepted")
+	}
+	request.RemoteAddr = "127.0.0.1:54321"
+	request.Host = "otelplane.example.com"
+	if validRequestOrigin(request, nil) {
+		t.Fatal("non-loopback host with null origin accepted")
+	}
+}

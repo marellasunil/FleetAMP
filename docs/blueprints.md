@@ -1,24 +1,24 @@
 # Blueprints (v0.3.0)
 
-Blueprints provide a guided path from an observability intent to a governed OpenTelemetry Collector deployment. They do not replace FleetAMP configuration versions or deployments; they create the same immutable artifacts used by the existing approval, OpAMP rollout, rollback, drift, and audit workflows.
+Blueprints provide a guided path from an observability intent to a governed OpenTelemetry Collector deployment. They do not replace OTelPlane configuration versions or deployments; they create the same immutable artifacts used by the existing approval, OpAMP rollout, rollback, drift, and audit workflows.
 
 ## Workflow
 
 1. An administrator creates a Destination Profile containing the approved exporter component, endpoint, authentication references, TLS, and environment.
 2. A user or Group Owner chooses a Blueprint and immediately sees the generated Collector structure, including receivers, governed processors and signal pipelines.
-3. The user selects one accessible group and an enabled Destination Profile. FleetAMP updates the preview with that profile's exporter component and non-sensitive settings. Header and credential values are masked; group-secret references remain visible by key.
-4. FleetAMP generates explicit Collector YAML. Memory limiting and batching are included as governed, locked defaults.
-5. FleetAMP validates YAML syntax, Collector structure, and—when `FLEETAMP_OTELCOL_BINARY` is configured—the real Collector distribution.
-6. FleetAMP stores the result as an immutable, group-scoped configuration version.
+3. The user selects one accessible group and an enabled Destination Profile. OTelPlane updates the preview with that profile's exporter component and non-sensitive settings. Header and credential values are masked; group-secret references remain visible by key.
+4. OTelPlane generates explicit Collector YAML. Memory limiting and batching are included as governed, locked defaults.
+5. OTelPlane validates YAML syntax, Collector structure, and—when `OTELPLANE_OTELCOL_BINARY` is configured—the real Collector distribution.
+6. OTelPlane stores the result as an immutable, group-scoped configuration version.
 7. The requester may save the version for review or immediately submit it to an eligible reviewer with a change reason and a 7–90 day validity period.
 8. Approval uses the existing target snapshot and diff. Approval starts the existing OpAMP deployment; failed delivery invokes automatic rollback to the last successful version.
-9. Deployment status, effective configuration, drift, rollback, and audit history remain available in their existing FleetAMP pages.
+9. Deployment status, effective configuration, drift, rollback, and audit history remain available in their existing OTelPlane pages.
 
 ## Using a Blueprint from a group
 
-Open **Groups & Labels**, select the group, and choose **Use Blueprint** from **Create configuration version**. FleetAMP carries the group into the Blueprint catalog and preselects it after a Blueprint is chosen. The generated version returns to the same group workflow for preview, approval, deployment, rollback and history.
+Open **Groups & Labels**, select the group, and choose **Use Blueprint** from **Create configuration version**. OTelPlane carries the group into the Blueprint catalog and preselects it after a Blueprint is chosen. The generated version returns to the same group workflow for preview, approval, deployment, rollback and history.
 
-The manual configuration editor starts from the latest successfully applied deployment. Its section tabs, configuration name and version therefore describe the current working baseline. FleetAMP rejects an unchanged copy, a changed configuration that reuses the baseline version, or an existing name/version pair.
+The manual configuration editor starts from the latest successfully applied deployment. Its section tabs, configuration name and version therefore describe the current working baseline. OTelPlane rejects an unchanged copy, a changed configuration that reuses the baseline version, or an existing name/version pair.
 
 Group deployment history shows governed deploy and rollback attempts in every delivery status. Automatic drift reconciliation remains visible in the Audit log instead of being mixed into this user-facing deployment timeline.
 
@@ -51,11 +51,11 @@ Additional patterns, reusable modules, profile versioning, and richer policy con
 
 ## Guide reference sources
 
-FleetAMP's built-in instrumentation decision catalog follows upstream OpenTelemetry guidance:
+OTelPlane's built-in instrumentation decision catalog follows upstream OpenTelemetry guidance:
 
 - [Zero-code instrumentation](https://opentelemetry.io/docs/zero-code/) for current supported application runtimes and Kubernetes injection.
 - [Collector receiver registry](https://opentelemetry.io/docs/collector/components/receiver/) for host, Kubernetes, database, log and protocol receivers and their maturity.
 - [OpenTelemetry Collector on Kubernetes](https://opentelemetry.io/docs/platforms/kubernetes/collector/) for DaemonSet, cluster-level and gateway deployment guidance.
 - [Go compile-time instrumentation](https://opentelemetry.io/docs/zero-code/go/compile-time/) for the stable build-time Go option; eBPF-based Go instrumentation remains a separate choice.
 
-Administrators can customize the catalog for the Collector distribution and organizational standards they operate. FleetAMP preserves those custom publications and automatically upgrades only an untouched built-in catalog.
+Administrators can customize the catalog for the Collector distribution and organizational standards they operate. OTelPlane preserves those custom publications and automatically upgrades only an untouched built-in catalog.

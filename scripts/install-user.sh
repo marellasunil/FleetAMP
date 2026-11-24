@@ -3,22 +3,22 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-SERVICE_NAME="fleetamp.service"
-BINARY_PATH="${FLEETAMP_INSTALL_BIN:-$HOME/.local/bin/fleetamp}"
+SERVICE_NAME="otelplane.service"
+BINARY_PATH="${OTELPLANE_INSTALL_BIN:-$HOME/.local/bin/otelplane}"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-UNIT_PATH="$UNIT_DIR/fleetamp.service"
-OVERRIDE_DIR="$UNIT_DIR/fleetamp.service.d"
+UNIT_PATH="$UNIT_DIR/otelplane.service"
+OVERRIDE_DIR="$UNIT_DIR/otelplane.service.d"
 OVERRIDE_PATH="$OVERRIDE_DIR/10-local-paths.conf"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/fleetamp"
-CREDENTIAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/fleetamp/credentials"
-TLS_DIR="${FLEETAMP_TLS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/fleetamp/tls}"
-PEPPER_CREDENTIAL="$CREDENTIAL_DIR/fleetamp-server-pepper.cred"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/otelplane"
+CREDENTIAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/otelplane/credentials"
+TLS_DIR="${OTELPLANE_TLS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/otelplane/tls}"
+PEPPER_CREDENTIAL="$CREDENTIAL_DIR/otelplane-server-pepper.cred"
 BACKUP_ROOT="$STATE_DIR/backups"
-HEALTH_URL="${FLEETAMP_HEALTH_URL:-http://127.0.0.1:8080/health}"
-HEALTH_TIMEOUT="${FLEETAMP_HEALTH_TIMEOUT:-30}"
+HEALTH_URL="${OTELPLANE_HEALTH_URL:-http://127.0.0.1:8080/health}"
+HEALTH_TIMEOUT="${OTELPLANE_HEALTH_TIMEOUT:-30}"
 ACTION="${1:-upgrade}"
 
-log() { printf '[fleetamp-install] %s\n' "$*"; }
+log() { printf '[otelplane-install] %s\n' "$*"; }
 fail() { log "ERROR: $*" >&2; exit 1; }
 
 require_command() {
@@ -41,7 +41,7 @@ ensure_server_pepper() {
   log "Creating server-bound encrypted credential ($key_mode)"
   head -c 48 /dev/urandom | base64 |
     systemd-creds encrypt --user --with-key="$key_mode" \
-      --name=fleetamp-server-pepper - "$PEPPER_CREDENTIAL"
+      --name=otelplane-server-pepper - "$PEPPER_CREDENTIAL"
   chmod 0600 "$PEPPER_CREDENTIAL"
 }
 
@@ -62,17 +62,17 @@ restore_backup() {
 
   log "Restoring service files and binary from $backup_dir"
   systemctl_user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-  [[ -f "$backup_dir/fleetamp" ]] &&
-    install -D -m 0755 "$backup_dir/fleetamp" "$BINARY_PATH"
-  [[ -f "$backup_dir/fleetamp.service" ]] &&
-    install -D -m 0644 "$backup_dir/fleetamp.service" "$UNIT_PATH"
+  [[ -f "$backup_dir/otelplane" ]] &&
+    install -D -m 0755 "$backup_dir/otelplane" "$BINARY_PATH"
+  [[ -f "$backup_dir/otelplane.service" ]] &&
+    install -D -m 0644 "$backup_dir/otelplane.service" "$UNIT_PATH"
   [[ -f "$backup_dir/10-local-paths.conf" ]] &&
     install -D -m 0644 "$backup_dir/10-local-paths.conf" "$OVERRIDE_PATH"
 
   systemctl_user daemon-reload
   systemctl_user start "$SERVICE_NAME"
   wait_for_health || fail "restored service did not become healthy"
-  log "Rollback completed and FleetAMP is healthy"
+  log "Rollback completed and OTelPlane is healthy"
 }
 if [[ "$ACTION" == "rollback" ]]; then
   require_command systemctl
@@ -106,8 +106,8 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 log "Running Go tests"
 (cd "$REPO_ROOT" && go test ./...)
 
-log "Building FleetAMP"
-(cd "$REPO_ROOT" && go build -trimpath -o "$BUILD_DIR/fleetamp" ./cmd/fleetamp)
+log "Building OTelPlane"
+(cd "$REPO_ROOT" && go build -trimpath -o "$BUILD_DIR/otelplane" ./cmd/otelplane)
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="$BACKUP_ROOT/$TIMESTAMP"
 mkdir -p "$BACKUP_DIR" "$UNIT_DIR" "$OVERRIDE_DIR" "$STATE_DIR/log" "$TLS_DIR"
@@ -118,33 +118,33 @@ if systemctl_user is-active --quiet "$SERVICE_NAME"; then
   SERVICE_WAS_ACTIVE=true
 fi
 
-log "Stopping FleetAMP for a consistent state backup"
+log "Stopping OTelPlane for a consistent state backup"
 systemctl_user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
 
-[[ -f "$BINARY_PATH" ]] && cp -a "$BINARY_PATH" "$BACKUP_DIR/fleetamp"
-[[ -f "$UNIT_PATH" ]] && cp -a "$UNIT_PATH" "$BACKUP_DIR/fleetamp.service"
+[[ -f "$BINARY_PATH" ]] && cp -a "$BINARY_PATH" "$BACKUP_DIR/otelplane"
+[[ -f "$UNIT_PATH" ]] && cp -a "$UNIT_PATH" "$BACKUP_DIR/otelplane.service"
 [[ -f "$OVERRIDE_PATH" ]] &&
   cp -a "$OVERRIDE_PATH" "$BACKUP_DIR/10-local-paths.conf"
 if [[ -d "$REPO_ROOT/data" ]]; then
   tar -C "$REPO_ROOT" -czf "$BACKUP_DIR/data.tar.gz" data
 fi
 
-install -D -m 0755 "$BUILD_DIR/fleetamp" "$BINARY_PATH"
-install -D -m 0644 "$REPO_ROOT/deploy/systemd/fleetamp-user.service" "$UNIT_PATH"
+install -D -m 0755 "$BUILD_DIR/otelplane" "$BINARY_PATH"
+install -D -m 0644 "$REPO_ROOT/deploy/systemd/otelplane-user.service" "$UNIT_PATH"
 printf '%s\n' \
   '[Service]' \
   "WorkingDirectory=$REPO_ROOT" \
-  "Environment=FLEETAMP_DATA_DIR=$REPO_ROOT/data" \
-  "Environment=FLEETAMP_DATABASE_PATH=$REPO_ROOT/data/fleetamp.db" \
+  "Environment=OTELPLANE_DATA_DIR=$REPO_ROOT/data" \
+  "Environment=OTELPLANE_DATABASE_PATH=$REPO_ROOT/data/otelplane.db" \
   >"$OVERRIDE_PATH"
 
 systemctl_user daemon-reload
 systemctl_user enable "$SERVICE_NAME" >/dev/null
 
-log "Starting upgraded FleetAMP"
+log "Starting upgraded OTelPlane"
 if ! systemctl_user start "$SERVICE_NAME" || ! wait_for_health; then
   log "Upgrade verification failed; restoring the previous installation"
-  if [[ -f "$BACKUP_DIR/fleetamp" ]]; then
+  if [[ -f "$BACKUP_DIR/otelplane" ]]; then
     restore_backup "$BACKUP_DIR"
   else
     systemctl_user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
@@ -153,7 +153,7 @@ if ! systemctl_user start "$SERVICE_NAME" || ! wait_for_health; then
   exit 1
 fi
 
-log "FleetAMP is healthy at $HEALTH_URL"
+log "OTelPlane is healthy at $HEALTH_URL"
 log "Backup saved at $BACKUP_DIR"
 if [[ "$SERVICE_WAS_ACTIVE" == false ]]; then
   log "The service was previously inactive and is now enabled and running"

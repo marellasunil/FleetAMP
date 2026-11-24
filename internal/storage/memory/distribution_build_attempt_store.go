@@ -3,7 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
-	"github.com/marellasunil/FleetAMP/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
 	"sort"
 	"sync"
 )

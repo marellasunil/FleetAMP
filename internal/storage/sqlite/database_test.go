@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/groups"
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
-	"github.com/marellasunil/FleetAMP/internal/runtimes"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/runtimes"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 func TestComponentLifecycleRequestPersistsImmutableSpecification(t *testing.T) {
@@ -283,7 +283,7 @@ func TestExistingUsersTableMigratesGroupOwnerRole(t *testing.T) {
 
 func TestConfigurationAndAssignmentPersistence(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "fleetamp.db")
+	path := filepath.Join(t.TempDir(), "otelplane.db")
 	db, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
@@ -333,7 +333,7 @@ func TestConfigurationAndAssignmentPersistence(t *testing.T) {
 
 func TestDeploymentHistoryPersistenceAndStatus(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "fleetamp.db")
+	path := filepath.Join(t.TempDir(), "otelplane.db")
 	db, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)

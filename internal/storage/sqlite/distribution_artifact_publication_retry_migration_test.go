@@ -30,11 +30,11 @@ func TestArtifactPublicationExecutionRetryMigrationPreservesReceipt(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = raw.Exec(`INSERT INTO distribution_artifact_publications VALUES('publication-1','promotion-1','review-1','artifact-1','artifact-hash','oci://registry.example.test/fleetamp:v1','secret://registry','queued','pub-hash','admin','2026-10-22T11:58:00Z')`)
+	_, err = raw.Exec(`INSERT INTO distribution_artifact_publications VALUES('publication-1','promotion-1','review-1','artifact-1','artifact-hash','oci://registry.example.test/otelplane:v1','secret://registry','queued','pub-hash','admin','2026-10-22T11:58:00Z')`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = raw.Exec(`INSERT INTO distribution_artifact_publication_preflights VALUES('preflight-1','publication-1','pub-hash','artifact-1','artifact-cache://artifact-hash/fleetamp-collector','artifact-hash',8,'oci://registry.example.test/fleetamp:v1','registry.example.test','secret://registry',1,'passed','pre-hash','admin','2026-10-22T11:59:00Z')`)
+	_, err = raw.Exec(`INSERT INTO distribution_artifact_publication_preflights VALUES('preflight-1','publication-1','pub-hash','artifact-1','artifact-cache://artifact-hash/otelplane-collector','artifact-hash',8,'oci://registry.example.test/otelplane:v1','registry.example.test','secret://registry',1,'passed','pre-hash','admin','2026-10-22T11:59:00Z')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestArtifactPublicationExecutionRetryMigrationPreservesReceipt(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = raw.Exec(`INSERT INTO distribution_artifact_publication_executions VALUES('execution-1','publication-1','pub-hash','preflight-1','pre-hash','artifact-1','artifact-hash','oci://registry.example.test/fleetamp:v1','secret://registry','failed','publisher-error','failure-hash','worker-1','evidence-hash','2026-10-22T12:00:00Z','2026-10-22T12:00:01Z')`)
+	_, err = raw.Exec(`INSERT INTO distribution_artifact_publication_executions VALUES('execution-1','publication-1','pub-hash','preflight-1','pre-hash','artifact-1','artifact-hash','oci://registry.example.test/otelplane:v1','secret://registry','failed','publisher-error','failure-hash','worker-1','evidence-hash','2026-10-22T12:00:00Z','2026-10-22T12:00:01Z')`)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 func TestAgentStoreUpsertGetListDelete(t *testing.T) {

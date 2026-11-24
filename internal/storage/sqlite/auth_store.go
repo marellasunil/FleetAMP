@@ -1,4 +1,4 @@
-// SQLite persistence for FleetAMP users and RBAC roles.
+// SQLite persistence for OTelPlane users and RBAC roles.
 package sqlite
 
 import (

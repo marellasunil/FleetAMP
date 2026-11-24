@@ -1,0 +1,1260 @@
+// OTelPlane application entry point.
+//
+// Purpose:
+//   Wires the management protocol adapter, stores, lifecycle/event handling,
+//   REST API, and lightweight web UI into one OTelPlane server process.
+//
+// Runtime flow:
+//   OpAMP client -> internal/opamp.Adapter -> ManagedAgent/config events
+//   -> stores -> lifecycle/history -> REST API and /agents UI.
+//
+// Main dependencies:
+//   internal/opamp, internal/agents, internal/configs, internal/events,
+//   internal/storage/memory, internal/storage/file, and internal/storage/sqlite.
+//
+// Configuration:
+//   OTELPLANE_HTTP_ADDR, OTELPLANE_OPAMP_ADDR, OTELPLANE_DATA_DIR,
+//   OTELPLANE_RETIRE_AFTER, OTELPLANE_DATABASE_PATH, and OTELPLANE_OTELCOL_BINARY
+//   control listeners, persistence, lifecycle retirement, and validation.
+//
+// Design note:
+//   Protocol-specific OpAMP types stay behind the adapter boundary; core
+//   OTelPlane code works with protocol-independent domain models.
+
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html/template"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"regexp"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/marellasunil/OTelPlane/internal/addons"
+	"github.com/marellasunil/OTelPlane/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/events"
+	"github.com/marellasunil/OTelPlane/internal/gitops"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/integrations"
+	fleetopamp "github.com/marellasunil/OTelPlane/internal/opamp"
+	"github.com/marellasunil/OTelPlane/internal/storage"
+	filestore "github.com/marellasunil/OTelPlane/internal/storage/file"
+	"github.com/marellasunil/OTelPlane/internal/storage/memory"
+	sqlitestore "github.com/marellasunil/OTelPlane/internal/storage/sqlite"
+)
+
+type healthResponse struct {
+	Status  string `json:"status"`
+	Service string `json:"service"`
+	Time    string `json:"time"`
+}
+
+var agentDisplayNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+// main assembles OTelPlane's stores, authentication, OpAMP adapter, HTTP pages/APIs, background workers, and graceful shutdown.
+func main() {
+	if versionRequested(os.Args[1:]) {
+		writeVersion(os.Stdout)
+		return
+	}
+	if handled, err := handleAdminCommand(context.Background(), os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return
+	}
+
+	closeLog := configureLogging()
+	defer closeLog()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	httpAddr := envOrDefault("OTELPLANE_HTTP_ADDR", "127.0.0.1:8080")
+	opampAddr := envOrDefault("OTELPLANE_OPAMP_ADDR", "127.0.0.1:4320")
+	security, err := loadSecurityConfig(httpAddr, opampAddr)
+	if err != nil {
+		fatalLog("validate security configuration", err)
+	}
+	transportTLS, err := loadTransportTLSConfig()
+	if err != nil {
+		fatalLog("load TLS configuration", err)
+	}
+	agentStore := memory.NewAgentStore()
+	dataDir := envOrDefault("OTELPLANE_DATA_DIR", "./data")
+	eventStore, err := filestore.NewEventStore(dataDir)
+	if err != nil {
+		fatalLog("initialize event store", err)
+	}
+	if err := loadAgentSnapshot(ctx, agentStore, dataDir); err != nil {
+		fatalLog("load agent snapshot", err)
+	}
+	retireAfter := durationEnvOrDefault("OTELPLANE_RETIRE_AFTER", 24*time.Hour)
+	databasePath := envOrDefault("OTELPLANE_DATABASE_PATH", dataDir+"/otelplane.db")
+	database, err := sqlitestore.Open(ctx, databasePath)
+	if err != nil {
+		fatalLog("initialize sqlite database", err)
+	}
+	defer database.Close()
+	auth, err := newAuthManager(ctx, database.Authentication(), dataDir, httpAddr)
+	if err != nil {
+		fatalLog("initialize authentication", err)
+	}
+	notifier, err := loadApprovalNotifier(database.Authentication())
+	if err != nil {
+		fatalLog("initialize approval notifications", err)
+	}
+	configStore := database.Configurations()
+	configurationTemplateStore := database.ConfigurationTemplates()
+	assignmentStore := database.Assignments()
+	deploymentStore := database.Deployments()
+	groupStore := database.Groups()
+	auth.groupStore = groupStore
+	groupRequestStore := database.GroupDeploymentRequests()
+	membershipChangeStore := database.MembershipChanges()
+	destinationProfileStore := database.DestinationProfiles()
+	sectionPolicyStore := database.SectionPolicies()
+	driftPolicyStore := database.DriftPolicy()
+	auditStore := database.Audit()
+	groupSecretStore := database.GroupSecrets()
+	migrationStore := database.Migrations()
+	componentLifecycleRequestStore := database.ComponentLifecycleRequests()
+	componentLifecycleValidationStore := database.ComponentLifecycleValidations()
+	componentLifecycleApprovalStore := database.ComponentLifecycleApprovals()
+	componentLifecycleExecutionStore := database.ComponentLifecycleExecutions()
+	componentGitOpsPreviewStore := database.ComponentGitOpsPreviews()
+	gitOpsPreviewApprovalStore := database.GitOpsPreviewApprovals()
+	gitOpsExecutionStore := database.GitOpsExecutions()
+	integrationConnectionStore := database.IntegrationConnections()
+	integrationValidationStore := database.IntegrationValidations()
+	distributionStore := database.Distributions()
+	distributionPreviewStore := database.DistributionPreviews()
+	distributionPreviewHandoffStore := database.DistributionPreviewHandoffs()
+	distributionBuildPlanStore := database.DistributionBuildPlans()
+	distributionBuildApprovalStore := database.DistributionBuildApprovals()
+	distributionBuildExecutionStore := database.DistributionBuildExecutions()
+	distributionBuildPreflightStore := database.DistributionBuildPreflights()
+	distributionBuildWorkerResultStore := database.DistributionBuildWorkerResults()
+	distributionBuildSourceStore := database.DistributionBuildSources()
+	distributionBuildSourceAcquisitionStore := database.DistributionBuildSourceAcquisitions()
+	distributionBuildSourceInspectionStore := database.DistributionBuildSourceInspections()
+	distributionBuildArtifactStore := database.DistributionBuildArtifacts()
+	distributionBuildAttemptStore := database.DistributionBuildAttempts()
+	distributionBuildRetryRequestStore := database.DistributionBuildRetryRequests()
+	distributionArtifactPromotionStore := database.DistributionArtifactPromotions()
+	distributionArtifactPromotionReviewStore := database.DistributionArtifactPromotionReviews()
+	distributionArtifactPublicationStore := database.DistributionArtifactPublications()
+	distributionArtifactPublicationPreflightStore := database.DistributionArtifactPublicationPreflights()
+	distributionArtifactPublicationExecutionStore := database.DistributionArtifactPublicationExecutions()
+	distributionReleaseStore := database.DistributionReleases()
+	integrationValidator := &integrations.ConnectionValidator{Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("OTELPLANE_INTEGRATION_HTTP_TIMEOUT", 15*time.Second)}, AllowedHosts: commaSeparatedEnv("OTELPLANE_INTEGRATION_ALLOWED_HOSTS")}
+	runtimeGroupSecrets = &groupSecretService{store: groupSecretStore, pepper: auth.pepper}
+	configValidator := configs.NewValidator(os.Getenv("OTELPLANE_OTELCOL_BINARY"))
+	adapter := fleetopamp.NewAdapter(opampAddr, security.OpAMPToken, transportTLS.OpAMP.Config)
+	go runApprovalExpiryLoop(ctx, groupRequestStore, groupStore, notifier)
+	if boolEnv("OTELPLANE_GITOPS_WORKER_ENABLED") {
+		workerID := envOrDefault("OTELPLANE_GITOPS_WORKER_ID", "otelplane-local-worker")
+		gitOpsAdapters := gitops.NewDryRunRegistry()
+		if boolEnv("OTELPLANE_GITOPS_GITHUB_WRITES_ENABLED") {
+			githubAdapter := &gitops.GitHubAdapter{Connections: integrationConnectionStore, Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, Client: &http.Client{Timeout: durationEnvOrDefault("OTELPLANE_GITOPS_HTTP_TIMEOUT", 30*time.Second)}}
+			if err := gitOpsAdapters.Register("github", githubAdapter); err != nil {
+				fatalLog("initialize GitHub GitOps adapter", err)
+			}
+			slog.Warn("GitHub GitOps repository writes enabled", "component", "gitops_worker", "worker_id", workerID)
+			if boolEnv("OTELPLANE_GITOPS_GITHUB_STATUS_SYNC_ENABLED") {
+				statusSyncID := envOrDefault("OTELPLANE_GITOPS_STATUS_SYNC_ID", workerID+"-status")
+				statusSync := &gitops.StatusSynchronizer{ID: statusSyncID, Executions: gitOpsExecutionStore, Previews: componentGitOpsPreviewStore, Adapters: gitOpsAdapters}
+				go statusSync.Run(ctx, durationEnvOrDefault("OTELPLANE_GITOPS_STATUS_SYNC_INTERVAL", 30*time.Second))
+				slog.Info("GitHub pull request status synchronization enabled", "component", "gitops_status_sync", "synchronizer_id", statusSyncID)
+			}
+		}
+		gitOpsWorker := &gitops.Worker{ID: workerID, Executions: gitOpsExecutionStore, Previews: componentGitOpsPreviewStore, Adapters: gitOpsAdapters, LeaseTTL: durationEnvOrDefault("OTELPLANE_GITOPS_LEASE_TTL", 30*time.Second)}
+		go gitOpsWorker.Run(ctx, durationEnvOrDefault("OTELPLANE_GITOPS_WORKER_INTERVAL", 5*time.Second))
+		slog.Info("GitOps worker enabled", "component", "gitops_worker", "worker_id", workerID)
+	}
+	if boolEnv("OTELPLANE_DISTRIBUTION_BUILD_WORKER_ENABLED") {
+		workerID := envOrDefault("OTELPLANE_DISTRIBUTION_BUILD_WORKER_ID", "otelplane-build-dry-run")
+		worker := &distributionBuildWorker{ID: workerID, Executions: distributionBuildExecutionStore, Preflights: distributionBuildPreflightStore, Results: distributionBuildWorkerResultStore, Sources: distributionBuildSourceStore}
+		go worker.run(ctx, durationEnvOrDefault("OTELPLANE_DISTRIBUTION_BUILD_WORKER_INTERVAL", 5*time.Second))
+		slog.Info("Collector distribution dry-run worker enabled", "component", "distribution_build_worker", "worker_id", workerID, "adapter", "dry-run")
+	}
+	if boolEnv("OTELPLANE_DISTRIBUTION_SOURCE_DOWNLOAD_ENABLED") {
+		downloaderID := envOrDefault("OTELPLANE_DISTRIBUTION_SOURCE_DOWNLOADER_ID", "otelplane-source-downloader")
+		fetcher := distributions.NewRestrictedHTTPSourceFetcher(dataDir+"/distribution-sources", durationEnvOrDefault("OTELPLANE_DISTRIBUTION_SOURCE_DOWNLOAD_TIMEOUT", 2*time.Minute), int64EnvOrDefault("OTELPLANE_DISTRIBUTION_SOURCE_MAX_BYTES", 256<<20))
+		downloader := &distributionSourceDownloader{ID: downloaderID, Sources: distributionBuildSourceStore, Acquisitions: distributionBuildSourceAcquisitionStore, Fetcher: fetcher}
+		go downloader.run(ctx, durationEnvOrDefault("OTELPLANE_DISTRIBUTION_SOURCE_DOWNLOAD_INTERVAL", 30*time.Second))
+		slog.Warn("official Collector source downloads enabled", "component", "distribution_source_downloader", "worker_id", downloaderID, "host", "codeload.github.com")
+	}
+	if boolEnv("OTELPLANE_DISTRIBUTION_SOURCE_INSPECTION_ENABLED") {
+		inspectorID := envOrDefault("OTELPLANE_DISTRIBUTION_SOURCE_INSPECTOR_ID", "otelplane-source-inspector")
+		inspector := &distributionSourceInspector{ID: inspectorID, CacheDir: dataDir + "/distribution-sources", Acquisitions: distributionBuildSourceAcquisitionStore, Inspections: distributionBuildSourceInspectionStore, Executions: distributionBuildExecutionStore, Limits: distributions.ArchiveInspectionLimits{MaxEntries: int64EnvOrDefault("OTELPLANE_DISTRIBUTION_SOURCE_MAX_ENTRIES", 100000), MaxUncompressedBytes: int64EnvOrDefault("OTELPLANE_DISTRIBUTION_SOURCE_MAX_UNCOMPRESSED_BYTES", 1<<30)}}
+		go inspector.run(ctx, durationEnvOrDefault("OTELPLANE_DISTRIBUTION_SOURCE_INSPECTION_INTERVAL", 30*time.Second))
+		slog.Warn("Collector source archive inspection enabled", "component", "distribution_source_inspector", "worker_id", inspectorID, "execution", "disabled")
+	}
+	if boolEnv("OTELPLANE_DISTRIBUTION_OCB_BUILD_ENABLED") {
+		workerID := envOrDefault("OTELPLANE_DISTRIBUTION_OCB_WORKER_ID", "otelplane-ocb-worker")
+		runner := &distributions.ContainerOCBRunner{Runtime: envOrDefault("OTELPLANE_DISTRIBUTION_OCB_RUNTIME", "podman"), BuilderImage: strings.TrimSpace(os.Getenv("OTELPLANE_DISTRIBUTION_OCB_IMAGE")), WorkspaceRoot: dataDir + "/distribution-build-workspaces", ArtifactRoot: dataDir + "/distribution-artifacts", MemoryLimit: envOrDefault("OTELPLANE_DISTRIBUTION_OCB_MEMORY", "1g"), CPULimit: envOrDefault("OTELPLANE_DISTRIBUTION_OCB_CPUS", "1"), PIDsLimit: int64EnvOrDefault("OTELPLANE_DISTRIBUTION_OCB_PIDS", 256), MaxArtifactBytes: int64EnvOrDefault("OTELPLANE_DISTRIBUTION_OCB_MAX_ARTIFACT_BYTES", 512<<20)}
+		if err := runner.Validate(); err != nil {
+			fatalLog("initialize sandboxed OCB runner", err)
+		}
+		worker := &distributionOCBWorker{ID: workerID, Inspections: distributionBuildSourceInspectionStore, Artifacts: distributionBuildArtifactStore, Attempts: distributionBuildAttemptStore, Retries: distributionBuildRetryRequestStore, Runner: runner, BuildTimeout: durationEnvOrDefault("OTELPLANE_DISTRIBUTION_OCB_TIMEOUT", 15*time.Minute), RetryBackoff: durationEnvOrDefault("OTELPLANE_DISTRIBUTION_OCB_RETRY_BACKOFF", time.Minute), MaxAutomaticAttempts: boundedIntEnvOrDefault("OTELPLANE_DISTRIBUTION_OCB_MAX_ATTEMPTS", 3, 1, 10)}
+		go worker.run(ctx, durationEnvOrDefault("OTELPLANE_DISTRIBUTION_OCB_INTERVAL", 30*time.Second))
+		slog.Warn("offline sandboxed OCB builds enabled", "component", "distribution_ocb_worker", "worker_id", workerID, "runtime", runner.Runtime, "builder_image", runner.BuilderImage, "network", "none")
+	}
+	publicationWorkerEnabled := boolEnv("OTELPLANE_DISTRIBUTION_PUBLICATION_WORKER_ENABLED")
+	if publicationWorkerEnabled {
+		publisher := &distributions.ORASArtifactPublisher{Executable: envOrDefault("OTELPLANE_DISTRIBUTION_ORAS_BINARY", "oras"), ArtifactRoot: dataDir + "/distribution-artifacts", StagingRoot: dataDir + "/distribution-publication-staging", Username: envOrDefault("OTELPLANE_DISTRIBUTION_REGISTRY_USERNAME", "oauth2"), Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, MaxBytes: int64EnvOrDefault("OTELPLANE_DISTRIBUTION_PUBLICATION_MAX_ARTIFACT_BYTES", 512<<20)}
+		if err := publisher.Validate(); err != nil {
+			fatalLog("initialize artifact registry publisher", err)
+		}
+		workerID := envOrDefault("OTELPLANE_DISTRIBUTION_PUBLICATION_WORKER_ID", "otelplane-artifact-publisher")
+		worker := &distributionArtifactPublicationWorker{ID: workerID, Executions: distributionArtifactPublicationExecutionStore, Publisher: publisher, LeaseTTL: durationEnvOrDefault("OTELPLANE_DISTRIBUTION_PUBLICATION_LEASE_TTL", 20*time.Minute), Timeout: durationEnvOrDefault("OTELPLANE_DISTRIBUTION_PUBLICATION_TIMEOUT", 15*time.Minute)}
+		go worker.run(ctx, durationEnvOrDefault("OTELPLANE_DISTRIBUTION_PUBLICATION_INTERVAL", 30*time.Second))
+		slog.Warn("artifact registry publication worker enabled", "component", "distribution_artifact_publisher", "worker_id", workerID, "publisher", "oras")
+	}
+
+	go func() {
+		if err := adapter.Start(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("OpAMP server stopped", "component", "opamp", "event", "server_stopped", "error", err)
+			stop()
+		}
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event := <-adapter.Events():
+				if event.Agent == nil {
+					continue
+				}
+				now := time.Now().UTC()
+				previous, _ := agentStore.Get(ctx, event.Agent.InstanceUID)
+				if previous == nil && (event.Type == "connected" || event.Type == "updated") {
+					if sourceUID, inherited := inheritManagedMetadataByStableID(ctx, agentStore, event.Agent); inherited {
+						slog.Info("agent managed metadata reassociated", "component", "agents", "event", "identity_reassociated",
+							"source_agent_uid", sourceUID, "agent_uid", event.Agent.InstanceUID,
+							"stable_agent_id", event.Agent.Attributes[stableAgentIDAttribute])
+					}
+				}
+				switch event.Type {
+				case "connected", "updated":
+					event.Agent.Status = agents.LifecycleConnected
+					event.Agent.DisconnectedAt = nil
+					event.Agent.RetiredAt = nil
+				case "disconnected":
+					event.Agent.Status = agents.LifecycleDisconnected
+					event.Agent.Healthy = false
+					event.Agent.DisconnectedAt = &now
+				}
+				if previous != nil {
+					event.Agent.DisplayName = previous.DisplayName
+					event.Agent.ManagementAuthority = previous.ManagementAuthority
+					event.Agent.AuthorityUpdatedBy = previous.AuthorityUpdatedBy
+					event.Agent.AuthorityUpdatedAt = previous.AuthorityUpdatedAt
+					event.Agent.Labels = copyStringMap(previous.Labels)
+					event.Agent.GroupFields = copyStringMap(previous.GroupFields)
+					event.Agent.ExcludedGroupIDs = append([]string(nil), previous.ExcludedGroupIDs...)
+				}
+				if previous != nil && !previous.FirstSeen.IsZero() {
+					event.Agent.FirstSeen = previous.FirstSeen
+				} else if event.Agent.FirstSeen.IsZero() {
+					event.Agent.FirstSeen = now
+				}
+				if err := agentStore.Upsert(ctx, event.Agent); err != nil && ctx.Err() == nil {
+					slog.Error("failed to store agent", "component", "agents", "event", "store_failed", "agent_uid", event.Agent.InstanceUID, "error", err)
+				} else if err := saveAgentSnapshot(ctx, agentStore, dataDir); err != nil && ctx.Err() == nil {
+					slog.Error("failed to save agent snapshot", "component", "agents", "event", "snapshot_save_failed", "error", err)
+				} else if event.Type == "connected" || event.Type == "updated" {
+					group, reconcileErr := reconcileDynamicGroupMembership(ctx, event.Agent, groupStore, agentStore, configStore, groupRequestStore, assignmentStore, deploymentStore, adapter, dataDir)
+					if reconcileErr != nil && ctx.Err() == nil {
+						slog.Warn("dynamic group membership not applied", "component", "groups", "event", "dynamic_membership_failed", "agent_uid", event.Agent.InstanceUID, "error", reconcileErr)
+					} else if group != nil {
+						slog.Info("dynamic group membership applied", "component", "groups", "event", "dynamic_membership_applied", "agent_uid", event.Agent.InstanceUID, "group_id", group.ID, "group_name", group.Name)
+					}
+				}
+				if event.Type == "connected" || event.Type == "disconnected" {
+					_ = eventStore.Append(ctx, &events.AgentEvent{AgentInstanceUID: event.Agent.InstanceUID, AgentName: event.Agent.Name, Type: events.Type(event.Type), Timestamp: now})
+				}
+				if previous != nil && previous.Healthy != event.Agent.Healthy {
+					_ = eventStore.Append(ctx, &events.AgentEvent{AgentInstanceUID: event.Agent.InstanceUID, AgentName: event.Agent.Name, Type: events.HealthChanged, Timestamp: now, Metadata: map[string]string{"healthy": fmt.Sprintf("%t", event.Agent.Healthy)}})
+				}
+				slog.Info("agent state changed", "component", "agents", "event", event.Type,
+					"agent_uid", event.Agent.InstanceUID, "agent_name", event.Agent.Name,
+					"connected", event.Agent.Connected, "healthy", event.Agent.Healthy, "status", event.Agent.Status)
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case report := <-adapter.ConfigEvents():
+				if err := assignmentStore.UpdateByAgentHash(ctx, report.AgentInstanceUID, report.ConfigurationHash, report.Status, report.Error); err != nil && ctx.Err() == nil {
+					slog.Error("failed to update configuration status", "component", "config", "event", "status_update_failed", "agent_uid", report.AgentInstanceUID, "config_hash", report.ConfigurationHash, "error", err)
+				}
+				if err := deploymentStore.UpdateLatestByAgentHash(ctx, report.AgentInstanceUID, report.ConfigurationHash, report.Status, report.Error); err != nil && !errors.Is(err, storage.ErrDeploymentNotFound) && ctx.Err() == nil {
+					slog.Error("failed to update deployment status", "component", "deployment", "event", "status_update_failed", "agent_uid", report.AgentInstanceUID, "config_hash", report.ConfigurationHash, "error", err)
+				}
+				if report.Status == configs.DeliveryFailed || report.Status == configs.DeliveryUnsupported {
+					attemptAutomaticRollback(ctx, report.AgentInstanceUID, report.ConfigurationHash, configStore, assignmentStore, deploymentStore, adapter)
+				}
+			}
+		}
+	}()
+
+	go runRetirementLoop(ctx, agentStore, eventStore, retireAfter, dataDir)
+	go runDriftReconciler(ctx, driftPolicyStore, assignmentStore, configStore, deploymentStore, auditStore, adapter)
+
+	mux := http.NewServeMux()
+	auth.registerRoutes(mux)
+	registerHealthRoutes(mux)
+	registerAgentRoutes(mux, agentStore, configStore, assignmentStore, deploymentStore, groupStore, eventStore, adapter, sectionPolicyStore, auth, dataDir)
+	registerConfigRoutes(mux, configStore, assignmentStore, deploymentStore, agentStore, configValidator, adapter, sectionPolicyStore, auth)
+	registerSectionEditorRoutes(mux, sectionPolicyStore, configValidator, auth)
+	registerDriftPolicyRoutes(mux, driftPolicyStore, auth)
+	registerAuditRoutes(mux, auditStore)
+	registerGroupRoutes(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, distributionStore, configValidator, adapter, sectionPolicyStore, auth, notifier, dataDir)
+	registerMembershipRoutes(mux, membershipChangeStore, groupStore, agentStore, configStore, assignmentStore, deploymentStore, groupRequestStore, adapter, auth, dataDir)
+	registerOwnershipLifecycleRoutes(mux, membershipChangeStore, groupStore, auth)
+	registerApprovalRoutes(mux, groupRequestStore, configStore, groupStore, notifier, auth)
+	registerComponentLifecycleApprovalRoutes(mux, componentLifecycleApprovalStore, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleExecutionStore, groupStore, auth)
+	registerGitOpsPreviewRoutes(mux, componentLifecycleExecutionStore, componentLifecycleRequestStore, componentGitOpsPreviewStore, gitOpsPreviewApprovalStore, gitOpsExecutionStore, integrationConnectionStore, integrationValidationStore, groupStore, auth)
+	registerGitOpsExecutionRoutes(mux, gitOpsExecutionStore, componentGitOpsPreviewStore, componentLifecycleExecutionStore, componentLifecycleRequestStore, groupStore, auth)
+	registerDeploymentRoutes(mux, componentLifecycleRequestStore, componentLifecycleValidationStore, componentLifecycleApprovalStore, groupStore, agentStore, auth)
+	registerGroupSecretRoutes(mux, groupSecretStore, groupStore, auth)
+	registerBlueprintRoutes(mux, destinationProfileStore, groupStore, agentStore, configStore, assignmentStore, groupRequestStore, configValidator, auth, notifier)
+	registerConfigurationTemplateRoutes(mux, configurationTemplateStore, configStore, groupStore, configValidator, auth)
+	registerMigrationRoutes(mux, groupStore, destinationProfileStore, configStore, migrationStore, agentStore, adapter, configValidator, sectionPolicyStore, auth)
+	registerDistributionRoutes(mux, distributionStore, distributionReleaseStore, distributionLifecycleStores{BuildPlans: distributionBuildPlanStore, BuildAttempts: distributionBuildAttemptStore, Promotions: distributionArtifactPromotionStore, PromotionReviews: distributionArtifactPromotionReviewStore, Publications: distributionArtifactPublicationStore, PublicationExecutions: distributionArtifactPublicationExecutionStore, Previews: distributionPreviewStore, Handoffs: distributionPreviewHandoffStore}, configValidator, auth)
+	registerDistributionPreviewRoutes(mux, distributionStore, distributionReleaseStore, distributionPreviewStore, distributionPreviewHandoffStore, groupStore, agentStore, assignmentStore, configValidator, auth, notifier)
+	registerDistributionBuildPlanRoutes(mux, distributionStore, distributionBuildPlanStore, distributionBuildApprovalStore, distributionBuildExecutionStore, distributionBuildPreflightStore, distributionBuildWorkerResultStore, distributionBuildSourceStore, distributionBuildSourceAcquisitionStore, distributionBuildSourceInspectionStore, distributionBuildArtifactStore, distributionBuildAttemptStore, distributionBuildRetryRequestStore, auth)
+	publicationPreflightVerifier := &distributions.ArtifactPublicationPreflightVerifier{ArtifactRoot: dataDir + "/distribution-artifacts", AllowedHosts: commaSeparatedEnv("OTELPLANE_DISTRIBUTION_PUBLICATION_ALLOWED_HOSTS"), Secrets: gitops.EnvironmentSecretResolver{Lookup: os.LookupEnv}, MaxBytes: int64EnvOrDefault("OTELPLANE_DISTRIBUTION_PUBLICATION_MAX_ARTIFACT_BYTES", 512<<20)}
+	registerDistributionArtifactPromotionRoutes(mux, distributionStore, distributionBuildArtifactStore, distributionBuildPlanStore, distributionArtifactPromotionStore, distributionArtifactPromotionReviewStore, distributionArtifactPublicationStore, distributionArtifactPublicationPreflightStore, distributionArtifactPublicationExecutionStore, distributionReleaseStore, publicationPreflightVerifier, publicationWorkerEnabled, auth)
+	registerAddonRoutes(mux, addons.NewDefaultCatalog())
+	registerIntegrationRoutes(mux, integrations.NewDefaultGitCatalog(), integrationConnectionStore, integrationValidationStore, integrationValidator, durationEnvOrDefault("OTELPLANE_INTEGRATION_VALIDATION_TTL", 24*time.Hour), groupStore, auth)
+	registerUIRoutes(mux)
+
+	httpServer := &http.Server{
+		Addr:              httpAddr,
+		Handler:           auditMiddleware(auth, auditStore, securityMiddleware(security, auth, mux)),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+		TLSConfig:         transportTLS.HTTP.Config,
+	}
+	go func() {
+		scheme := "http"
+		var serveErr error
+		if transportTLS.HTTP.Enabled {
+			scheme = "https"
+			slog.Info("OTelPlane HTTPS server listening", "component", "http", "event", "server_started", "address", httpAddr, "tls", true)
+			serveErr = httpServer.ListenAndServeTLS(transportTLS.HTTP.CertFile, transportTLS.HTTP.KeyFile)
+		} else {
+			slog.Info("OTelPlane HTTP server listening", "component", "http", "event", "server_started", "address", httpAddr, "tls", false)
+			serveErr = httpServer.ListenAndServe()
+		}
+		if serveErr != nil && serveErr != http.ErrServerClosed {
+			slog.Error("HTTP server stopped", "component", "http", "event", "server_stopped", "scheme", scheme, "error", serveErr)
+			stop()
+		}
+	}()
+
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = httpServer.Shutdown(shutdownCtx)
+}
+
+func attemptAutomaticRollback(ctx context.Context, agentUID, failedHash string, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) {
+	failed, err := deploymentStore.LatestByAgentHash(ctx, agentUID, failedHash)
+	if err != nil || failed.Action != configs.DeploymentActionDeploy || failed.PreviousConfigurationID == "" {
+		return
+	}
+	claimed, err := deploymentStore.ClaimRollback(ctx, failed.ID)
+	if err != nil || !claimed {
+		return
+	}
+	previous, err := configStore.Get(ctx, failed.PreviousConfigurationID)
+	if err != nil {
+		slog.Error("automatic rollback configuration unavailable", "component", "deployment", "event", "rollback_failed", "agent_uid", agentUID, "deployment_id", failed.ID, "previous_configuration_id", failed.PreviousConfigurationID, "error", err)
+		return
+	}
+	_, rollback, err := deliverConfiguration(ctx, agentUID, previous, configs.DeploymentActionRollback, assignmentStore, deploymentStore, adapter)
+	if err != nil {
+		slog.Error("automatic rollback delivery failed", "component", "deployment", "event", "rollback_failed", "agent_uid", agentUID, "failed_configuration_version", failed.ConfigurationVersion, "rollback_configuration_version", previous.Version, "error", err)
+		return
+	}
+	slog.Warn("deployment failed; automatic rollback started", "component", "deployment", "event", "rollback_started", "agent_uid", agentUID, "failed_configuration_version", failed.ConfigurationVersion, "rollback_configuration_version", previous.Version, "rollback_deployment_id", rollback.ID)
+}
+
+// registerHealthRoutes exposes unauthenticated liveness (/health) and readiness (/ready) probes for service managers and load balancers.
+func registerHealthRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(healthResponse{
+			Status: "ok", Service: "otelplane", Time: time.Now().UTC().Format(time.RFC3339),
+		})
+	})
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ready"}`))
+	})
+}
+
+// registerAgentRoutes serves fleet inventory, agent detail, effective configuration, drift, deployment history, and per-agent deployment actions.
+func registerAgentRoutes(mux *http.ServeMux, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, groupStore storage.GroupStore, eventStore interface {
+	ListSince(context.Context, time.Time) ([]*events.AgentEvent, error)
+}, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, dataDir string) {
+	// /api/v1/agents returns the current normalized inventory for automation clients.
+	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
+		agentsList, err := agentStore.List(r.Context())
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if currentRole(auth, r) != roleAdmin {
+			allGroups, groupErr := groupStore.List(r.Context())
+			if groupErr != nil {
+				internalServerError(w, groupErr)
+				return
+			}
+			visibleGroups := groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), allGroups)
+			filtered := make([]*agents.ManagedAgent, 0, len(agentsList))
+			for _, agent := range agentsList {
+				for _, group := range visibleGroups {
+					if groups.MatchesIdentity(group, agent) {
+						filtered = append(filtered, agent)
+						break
+					}
+				}
+			}
+			agentsList = filtered
+		}
+		writeJSON(w, http.StatusOK, agentsList)
+	})
+
+	// /agents is the fleet overview page with lifecycle-status and optional group filtering.
+	mux.HandleFunc("/agents", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agents" {
+			http.NotFound(w, r)
+			return
+		}
+		statusFilter := r.URL.Query().Get("status")
+		switch statusFilter {
+		case "all", "active", "offline", "retired":
+		default:
+			statusFilter = "all"
+		}
+		agentsList, err := selectAgentsForStatus(r.Context(), agentStore, statusFilter)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		selectedGroup := r.URL.Query().Get("group")
+		allGroups, _ := groupStore.List(r.Context())
+		allGroups = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), allGroups)
+		var selected *groups.Group
+		if selectedGroup != "" {
+			for _, group := range allGroups {
+				if group.ID == selectedGroup {
+					selected = group
+					break
+				}
+			}
+		}
+		tab := r.URL.Query().Get("tab")
+		switch tab {
+		case "agents", "pipelines", "ai-insights", "slos":
+		default:
+			tab = "agents"
+		}
+		view := agentListView{Page: "fleet", Tab: tab, StatusFilter: statusFilter, Groups: allGroups, SelectedGroup: selectedGroup, Items: make([]agentListItem, 0, len(agentsList))}
+		for _, agent := range agentsList {
+			if currentRole(auth, r) != roleAdmin {
+				visible := false
+				for _, group := range allGroups {
+					if groups.MatchesIdentity(group, agent) {
+						visible = true
+						break
+					}
+				}
+				if !visible {
+					continue
+				}
+			}
+			if selected != nil && !groups.Matches(selected, agent) {
+				continue
+			}
+			item := agentListItem{Agent: agent}
+			for _, group := range allGroups {
+				if groups.MatchesIdentity(group, agent) {
+					item.Groups = append(item.Groups, group)
+				}
+			}
+			item.CanDelete = currentRole(auth, r) == roleAdmin && !agent.Connected
+			if deployments, depErr := deploymentStore.ListByAgent(r.Context(), agent.InstanceUID, 1); depErr == nil && len(deployments) > 0 {
+				item.LastDeployment = deployments[0]
+			}
+			view.Items = append(view.Items, item)
+			view.Total++
+			if agent.Connected && agent.Healthy {
+				view.Healthy++
+			} else {
+				view.Attention++
+			}
+		}
+		populateLifecycleCounts(r.Context(), &view, agentStore, selected)
+		populateLastConnected(r.Context(), &view, eventStore)
+		if view.Total > 0 {
+			view.HealthyPercent = view.Healthy * 100 / view.Total
+		}
+		view.Pagination = paginationFromRequest(r, len(view.Items))
+		view.Items = paginateSlice(view.Items, view.Pagination)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := agentsPage.Execute(w, view); err != nil {
+			slog.Error("failed to render agents page", "component", "http", "event", "render_failed", "page", "agents", "error", err)
+		}
+	})
+
+	// /agents/{uid}/delete removes a disconnected inventory record. Admins may
+	// remove any record; Group Owners may remove only members of an owned group.
+	mux.HandleFunc("POST /agents/{uid}/delete", func(w http.ResponseWriter, r *http.Request) {
+		uid := strings.TrimSpace(r.PathValue("uid"))
+		agent, err := agentStore.Get(r.Context(), uid)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if agent.Connected {
+			http.Error(w, "connected collectors cannot be deleted; disconnect or retire the collector first", http.StatusConflict)
+			return
+		}
+		allGroups, groupErr := groupStore.List(r.Context())
+		if groupErr != nil {
+			internalServerError(w, groupErr)
+			return
+		}
+		if !canDeleteAgent(currentRole(auth, r), currentUsername(auth, r), agent, allGroups) {
+			http.Error(w, "forbidden: only an Admin or an owner of the assigned group can delete this collector", http.StatusForbidden)
+			return
+		}
+		if err := agentStore.Delete(r.Context(), uid); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			_ = agentStore.Upsert(r.Context(), agent)
+			internalServerError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/agents?deleted=1", http.StatusSeeOther)
+	})
+
+	// /agents/{uid}/display-name assigns an operator-friendly alias without
+	// changing the immutable OpAMP InstanceUID or reported stable identity.
+	mux.HandleFunc("POST /agents/{uid}/display-name", func(w http.ResponseWriter, r *http.Request) {
+		if currentRole(auth, r) != roleAdmin {
+			http.Error(w, "forbidden: only an Admin can rename a collector", http.StatusForbidden)
+			return
+		}
+		uid := strings.TrimSpace(r.PathValue("uid"))
+		agent, err := agentStore.Get(r.Context(), uid)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		displayName := strings.ToLower(strings.TrimSpace(r.FormValue("display_name")))
+		if len(displayName) < 3 || len(displayName) > 63 || !agentDisplayNamePattern.MatchString(displayName) {
+			http.Redirect(w, r, "/agents/"+uid+"?error="+url.QueryEscape("Display name must be 3-63 lowercase letters, numbers or hyphen-separated words."), http.StatusSeeOther)
+			return
+		}
+		items, err := agentStore.List(r.Context())
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		for _, candidate := range items {
+			if candidate.InstanceUID != uid && (strings.EqualFold(candidate.DisplayName, displayName) || strings.EqualFold(candidate.Name, displayName)) {
+				http.Redirect(w, r, "/agents/"+uid+"?error="+url.QueryEscape("Display name is already assigned to another collector."), http.StatusSeeOther)
+				return
+			}
+		}
+		previous := *agent
+		agent.DisplayName = displayName
+		agent.Name = displayName
+		if err := agentStore.Upsert(r.Context(), agent); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			_ = agentStore.Upsert(r.Context(), &previous)
+			internalServerError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/agents/"+uid+"?renamed=1", http.StatusSeeOther)
+	})
+
+	// Lifecycle authority is an independent, explicit trust decision. Assigning
+	// a Collector to a group does not grant OTelPlane permission to restart,
+	// upgrade, install, or remove the underlying process.
+	mux.HandleFunc("POST /agents/{uid}/management-authority", func(w http.ResponseWriter, r *http.Request) {
+		if currentRole(auth, r) != roleAdmin {
+			http.Error(w, "forbidden: only an Admin can change Collector management authority", http.StatusForbidden)
+			return
+		}
+		uid := strings.TrimSpace(r.PathValue("uid"))
+		agent, err := agentStore.Get(r.Context(), uid)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		authority := agents.ManagementAuthority(strings.TrimSpace(r.FormValue("management_authority")))
+		if !authority.Valid() {
+			http.Redirect(w, r, "/agents/"+uid+"?error="+url.QueryEscape("Select a valid management authority."), http.StatusSeeOther)
+			return
+		}
+		if authority == agents.AuthorityLifecycleManaged && strings.TrimSpace(r.FormValue("confirm_lifecycle")) != "yes" {
+			http.Redirect(w, r, "/agents/"+uid+"?error="+url.QueryEscape("Confirm that OTelPlane is the authoritative lifecycle manager."), http.StatusSeeOther)
+			return
+		}
+		previous := *agent
+		now := time.Now().UTC()
+		agent.ManagementAuthority = authority
+		agent.AuthorityUpdatedBy = currentUsername(auth, r)
+		agent.AuthorityUpdatedAt = &now
+		if err := agentStore.Upsert(r.Context(), agent); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			_ = agentStore.Upsert(r.Context(), &previous)
+			internalServerError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/agents/"+uid+"?authority_saved=1", http.StatusSeeOther)
+	})
+
+	// /api/v1/agent-events returns lifecycle events inside a requested time range.
+	mux.HandleFunc("/api/v1/agent-events", func(w http.ResponseWriter, r *http.Request) {
+		since := timeRangeStart(r.URL.Query().Get("range"))
+		items, err := eventStore.ListSince(r.Context(), since)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, items)
+	})
+
+	// /agents/{uid} is the agent detail page; nested paths expose effective config, drift, deployments, and deploy/rollback actions.
+	mux.HandleFunc("/agents/", func(w http.ResponseWriter, r *http.Request) {
+		uid := strings.Trim(strings.TrimPrefix(r.URL.Path, "/agents/"), "/")
+		if uid == "" {
+			http.Redirect(w, r, "/agents", http.StatusPermanentRedirect)
+			return
+		}
+		if strings.Contains(uid, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		agent, err := agentStore.Get(r.Context(), uid)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		view := agentDetailView{
+			Page: "fleet", Agent: agent, EffectiveConfig: adapter.EffectiveConfig(uid),
+			RemoteConfigSupported: hasCapability(agent.Capabilities, "accepts_remote_config"),
+			TargetingMetadata:     groups.TargetingMetadata(agent), GroupIdentity: groups.GroupIdentity(agent),
+			EffectiveLabels: groups.EffectiveLabels(agent), UnknownGroupFields: agent.UnknownGroupFields,
+			Error: r.URL.Query().Get("error"), DisplayNameSaved: r.URL.Query().Get("renamed") == "1",
+			AuthoritySaved:    r.URL.Query().Get("authority_saved") == "1",
+			CanManageIdentity: currentRole(auth, r) == roleAdmin,
+		}
+		view.Deployments, _ = deploymentStore.ListByAgent(r.Context(), uid, 10)
+		if allGroups, groupErr := groupStore.List(r.Context()); groupErr == nil {
+			allGroups = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), allGroups)
+			for _, group := range allGroups {
+				if group.Enabled && currentRole(auth, r) == roleAdmin {
+					view.AllGroups = append(view.AllGroups, group)
+				}
+				if groups.Matches(group, agent) {
+					view.Groups = append(view.Groups, group)
+				}
+			}
+			if currentRole(auth, r) != roleAdmin && len(view.Groups) == 0 {
+				http.Error(w, "forbidden: collector is outside your assigned groups", http.StatusForbidden)
+				return
+			}
+		}
+		view.DeploymentSummary = summarizeDeployments(view.Deployments)
+		assignments, _ := assignmentStore.List(r.Context())
+		for _, a := range assignments {
+			if a.AgentInstanceUID != uid {
+				continue
+			}
+			if view.Assignment == nil || a.UpdatedAt.After(view.Assignment.UpdatedAt) {
+				view.Assignment = a
+			}
+		}
+		if view.Assignment != nil {
+			view.DesiredConfig, _ = configStore.Get(r.Context(), view.Assignment.ConfigurationID)
+		}
+		if view.DesiredConfig != nil {
+			desiredForComparison := view.DesiredConfig.Content
+			if runtimeGroupSecrets != nil && view.DesiredConfig.GroupID != "" && secretReferencePattern.MatchString(desiredForComparison) {
+				if resolved, resolveErr := runtimeGroupSecrets.materialize(r.Context(), view.DesiredConfig.GroupID, desiredForComparison); resolveErr == nil {
+					desiredForComparison, _ = runtimeGroupSecrets.normalize(r.Context(), view.DesiredConfig.GroupID, resolved)
+					view.EffectiveConfig, _ = runtimeGroupSecrets.normalize(r.Context(), view.DesiredConfig.GroupID, view.EffectiveConfig)
+				} else {
+					view.EffectiveConfig = "Protected effective configuration unavailable until all referenced group secrets are restored."
+				}
+			}
+			view.Drift = configs.CompareDesiredEffective(desiredForComparison, view.EffectiveConfig)
+			allConfigs, _ := configStore.List(r.Context())
+			for _, candidate := range allConfigs {
+				if candidate.Name == view.DesiredConfig.Name {
+					view.ConfigurationHistory = append(view.ConfigurationHistory, candidate)
+				}
+			}
+		} else {
+			view.Drift = configs.CompareDesiredEffective("", view.EffectiveConfig)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := agentDetailPage.Execute(w, view); err != nil {
+			slog.Error("failed to render agent detail page", "component", "http", "event", "render_failed", "page", "agent_detail", "error", err)
+		}
+	})
+
+	// / redirects to the fleet overview and rejects unknown top-level paths.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/agents", http.StatusTemporaryRedirect)
+	})
+}
+
+func canDeleteAgent(principalRole role, username string, agent *agents.ManagedAgent, allGroups []*groups.Group) bool {
+	if principalRole == roleAdmin {
+		return true
+	}
+	if principalRole != roleGroupOwner {
+		return false
+	}
+	matched := false
+	for _, group := range allGroups {
+		if groups.MatchesIdentity(group, agent) {
+			matched = true
+			if !isGroupOwner(group, username) {
+				return false
+			}
+		}
+	}
+	return matched
+}
+
+type agentDetailView struct {
+	Page                  string
+	Agent                 *agents.ManagedAgent
+	Assignment            *configs.Assignment
+	DesiredConfig         *configs.Configuration
+	EffectiveConfig       string
+	RemoteConfigSupported bool
+	Drift                 configs.DriftResult
+	ConfigurationHistory  []*configs.Configuration
+	SavedConfigurations   []*configs.Configuration
+	ConfigurationSaved    string
+	Deployments           []*configs.Deployment
+	DeploymentSummary     deploymentSummary
+	Groups                []*groups.Group
+	AllGroups             []*groups.Group
+	TargetingMetadata     map[string]string
+	GroupIdentity         map[string]string
+	EffectiveLabels       map[string]string
+	UnknownGroupFields    map[string]string
+	EditorSections        []configurationSectionView
+	EditorBaseline        string
+	EditorError           string
+	CanEditConfiguration  bool
+	CanAdminBreakGlass    bool
+	CanManageIdentity     bool
+	DisplayNameSaved      bool
+	AuthoritySaved        bool
+	Error                 string
+}
+
+// hasCapability performs a case-insensitive capability lookup for UI and deployment eligibility checks.
+func hasCapability(capabilities []string, wanted string) bool {
+	for _, capability := range capabilities {
+		if capability == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+type deploymentSummary struct {
+	CurrentDeployedVersion string              `json:"current_deployed_version,omitempty"`
+	LastDeployment         *configs.Deployment `json:"last_deployment,omitempty"`
+	LastDeploymentDuration string              `json:"last_deployment_duration,omitempty"`
+	LastSuccessful         *configs.Deployment `json:"last_successful_deployment,omitempty"`
+}
+
+// summarizeDeployments reduces deployment records into status counters displayed on an agent detail page.
+func summarizeDeployments(items []*configs.Deployment) deploymentSummary {
+	var summary deploymentSummary
+	if len(items) == 0 {
+		return summary
+	}
+	summary.LastDeployment = items[0]
+	summary.LastDeploymentDuration = deploymentDuration(items[0])
+	for _, d := range items {
+		if d.Status == configs.DeliveryApplied {
+			if summary.LastSuccessful == nil {
+				summary.LastSuccessful = d
+			}
+			if summary.CurrentDeployedVersion == "" {
+				summary.CurrentDeployedVersion = d.ConfigurationVersion
+			}
+		}
+	}
+	return summary
+}
+
+// deploymentDuration formats the elapsed time between a deployment's start and completion, failure, or current time.
+func deploymentDuration(d *configs.Deployment) string {
+	if d == nil || d.SentAt == nil {
+		return ""
+	}
+	var end *time.Time
+	if d.AppliedAt != nil {
+		end = d.AppliedAt
+	} else if d.FailedAt != nil {
+		end = d.FailedAt
+	}
+	if end == nil || end.Before(*d.SentAt) {
+		return ""
+	}
+	return end.Sub(*d.SentAt).Round(time.Millisecond).String()
+}
+
+type createConfigurationRequest struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Content     string `json:"content"`
+	ContentType string `json:"content_type"`
+}
+
+type rollbackResponse struct {
+	Action              string                 `json:"action"`
+	FromConfigurationID string                 `json:"from_configuration_id"`
+	TargetConfiguration *configs.Configuration `json:"target_configuration"`
+	Assignment          *configs.Assignment    `json:"assignment"`
+	Deployment          *configs.Deployment    `json:"deployment,omitempty"`
+}
+
+// latestAssignmentForAgent finds the newest desired configuration assignment for one managed agent.
+func latestAssignmentForAgent(ctx context.Context, store storage.AssignmentStore, agentUID string) (*configs.Assignment, error) {
+	assignments, err := store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var latest *configs.Assignment
+	for _, assignment := range assignments {
+		if assignment.AgentInstanceUID == agentUID && (latest == nil || assignment.UpdatedAt.After(latest.UpdatedAt)) {
+			latest = assignment
+		}
+	}
+	if latest == nil {
+		return nil, storage.ErrAssignmentNotFound
+	}
+	return latest, nil
+}
+
+// deliverConfiguration records desired state and deployment history, sends remote configuration through OpAMP, and persists success or failure.
+func deliverConfiguration(ctx context.Context, agentUID string, configuration *configs.Configuration, action configs.DeploymentAction, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) (*configs.Assignment, *configs.Deployment, error) {
+	return deliverConfigurationWithRollback(ctx, agentUID, configuration, action, "", "", assignmentStore, deploymentStore, adapter)
+}
+
+func deliverConfigurationWithRollback(ctx context.Context, agentUID string, configuration *configs.Configuration, action configs.DeploymentAction, previousConfigurationID, approvalRequestID string, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, adapter *fleetopamp.Adapter) (*configs.Assignment, *configs.Deployment, error) {
+	resolvedConfiguration, err := configurationForDelivery(ctx, configuration)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve group secrets: %w", err)
+	}
+	configuration = resolvedConfiguration
+	latest, err := latestAssignmentForAgent(ctx, assignmentStore, agentUID)
+	if err != nil && !errors.Is(err, storage.ErrAssignmentNotFound) {
+		return nil, nil, err
+	}
+	if action != configs.DeploymentActionReconcile && err == nil &&
+		latest.ConfigurationHash == configuration.Hash && latest.Status == configs.DeliveryApplied {
+		return latest, nil, configs.ErrConfigurationCurrent
+	}
+	if recent, err := deploymentStore.ListByAgent(ctx, agentUID, 1); err != nil {
+		return nil, nil, err
+	} else if len(recent) > 0 && (recent[0].Status == configs.DeliveryPending || recent[0].Status == configs.DeliverySent || recent[0].Status == configs.DeliveryApplying) {
+		return nil, nil, configs.ErrDeploymentInProgress
+	}
+	deployment, err := configs.NewDeployment(agentUID, configuration, action)
+	if err != nil {
+		return nil, nil, err
+	}
+	deployment.PreviousConfigurationID = previousConfigurationID
+	deployment.ApprovalRequestID = approvalRequestID
+	if err := deploymentStore.Create(ctx, deployment); err != nil {
+		return nil, nil, err
+	}
+	assignment := &configs.Assignment{
+		AgentInstanceUID: agentUID, ConfigurationID: configuration.ID, ConfigurationHash: configuration.Hash,
+		Status: configs.DeliveryPending, UpdatedAt: time.Now().UTC(),
+	}
+	if err := assignmentStore.Upsert(ctx, assignment); err != nil {
+		_ = deploymentStore.UpdateLatestByAgentHash(ctx, agentUID, configuration.Hash, configs.DeliveryFailed, err.Error())
+		return nil, deployment, err
+	}
+	if err := adapter.SendRemoteConfig(ctx, agentUID, configuration); err != nil {
+		assignment.Error = err.Error()
+		assignment.UpdatedAt = time.Now().UTC()
+		if errors.Is(err, fleetopamp.ErrRemoteConfigUnsupported) {
+			assignment.Status = configs.DeliveryUnsupported
+		} else {
+			assignment.Status = configs.DeliveryFailed
+		}
+		if storeErr := assignmentStore.Upsert(ctx, assignment); storeErr != nil {
+			return assignment, deployment, fmt.Errorf("persist failed delivery state: %w", storeErr)
+		}
+		_ = deploymentStore.UpdateLatestByAgentHash(ctx, agentUID, configuration.Hash, assignment.Status, assignment.Error)
+		return assignment, deployment, err
+	}
+	assignment.Status = configs.DeliverySent
+	assignment.Error = ""
+	assignment.UpdatedAt = time.Now().UTC()
+	if err := assignmentStore.Upsert(ctx, assignment); err != nil {
+		return assignment, deployment, err
+	}
+	_ = deploymentStore.UpdateLatestByAgentHash(ctx, agentUID, configuration.Hash, configs.DeliverySent, "")
+	updated, _ := deploymentStore.Get(ctx, deployment.ID)
+	if updated != nil {
+		deployment = updated
+	}
+	return assignment, deployment, nil
+}
+
+// registerConfigRoutes exposes configuration artifact, validation, and
+// assignment APIs. Validation occurs both before artifact creation and again
+// immediately before delivery to protect against unsafe desired state.
+// registerConfigRoutes serves configuration CRUD/listing pages, validation, direct deployment, rollback, and group rollout actions.
+func registerConfigRoutes(mux *http.ServeMux, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, agentStore *memory.AgentStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager) {
+	registerConfigurationUIRoutes(mux, configStore)
+
+	// Configuration authoring is group-scoped so direct collector requests
+	// cannot bypass group ownership, validation, and approval controls.
+	mux.HandleFunc("POST /agents/{uid}/configurations", func(w http.ResponseWriter, r *http.Request) {
+		uid := r.PathValue("uid")
+		if _, err := agentStore.Get(r.Context(), uid); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "collector-level configuration authoring has moved to Groups", http.StatusGone)
+	})
+
+	// /api/v1/configurations/validate checks Collector YAML without storing or deploying it.
+	mux.HandleFunc("/api/v1/configurations/validate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var request createConfigurationRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		result := validator.Validate(r.Context(), request.Content)
+		status := http.StatusOK
+		if !result.Valid {
+			status = http.StatusUnprocessableEntity
+		}
+		writeJSON(w, status, result)
+	})
+
+	// /api/v1/configurations creates and lists versioned desired configurations.
+	mux.HandleFunc("/api/v1/configurations", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			items, err := configStore.List(r.Context())
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			name := strings.TrimSpace(r.URL.Query().Get("name"))
+			if name != "" {
+				filtered := make([]*configs.Configuration, 0)
+				for _, item := range items {
+					if item.Name == name {
+						filtered = append(filtered, item)
+					}
+				}
+				items = filtered
+			}
+			writeJSON(w, http.StatusOK, items)
+		case http.MethodPost:
+			var request createConfigurationRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, "invalid JSON body", http.StatusBadRequest)
+				return
+			}
+			if strings.TrimSpace(request.Name) == "" || strings.TrimSpace(request.Version) == "" || strings.TrimSpace(request.Content) == "" {
+				http.Error(w, "name, version and content are required", http.StatusBadRequest)
+				return
+			}
+			validation := validator.Validate(r.Context(), request.Content)
+			if !validation.Valid {
+				writeJSON(w, http.StatusUnprocessableEntity, validation)
+				return
+			}
+			configuration := configs.NewConfiguration(request.Name, request.Version, request.Content, request.ContentType)
+			if err := configStore.Put(r.Context(), configuration); err != nil {
+				internalServerError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, configuration)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
+	// /api/v1/assignments lists desired-state assignments and their latest delivery status.
+	mux.HandleFunc("/api/v1/assignments", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		items, err := assignmentStore.List(r.Context())
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, items)
+	})
+
+	// /api/v1/agents/{uid}/config deploys a configuration directly to one connected, capable agent.
+	mux.HandleFunc("/api/v1/agents/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/agents/"), "/"), "/")
+		if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "deployment-summary" {
+			agentUID := parts[0]
+			if _, err := agentStore.Get(r.Context(), agentUID); err != nil {
+				http.Error(w, "managed agent not found", http.StatusNotFound)
+				return
+			}
+			items, err := deploymentStore.ListByAgent(r.Context(), agentUID, 100)
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, summarizeDeployments(items))
+			return
+		}
+
+		if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "deployments" {
+			agentUID := parts[0]
+			if _, err := agentStore.Get(r.Context(), agentUID); err != nil {
+				http.Error(w, "managed agent not found", http.StatusNotFound)
+				return
+			}
+			limit := 10
+			if raw := r.URL.Query().Get("limit"); raw != "" {
+				if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+					limit = parsed
+				}
+			}
+			items, err := deploymentStore.ListByAgent(r.Context(), agentUID, limit)
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, items)
+			return
+		}
+		if r.Method == http.MethodGet && len(parts) == 2 && parts[1] == "drift" {
+			agentUID := parts[0]
+			if _, err := agentStore.Get(r.Context(), agentUID); err != nil {
+				http.Error(w, "managed agent not found", http.StatusNotFound)
+				return
+			}
+			latest, err := latestAssignmentForAgent(r.Context(), assignmentStore, agentUID)
+			effective := adapter.EffectiveConfig(agentUID)
+			if errors.Is(err, storage.ErrAssignmentNotFound) {
+				writeJSON(w, http.StatusOK, configs.CompareDesiredEffective("", effective))
+				return
+			}
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			desired, err := configStore.Get(r.Context(), latest.ConfigurationID)
+			if err != nil {
+				http.Error(w, "desired configuration not found", http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, configs.CompareDesiredEffective(desired.Content, effective))
+			return
+		}
+
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[1] == "rollback" {
+			agentUID, targetConfigID := parts[0], parts[2]
+			if _, err := agentStore.Get(r.Context(), agentUID); err != nil {
+				http.Error(w, "managed agent not found", http.StatusNotFound)
+				return
+			}
+			latest, err := latestAssignmentForAgent(r.Context(), assignmentStore, agentUID)
+			if errors.Is(err, storage.ErrAssignmentNotFound) {
+				http.Error(w, "agent has no desired configuration to roll back from", http.StatusConflict)
+				return
+			}
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			current, err := configStore.Get(r.Context(), latest.ConfigurationID)
+			if err != nil {
+				http.Error(w, "current desired configuration not found", http.StatusInternalServerError)
+				return
+			}
+			target, err := configStore.Get(r.Context(), targetConfigID)
+			if err != nil {
+				http.Error(w, "rollback configuration not found", http.StatusNotFound)
+				return
+			}
+			if err := configs.ValidateRollbackTarget(current, target); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			validation := validator.Validate(r.Context(), target.Content)
+			if !validation.Valid {
+				writeJSON(w, http.StatusUnprocessableEntity, validation)
+				return
+			}
+			assignment, deployment, deliveryErr := deliverConfiguration(r.Context(), agentUID, target, configs.DeploymentActionRollback, assignmentStore, deploymentStore, adapter)
+			response := rollbackResponse{Action: "rollback", FromConfigurationID: current.ID, TargetConfiguration: target, Assignment: assignment, Deployment: deployment}
+			if deliveryErr != nil {
+				status := http.StatusInternalServerError
+				if errors.Is(deliveryErr, fleetopamp.ErrRemoteConfigUnsupported) || errors.Is(deliveryErr, fleetopamp.ErrAgentNotConnected) || errors.Is(deliveryErr, configs.ErrDeploymentInProgress) || errors.Is(deliveryErr, configs.ErrConfigurationCurrent) {
+					status = http.StatusConflict
+				}
+				writeJSON(w, status, response)
+				return
+			}
+			writeJSON(w, http.StatusAccepted, response)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if len(parts) != 3 || parts[1] != "configurations" {
+			http.NotFound(w, r)
+			return
+		}
+		agentUID, configID := parts[0], parts[2]
+		if _, err := agentStore.Get(r.Context(), agentUID); err != nil {
+			http.Error(w, "managed agent not found", http.StatusNotFound)
+			return
+		}
+		configuration, err := configStore.Get(r.Context(), configID)
+		if err != nil {
+			http.Error(w, "configuration not found", http.StatusNotFound)
+			return
+		}
+		validation := validator.Validate(r.Context(), configuration.Content)
+		if !validation.Valid {
+			writeJSON(w, http.StatusUnprocessableEntity, validation)
+			return
+		}
+		assignment, _, deliveryErr := deliverConfiguration(r.Context(), agentUID, configuration, configs.DeploymentActionDeploy, assignmentStore, deploymentStore, adapter)
+		if deliveryErr != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(deliveryErr, fleetopamp.ErrRemoteConfigUnsupported) || errors.Is(deliveryErr, fleetopamp.ErrAgentNotConnected) ||
+				errors.Is(deliveryErr, configs.ErrDeploymentInProgress) || errors.Is(deliveryErr, configs.ErrConfigurationCurrent) {
+				status = http.StatusConflict
+			}
+			writeJSON(w, status, assignment)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, assignment)
+	})
+}
+
+// writeJSON sends a JSON response with the supplied status and consistent content type.
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+// envOrDefault returns a trimmed environment value or its fallback when unset.
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func commaSeparatedEnv(key string) []string {
+	parts := strings.Split(os.Getenv(key), ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
+}
+
+// durationEnvOrDefault parses a duration environment variable and falls back after logging invalid input.
+func durationEnvOrDefault(key string, fallback time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+var legacyAgentDetailPage = template.Must(template.New("agent-detail").Parse(`<!doctype html>
+<html><head><meta charset="utf-8"><title>OTelPlane Agent</title><style>
+body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;margin:0;padding:32px;max-width:1400px}a{color:#93c5fd;text-decoration:none}.back{display:inline-block;margin-bottom:22px}.head{display:flex;justify-content:space-between;gap:24px;align-items:flex-start}.muted{color:#94a3b8}.chips{display:flex;gap:8px;flex-wrap:wrap}.chip{background:#1f2937;border-radius:999px;padding:5px 10px;font-size:13px}.ok{color:#86efac}.bad{color:#fca5a5}.warn{color:#fde68a}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:24px 0}.card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:18px}.card h2{margin-top:0;font-size:18px}.kv{display:grid;grid-template-columns:130px 1fr;gap:8px 12px}.kv span:nth-child(odd){color:#94a3b8}pre{white-space:pre-wrap;overflow:auto;background:#060b14;border:1px solid #1f2937;border-radius:10px;padding:16px;max-height:520px}code{color:#c4b5fd}.configgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:900px){.configgrid{grid-template-columns:1fr}}
+</style></head><body>
+<div style="display:flex;gap:16px;margin-bottom:22px"><a href="/agents">← Agents</a><a href="/groups">Groups</a></div>
+<div class="head"><div><h1>{{.Agent.Name}}</h1><div class="muted"><code>{{.Agent.InstanceUID}}</code></div></div><div class="chips"><span class="chip {{if .Agent.Connected}}ok{{else}}bad{{end}}">Connected: {{.Agent.Connected}}</span><span class="chip {{if .Agent.Healthy}}ok{{else}}bad{{end}}">Healthy: {{.Agent.Healthy}}</span></div></div>
+{{if .Error}}<div class="card bad" style="margin-top:16px"><strong>{{.Error}}</strong></div>{{end}}
+<div class="grid"><section class="card"><h2>Overview</h2><div class="kv"><span>Type</span><span>{{.Agent.Type}}</span><span>OTel Version</span><span>{{.Agent.Version}}</span><span>Hostname</span><span>{{.Agent.Hostname}}</span><span>OS</span><span>{{index .Agent.Attributes "os.type"}}</span><span>OS Details</span><span>{{index .Agent.Attributes "os.description"}}</span><span>Architecture</span><span>{{index .Agent.Attributes "host.arch"}}</span><span>Runtime</span><span>{{.Agent.Deployment.Runtime}}</span><span>Cluster</span><span>{{.Agent.Deployment.Cluster}}</span><span>Last seen</span><span>{{.Agent.LastSeen}}</span></div></section>
+<section class="card"><h2>Capabilities</h2><div class="chips">{{range .Agent.Capabilities}}<span class="chip">{{.}}</span>{{end}}</div><p class="{{if .RemoteConfigSupported}}ok{{else}}warn{{end}}">Remote config: {{if .RemoteConfigSupported}}supported{{else}}not advertised by this agent{{end}}</p></section>
+<section class="card"><h2>Ownership identity</h2><p class="muted">Flexible managed key/value fields used for exclusive group membership. OTelPlane-managed values override Collector-reported values.</p>{{if .GroupIdentity}}<div class="chips">{{range $k,$v := .GroupIdentity}}<span class="chip"><code>{{$k}}={{$v}}</code></span>{{end}}</div>{{else}}<p class="muted">No ownership identity reported or assigned.</p>{{end}}{{if .UnknownGroupFields}}<div class="bad" style="margin-top:12px"><strong>Malformed group field(s):</strong> {{range $k,$v := .UnknownGroupFields}}<code>{{$k}}={{$v}}</code> {{end}}</div>{{end}}</section>
+<section class="card"><h2>Labels</h2><p class="muted">Optional metadata. Maximum 5 OTelPlane-managed labels per agent. Collector-reported labels and OTelPlane-managed labels are combined; OTelPlane values override duplicate keys.</p>{{if .EffectiveLabels}}<div class="chips">{{range $k,$v := .EffectiveLabels}}<span class="chip"><code>{{$k}}={{$v}}</code></span>{{end}}</div>{{else}}<p class="muted">No labels available.</p>{{end}}<form method="post" action="/agents/{{.Agent.InstanceUID}}/label" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap"><input name="key" placeholder="label key (team)" required style="padding:8px;background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:7px"><input name="value" placeholder="value (payments)" required style="padding:8px;background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:7px"><button type="submit" style="padding:8px 12px">+ Add label</button></form></section>
+<section class="card"><h2>Reported OTel attributes</h2><p class="muted">Raw AgentDescription metadata reported by the Collector/OpAMP.</p>{{if .Agent.Attributes}}<div class="chips">{{range $k,$v := .Agent.Attributes}}<span class="chip"><code>{{$k}}={{$v}}</code></span>{{end}}</div>{{else}}<p class="muted">No reported attributes available.</p>{{end}}</section>
+<section class="card"><h2>Ownership group</h2>{{if .Groups}}<div class="chips">{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a>{{end}}</div>{{else}}<p class="muted">This agent does not match an ownership group.</p>{{end}}{{if .AllGroups}}<form method="post" action="/agents/{{.Agent.InstanceUID}}/group" style="margin-top:14px"><label>Assign group by name: <select name="group_id" required style="padding:8px;background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:7px"><option value="">Select group</option>{{range .AllGroups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><button type="submit" style="margin-left:8px;padding:8px 12px">Assign group</button></form><p class="muted">OTelPlane displays the group name while storing its immutable backend group ID.</p>{{end}}</section>
+<section class="card"><h2>Deployment status</h2>{{if .DeploymentSummary.LastDeployment}}<div class="kv"><span>Current deployed</span><span>{{if .DeploymentSummary.CurrentDeployedVersion}}v{{.DeploymentSummary.CurrentDeployedVersion}}{{else}}Unknown{{end}}</span><span>Last deployment</span><span>{{.DeploymentSummary.LastDeployment.ConfigurationName}} v{{.DeploymentSummary.LastDeployment.ConfigurationVersion}}</span><span>Status</span><span class="{{if eq .DeploymentSummary.LastDeployment.Status "applied"}}ok{{else if eq .DeploymentSummary.LastDeployment.Status "failed"}}bad{{else}}warn{{end}}">{{.DeploymentSummary.LastDeployment.Status}}</span><span>Duration</span><span>{{if .DeploymentSummary.LastDeploymentDuration}}{{.DeploymentSummary.LastDeploymentDuration}}{{else}}—{{end}}</span>{{if .DeploymentSummary.LastSuccessful}}<span>Last successful</span><span>{{.DeploymentSummary.LastSuccessful.ConfigurationName}} v{{.DeploymentSummary.LastSuccessful.ConfigurationVersion}} · {{.DeploymentSummary.LastSuccessful.AppliedAt}}</span>{{end}}</div>{{else}}<p class="muted">No OTelPlane deployment history has been recorded yet.</p>{{end}}</section>
+<section class="card"><h2>Latest assignment</h2>{{if .Assignment}}<div class="kv"><span>Status</span><span>{{.Assignment.Status}}</span><span>Config ID</span><span><code>{{.Assignment.ConfigurationID}}</code></span><span>Hash</span><span><code>{{.Assignment.ConfigurationHash}}</code></span><span>Updated</span><span>{{.Assignment.UpdatedAt}}</span>{{if .Assignment.Error}}<span>Error</span><span class="bad">{{.Assignment.Error}}</span>{{end}}</div>{{else}}<p class="muted">No OTelPlane configuration has been assigned.</p>{{end}}</section>
+<section class="card"><h2>Configuration drift</h2><div class="kv"><span>Status</span><span class="{{if .Drift.InSync}}ok{{else if eq .Drift.Status "drift"}}bad{{else}}warn{{end}}">{{.Drift.Status}}</span>{{if .Drift.Reason}}<span>Reason</span><span>{{.Drift.Reason}}</span>{{end}}</div>{{if .Drift.Differences}}<div style="margin-top:12px">{{range .Drift.Differences}}<div style="margin:8px 0;padding:10px;background:#0b1220;border-radius:8px"><code>{{.Path}}</code> <span class="warn">{{.Kind}}</span><br><span class="muted">Desired:</span> <code>{{printf "%v" .Desired}}</code><br><span class="muted">Effective:</span> <code>{{printf "%v" .Effective}}</code></div>{{end}}</div>{{end}}</section></div>
+<div class="configgrid"><section class="card"><h2>Desired configuration</h2>{{if .DesiredConfig}}<p class="muted">{{.DesiredConfig.Name}} · version {{.DesiredConfig.Version}}</p><pre>{{.DesiredConfig.Content}}</pre>{{else}}<p class="muted">No desired OTelPlane configuration.</p>{{end}}</section>
+<section class="card"><h2>Effective configuration</h2><p class="muted">Reported by the managed agent through OpAMP.</p>{{if .EffectiveConfig}}<pre>{{.EffectiveConfig}}</pre>{{else}}<p class="muted">No effective configuration has been reported yet.</p>{{end}}</section></div>
+{{if .Deployments}}<section class="card" style="margin-top:16px"><h2>Last OTelPlane configuration deployments</h2><p class="muted">Latest 10 deployment attempts for this managed agent.</p><table style="width:100%;border-collapse:collapse"><thead><tr><th>Version</th><th>Action</th><th>Status</th><th>Created</th><th>Sent</th><th>Applied / Failed</th></tr></thead><tbody>{{range .Deployments}}<tr><td><strong>{{.ConfigurationName}} v{{.ConfigurationVersion}}</strong><br><code>{{.ID}}</code></td><td>{{.Action}}</td><td class="{{if eq .Status "applied"}}ok{{else if eq .Status "failed"}}bad{{else}}warn{{end}}">{{.Status}}{{if .Error}}<br><span class="bad">{{.Error}}</span>{{end}}</td><td>{{.CreatedAt}}</td><td>{{if .SentAt}}{{.SentAt}}{{else}}—{{end}}</td><td>{{if .AppliedAt}}{{.AppliedAt}}{{else if .FailedAt}}{{.FailedAt}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table></section>{{else}}<section class="card" style="margin-top:16px"><h2>Last OTelPlane configuration deployments</h2><p class="muted">No OTelPlane deployment history has been recorded for this agent yet.</p></section>{{end}}
+{{if .ConfigurationHistory}}<section class="card" style="margin-top:16px"><h2>Configuration history</h2><table style="width:100%;border-collapse:collapse"><thead><tr><th>Version</th><th>Created</th><th>Hash</th><th>Config ID</th></tr></thead><tbody>{{range .ConfigurationHistory}}<tr><td>{{.Version}}</td><td>{{.CreatedAt}}</td><td><code>{{.Hash}}</code></td><td><code>{{.ID}}</code></td></tr>{{end}}</tbody></table></section>{{end}}
+</body></html>`))

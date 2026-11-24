@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/integrations"
+	"github.com/marellasunil/OTelPlane/internal/integrations"
 )
 
 var ErrIntegrationValidationNotFound = errors.New("integration validation not found")

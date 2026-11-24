@@ -1,8 +1,8 @@
-// Managed FleetAMP metadata merge helpers for Collector configuration.
+// Managed OTelPlane metadata merge helpers for Collector configuration.
 //
 // Purpose:
 //
-//	Safely injects FleetAMP group and label keys into service.telemetry.resource
+//	Safely injects OTelPlane group and label keys into service.telemetry.resource
 //	while preserving the rest of the desired OpenTelemetry Collector YAML.
 package configs
 
@@ -14,11 +14,11 @@ import (
 )
 
 const (
-	groupPrefix = "fleetamp.group."
-	labelPrefix = "fleetamp.label."
+	groupPrefix = "otelplane.group."
+	labelPrefix = "otelplane.label."
 )
 
-// MergeManagedMetadata injects FleetAMP-controlled group identity and labels
+// MergeManagedMetadata injects OTelPlane-controlled group identity and labels
 // into the Collector's own telemetry resource without replacing other config.
 func MergeManagedMetadata(content string, groupFields, labels map[string]string) (string, error) {
 	root := map[string]any{}

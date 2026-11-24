@@ -82,7 +82,7 @@ func NewConnection(v Connection, createdBy string) (*Connection, error) {
 		}
 	}
 	if len(groups) == 0 {
-		return nil, errors.New("at least one FleetAMP group binding is required")
+		return nil, errors.New("at least one OTelPlane group binding is required")
 	}
 	v.GroupIDs = groups
 	raw := make([]byte, 16)

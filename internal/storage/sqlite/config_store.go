@@ -1,4 +1,4 @@
-// SQLite-backed implementation of FleetAMP ConfigurationStore.
+// SQLite-backed implementation of OTelPlane ConfigurationStore.
 package sqlite
 
 import (
@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type ConfigStore struct{ db *sql.DB }

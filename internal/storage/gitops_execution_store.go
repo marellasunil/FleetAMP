@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
 )
 
 var (

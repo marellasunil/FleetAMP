@@ -1,7 +1,7 @@
 // Per-agent configuration assignment and delivery-state model.
 //
 // Purpose:
-//   Correlates one FleetAMP configuration artifact with one managed agent and
+//   Correlates one OTelPlane configuration artifact with one managed agent and
 //   records the control-plane lifecycle: pending, sent, applying, applied,
 //   failed, or unsupported.
 //

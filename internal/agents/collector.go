@@ -2,7 +2,7 @@
 //
 // Purpose:
 //   Defines the identity, lifecycle, deployment metadata, labels, attributes,
-//   and capabilities FleetAMP uses for every managed telemetry agent.
+//   and capabilities OTelPlane uses for every managed telemetry agent.
 //
 // Flow:
 //   protocol adapter (for example OpAMP) -> ManagedAgent -> storage/API/UI.
@@ -15,7 +15,7 @@ package agents
 
 import "time"
 
-// ManagementAuthority records the explicit boundary between FleetAMP and the
+// ManagementAuthority records the explicit boundary between OTelPlane and the
 // platform that owns a Collector process. The zero value is intentionally
 // treated as observe_only so upgraded installations fail closed.
 type ManagementAuthority string
@@ -37,7 +37,7 @@ func EffectiveManagementAuthority(agent *ManagedAgent) ManagementAuthority {
 	return AuthorityObserveOnly
 }
 
-// AgentType identifies the kind of telemetry agent managed by FleetAMP.
+// AgentType identifies the kind of telemetry agent managed by OTelPlane.
 type AgentType string
 
 const (
@@ -78,7 +78,7 @@ type DeploymentContext struct {
 	Node string `json:"node,omitempty"`
 }
 
-// ManagedAgent is FleetAMP's protocol-independent representation of a
+// ManagedAgent is OTelPlane's protocol-independent representation of a
 // telemetry agent. Protocol-specific types (for example OpAMP protobufs)
 // must be translated into this model at the integration boundary.
 type LifecycleStatus string
@@ -94,7 +94,7 @@ type ManagedAgent struct {
 	Type        AgentType `json:"type"`
 
 	Name string `json:"name,omitempty"`
-	// DisplayName is an optional FleetAMP-managed alias. It is deliberately
+	// DisplayName is an optional OTelPlane-managed alias. It is deliberately
 	// separate from protocol identity and reported host/service metadata.
 	DisplayName string `json:"display_name,omitempty"`
 	Hostname    string `json:"hostname,omitempty"`
@@ -109,14 +109,14 @@ type ManagedAgent struct {
 	DisconnectedAt *time.Time `json:"disconnected_at,omitempty"`
 	RetiredAt      *time.Time `json:"retired_at,omitempty"`
 
-	// ManagementAuthority must be explicitly promoted before FleetAMP may
+	// ManagementAuthority must be explicitly promoted before OTelPlane may
 	// execute package or service lifecycle operations. Group membership grants
 	// target ownership, but never implicitly grants process lifecycle authority.
 	ManagementAuthority ManagementAuthority `json:"management_authority,omitempty"`
 	AuthorityUpdatedBy  string              `json:"authority_updated_by,omitempty"`
 	AuthorityUpdatedAt  *time.Time           `json:"authority_updated_at,omitempty"`
 
-	// Deployment describes where the agent runs. FleetAMP manages the
+	// Deployment describes where the agent runs. OTelPlane manages the
 	// telemetry-agent control plane; the underlying runtime remains responsible
 	// for workload scheduling and replica lifecycle.
 	Deployment DeploymentContext `json:"deployment"`
@@ -126,7 +126,7 @@ type ManagedAgent struct {
 	// k8s.cluster.name, or k8s.namespace.name.
 	Attributes map[string]string `json:"attributes,omitempty"`
 
-	// GroupFields are FleetAMP-owned overrides for flexible ownership identity.
+	// GroupFields are OTelPlane-owned overrides for flexible ownership identity.
 	GroupFields map[string]string `json:"group_fields,omitempty"`
 
 	// ExcludedGroupIDs prevents an explicitly removed Collector from being
@@ -136,13 +136,13 @@ type ManagedAgent struct {
 	// ReportedGroupFields are group identity values reported by the agent through OpAMP.
 	ReportedGroupFields map[string]string `json:"reported_group_fields,omitempty"`
 
-	// Labels are FleetAMP-owned optional metadata.
+	// Labels are OTelPlane-owned optional metadata.
 	Labels map[string]string `json:"labels,omitempty"`
 
 	// ReportedLabels are optional labels reported by the agent through OpAMP.
 	ReportedLabels map[string]string `json:"reported_labels,omitempty"`
 
-	// UnknownGroupFields contains malformed FleetAMP group-prefixed metadata.
+	// UnknownGroupFields contains malformed OTelPlane group-prefixed metadata.
 	UnknownGroupFields map[string]string `json:"unknown_group_fields,omitempty"`
 
 	// Capabilities contains normalized management capabilities advertised
@@ -155,6 +155,6 @@ func (a *ManagedAgent) Touch() {
 	a.LastSeen = time.Now().UTC()
 }
 
-// Collector is kept as a compatibility alias while FleetAMP evolves from an
+// Collector is kept as a compatibility alias while OTelPlane evolves from an
 // OTel-Collector-only model to the generic ManagedAgent domain model.
 type Collector = ManagedAgent

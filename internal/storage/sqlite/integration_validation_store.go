@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/integrations"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/integrations"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type IntegrationValidationStore struct{ db *sql.DB }

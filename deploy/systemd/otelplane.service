@@ -1,0 +1,48 @@
+[Unit]
+Description=OTelPlane OpenTelemetry Fleet Management Control Plane
+Documentation=https://github.com/marellasunil/OTelPlane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=otelplane
+Group=otelplane
+Environment=OTELPLANE_TLS_DIR=/etc/otelplane/tls
+EnvironmentFile=/etc/otelplane/otelplane.env
+LoadCredentialEncrypted=otelplane-server-pepper:/etc/credstore.encrypted/otelplane-server-pepper
+WorkingDirectory=/var/lib/otelplane
+StateDirectory=otelplane
+LogsDirectory=otelplane
+ExecStart=/opt/otelplane/bin/otelplane
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# OTelPlane requires write access only to its state and log directories.
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+ReadWritePaths=/var/lib/otelplane /var/log/otelplane
+
+[Install]
+WantedBy=multi-user.target

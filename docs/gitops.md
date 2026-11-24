@@ -1,6 +1,6 @@
 # Governed GitOps delivery
 
-FleetAMP accepts change intent, resolves authorized targets, validates
+OTelPlane accepts change intent, resolves authorized targets, validates
 compatibility, creates an immutable repository preview and requires approval
 before an execution is queued. It does not create repositories or pipelines.
 
@@ -27,11 +27,11 @@ The UI stores only a reference such as:
 secret://github/production
 ```
 
-FleetAMP resolves that reference at runtime from the corresponding environment
+OTelPlane resolves that reference at runtime from the corresponding environment
 variable:
 
 ```bash
-FLEETAMP_GITOPS_SECRET_GITHUB_PRODUCTION=replace-with-test-token
+OTELPLANE_GITOPS_SECRET_GITHUB_PRODUCTION=replace-with-test-token
 ```
 
 Do not put the token in a repository connection, preview, configuration file or
@@ -45,14 +45,14 @@ read/write permissions.
 2. Enter a connection name and select the provider first.
 3. Complete only the fields displayed for GitHub, GitLab or Azure DevOps.
 4. Select an existing repository and branch.
-5. Set a relative allowed root such as `fleetamp/groups`.
+5. Set a relative allowed root such as `otelplane/groups`.
 6. Select the groups permitted to use the connection.
 7. Enter the `secret://` credential reference and save.
 8. Select **Test connection**.
 
 Validation evidence expires after 24 hours by default. Override this with
-`FLEETAMP_INTEGRATION_VALIDATION_TTL`. Self-hosted provider hosts must be HTTPS
-and explicitly listed in `FLEETAMP_INTEGRATION_ALLOWED_HOSTS`.
+`OTELPLANE_INTEGRATION_VALIDATION_TTL`. Self-hosted provider hosts must be HTTPS
+and explicitly listed in `OTELPLANE_INTEGRATION_ALLOWED_HOSTS`.
 
 ## 3. Create and approve a component proposal
 
@@ -80,7 +80,7 @@ Creating or approving a proposal does not modify a repository.
 7. Have that reviewer approve it.
 8. Queue the approved preview for execution.
 
-FleetAMP binds the approval to the plan hash, preview hash, connection snapshot,
+OTelPlane binds the approval to the plan hash, preview hash, connection snapshot,
 branch and repository path. A changed preview requires a new approval.
 
 ## 5. Run in dry-run mode
@@ -88,8 +88,8 @@ branch and repository path. A changed preview requires a new approval.
 Dry-run is the recommended initial configuration:
 
 ```bash
-FLEETAMP_GITOPS_WORKER_ENABLED=true
-FLEETAMP_GITOPS_GITHUB_WRITES_ENABLED=false
+OTELPLANE_GITOPS_WORKER_ENABLED=true
+OTELPLANE_GITOPS_GITHUB_WRITES_ENABLED=false
 ```
 
 The worker validates and records the provider execution without committing or
@@ -101,22 +101,22 @@ Only enable writes after the dry-run E2E flow succeeds against a dedicated test
 repository:
 
 ```bash
-FLEETAMP_GITOPS_WORKER_ENABLED=true
-FLEETAMP_GITOPS_GITHUB_WRITES_ENABLED=true
-FLEETAMP_GITOPS_GITHUB_STATUS_SYNC_ENABLED=true
+OTELPLANE_GITOPS_WORKER_ENABLED=true
+OTELPLANE_GITOPS_GITHUB_WRITES_ENABLED=true
+OTELPLANE_GITOPS_GITHUB_STATUS_SYNC_ENABLED=true
 ```
 
 Optional tuning:
 
 ```bash
-FLEETAMP_GITOPS_WORKER_ID=fleetamp-worker-1
-FLEETAMP_GITOPS_WORKER_INTERVAL=5s
-FLEETAMP_GITOPS_LEASE_TTL=30s
-FLEETAMP_GITOPS_STATUS_SYNC_ID=fleetamp-worker-1-status
-FLEETAMP_GITOPS_STATUS_SYNC_INTERVAL=30s
+OTELPLANE_GITOPS_WORKER_ID=otelplane-worker-1
+OTELPLANE_GITOPS_WORKER_INTERVAL=5s
+OTELPLANE_GITOPS_LEASE_TTL=30s
+OTELPLANE_GITOPS_STATUS_SYNC_ID=otelplane-worker-1-status
+OTELPLANE_GITOPS_STATUS_SYNC_INTERVAL=30s
 ```
 
-Restart FleetAMP after changing service environment variables. GitLab and Azure
+Restart OTelPlane after changing service environment variables. GitLab and Azure
 DevOps delivery remain dry-run in v0.3.0.
 
 ## 7. Monitor and recover
@@ -142,7 +142,7 @@ validation, preview, approval, queueing, retry and completion.
 
 - Use a dedicated repository and least-privilege credential for testing.
 - Keep the worker and GitHub writes disabled by default.
-- Restrict every connection to explicit FleetAMP groups.
+- Restrict every connection to explicit OTelPlane groups.
 - Use a relative allowed root and review the resolved preview path.
 - Never approve your own proposal or preview.
 - Revalidate expired repository evidence before queueing.

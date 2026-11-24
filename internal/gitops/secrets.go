@@ -30,7 +30,7 @@ func (r EnvironmentSecretResolver) Resolve(_ context.Context, reference string) 
 	if name == "" || strings.Contains(name, "..") {
 		return "", errors.New("credential reference is invalid")
 	}
-	environmentName := "FLEETAMP_GITOPS_SECRET_" + strings.ToUpper(strings.Trim(secretReferencePart.ReplaceAllString(name, "_"), "_"))
+	environmentName := "OTELPLANE_GITOPS_SECRET_" + strings.ToUpper(strings.Trim(secretReferencePart.ReplaceAllString(name, "_"), "_"))
 	value, ok := r.Lookup(environmentName)
 	if !ok || strings.TrimSpace(value) == "" {
 		return "", fmt.Errorf("credential %q is not configured in environment variable %s", reference, environmentName)

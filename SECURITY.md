@@ -1,6 +1,6 @@
 # Security Policy
 
-FleetAMP is in early development.
+OTelPlane is in early development.
 
 Please do not open public issues containing credentials, tokens, private keys, certificates, exploitable security details, or sensitive deployment information.
 

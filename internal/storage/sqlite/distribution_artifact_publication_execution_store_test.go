@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/distributions"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 func TestArtifactPublicationExecutionClaimAndComplete(t *testing.T) {
@@ -26,10 +26,10 @@ func TestArtifactPublicationExecutionClaimAndComplete(t *testing.T) {
 	}
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	sha := strings.Repeat("a", 64)
-	if _, err = db.db.ExecContext(ctx, `INSERT INTO distribution_artifact_publications(id,promotion_id,review_id,artifact_id,artifact_sha256,destination_ref,credential_ref,status,evidence_hash,queued_by,queued_at) VALUES('publication-1','promotion-1','review-1','artifact-1',?,'oci://registry.example.test/fleetamp:v1','secret://registry','queued',?,'admin',?)`, sha, strings.Repeat("b", 64), formatTime(now)); err != nil {
+	if _, err = db.db.ExecContext(ctx, `INSERT INTO distribution_artifact_publications(id,promotion_id,review_id,artifact_id,artifact_sha256,destination_ref,credential_ref,status,evidence_hash,queued_by,queued_at) VALUES('publication-1','promotion-1','review-1','artifact-1',?,'oci://registry.example.test/otelplane:v1','secret://registry','queued',?,'admin',?)`, sha, strings.Repeat("b", 64), formatTime(now)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.db.ExecContext(ctx, `INSERT INTO distribution_artifact_publication_preflights(id,publication_id,publication_evidence_hash,artifact_id,artifact_reference,artifact_sha256,artifact_size,destination_ref,destination_host,credential_ref,credential_available,status,evidence_hash,checked_by,checked_at) VALUES('preflight-1','publication-1',?,'artifact-1',? ,?,8,'oci://registry.example.test/fleetamp:v1','registry.example.test','secret://registry',1,'passed',?,'admin',?)`, strings.Repeat("b", 64), "artifact-cache://"+sha+"/fleetamp-collector", sha, strings.Repeat("c", 64), formatTime(now)); err != nil {
+	if _, err = db.db.ExecContext(ctx, `INSERT INTO distribution_artifact_publication_preflights(id,publication_id,publication_evidence_hash,artifact_id,artifact_reference,artifact_sha256,artifact_size,destination_ref,destination_host,credential_ref,credential_available,status,evidence_hash,checked_by,checked_at) VALUES('preflight-1','publication-1',?,'artifact-1',? ,?,8,'oci://registry.example.test/otelplane:v1','registry.example.test','secret://registry',1,'passed',?,'admin',?)`, strings.Repeat("b", 64), "artifact-cache://"+sha+"/otelplane-collector", sha, strings.Repeat("c", 64), formatTime(now)); err != nil {
 		t.Fatal(err)
 	}
 	store := db.DistributionArtifactPublicationExecutions()

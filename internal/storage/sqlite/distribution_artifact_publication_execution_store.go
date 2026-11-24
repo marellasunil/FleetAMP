@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/distributions"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type DistributionArtifactPublicationExecutionStore struct{ db *sql.DB }

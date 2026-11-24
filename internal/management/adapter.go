@@ -1,7 +1,7 @@
 // Protocol-independent management adapter contract and normalized events.
 //
 // Purpose:
-//   Defines the boundary between FleetAMP core and management protocols such as
+//   Defines the boundary between OTelPlane core and management protocols such as
 //   OpAMP, allowing additional telemetry-agent adapters to be added later.
 //
 // Flow:
@@ -12,7 +12,7 @@ package management
 import (
 	"context"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/agents"
 )
 
 // EventType describes normalized lifecycle events produced by a management
@@ -25,14 +25,14 @@ const (
 	EventUpdated      EventType = "updated"
 )
 
-// Event is the protocol-independent event FleetAMP consumes from management
+// Event is the protocol-independent event OTelPlane consumes from management
 // adapters such as OpAMP.
 type Event struct {
 	Type  EventType            `json:"type"`
 	Agent *agents.ManagedAgent `json:"agent"`
 }
 
-// Adapter is the boundary between FleetAMP core logic and a concrete agent
+// Adapter is the boundary between OTelPlane core logic and a concrete agent
 // management protocol or implementation.
 type Adapter interface {
 	Name() string

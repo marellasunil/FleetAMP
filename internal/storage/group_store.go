@@ -1,4 +1,4 @@
-// Storage contract for FleetAMP controlled group definitions.
+// Storage contract for OTelPlane controlled group definitions.
 //
 // Purpose:
 //
@@ -9,7 +9,7 @@ package storage
 import (
 	"context"
 	"errors"
-	"github.com/marellasunil/FleetAMP/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/groups"
 )
 
 var ErrGroupNotFound = errors.New("group not found")

@@ -1,4 +1,4 @@
-// Configuration validation for FleetAMP.
+// Configuration validation for OTelPlane.
 //
 // Purpose:
 //
@@ -18,7 +18,7 @@
 //
 // Configuration:
 //
-//	FLEETAMP_OTELCOL_BINARY is read by the application and passed to the
+//	OTELPLANE_OTELCOL_BINARY is read by the application and passed to the
 //	validator. When unset, YAML validation remains mandatory and Collector
 //	validation is reported as skipped.
 package configs
@@ -95,7 +95,7 @@ func (v *Validator) Validate(ctx context.Context, content string) ValidationResu
 	validateCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	dir, err := os.MkdirTemp("", "fleetamp-config-validate-*")
+	dir, err := os.MkdirTemp("", "otelplane-config-validate-*")
 	if err != nil {
 		result.Error = fmt.Sprintf("create validation workspace: %v", err)
 		return result

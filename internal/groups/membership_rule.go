@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/agents"
 )
 
 type MembershipMatchType string
@@ -79,7 +79,7 @@ func DynamicMatches(group *Group, agent *agents.ManagedAgent) bool {
 func membershipFieldValue(agent *agents.ManagedAgent, field string) string {
 	switch field {
 	case "stable_id":
-		return strings.TrimSpace(agent.Attributes["fleetamp.agent.id"])
+		return strings.TrimSpace(agent.Attributes["otelplane.agent.id"])
 	case "name":
 		return strings.TrimSpace(agent.Name)
 	case "display_name":

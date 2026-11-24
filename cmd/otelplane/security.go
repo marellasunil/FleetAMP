@@ -1,0 +1,430 @@
+package main
+
+import (
+	"crypto/subtle"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+)
+
+const defaultMaxRequestBodyBytes int64 = 1 << 20
+
+type securityConfig struct {
+	HTTPUsername       string
+	HTTPPassword       string
+	OpAMPToken         string
+	AllowedOrigins     map[string]struct{}
+	MaxBodyBytes       int64
+	AllowInsecure      bool
+	HTTPTLSTerminated  bool
+	OpAMPTLSTerminated bool
+	HTTPNativeTLS      bool
+	OpAMPNativeTLS     bool
+}
+
+// loadSecurityConfig validates authentication, origin, request-size, and remote-listener protection settings before startup.
+func loadSecurityConfig(httpAddr, opampAddr string) (securityConfig, error) {
+	cfg := securityConfig{
+		HTTPUsername:       strings.TrimSpace(os.Getenv("OTELPLANE_AUTH_USERNAME")),
+		HTTPPassword:       os.Getenv("OTELPLANE_AUTH_PASSWORD"),
+		OpAMPToken:         os.Getenv("OTELPLANE_OPAMP_TOKEN"),
+		AllowedOrigins:     parseAllowedOrigins(os.Getenv("OTELPLANE_ALLOWED_ORIGINS")),
+		MaxBodyBytes:       defaultMaxRequestBodyBytes,
+		AllowInsecure:      boolEnv("OTELPLANE_ALLOW_INSECURE"),
+		HTTPTLSTerminated:  boolEnv("OTELPLANE_HTTP_TLS_TERMINATED"),
+		OpAMPTLSTerminated: boolEnv("OTELPLANE_OPAMP_TLS_TERMINATED"),
+		HTTPNativeTLS:      boolEnv("OTELPLANE_HTTP_TLS_ENABLED"),
+		OpAMPNativeTLS:     boolEnv("OTELPLANE_OPAMP_TLS_ENABLED"),
+	}
+	if raw := strings.TrimSpace(os.Getenv("OTELPLANE_MAX_REQUEST_BODY_BYTES")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 1024 || value > 10<<20 {
+			return cfg, fmt.Errorf("OTELPLANE_MAX_REQUEST_BODY_BYTES must be between 1024 and 10485760")
+		}
+		cfg.MaxBodyBytes = value
+	}
+	if (cfg.HTTPUsername == "") != (cfg.HTTPPassword == "") {
+		return cfg, fmt.Errorf("OTELPLANE_AUTH_USERNAME and OTELPLANE_AUTH_PASSWORD must be configured together")
+	}
+	if cfg.HTTPPassword != "" && len(cfg.HTTPPassword) < 16 {
+		return cfg, fmt.Errorf("OTELPLANE_AUTH_PASSWORD must contain at least 16 characters")
+	}
+	if cfg.OpAMPToken != "" && len(cfg.OpAMPToken) < 32 {
+		return cfg, fmt.Errorf("OTELPLANE_OPAMP_TOKEN must contain at least 32 characters")
+	}
+	// Remote HTTP authentication is enforced by the bootstrap administrator and
+	// server-pepper flow. Environment-based Basic Auth remains a migration fallback.
+	if !isLoopbackListener(httpAddr) && !cfg.HTTPNativeTLS && !cfg.HTTPTLSTerminated && !cfg.AllowInsecure {
+		return cfg, fmt.Errorf("remote HTTP listener %q requires native TLS, OTELPLANE_HTTP_TLS_TERMINATED=true, or explicit OTELPLANE_ALLOW_INSECURE=true", httpAddr)
+	}
+	if !isLoopbackListener(opampAddr) && cfg.OpAMPToken == "" && !cfg.AllowInsecure {
+		return cfg, fmt.Errorf("remote OpAMP listener %q requires OTELPLANE_OPAMP_TOKEN or explicit OTELPLANE_ALLOW_INSECURE=true", opampAddr)
+	}
+	if !isLoopbackListener(opampAddr) && !cfg.OpAMPNativeTLS && !cfg.OpAMPTLSTerminated && !cfg.AllowInsecure {
+		return cfg, fmt.Errorf("remote OpAMP listener %q requires native TLS, OTELPLANE_OPAMP_TLS_TERMINATED=true, or explicit OTELPLANE_ALLOW_INSECURE=true", opampAddr)
+	}
+	if cfg.AllowInsecure {
+		slog.Warn("insecure remote listeners explicitly allowed", "component", "security", "event", "insecure_mode_enabled")
+	}
+	return cfg, nil
+}
+
+// boolEnv parses a boolean environment variable; invalid or missing values are treated as false.
+func boolEnv(name string) bool {
+	value, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv(name)))
+	return value
+}
+
+// isLoopbackListener reports whether an address is explicitly bound to localhost or a loopback IP.
+func isLoopbackListener(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// parseAllowedOrigins normalizes a comma-separated origin allowlist for constant-time map lookup.
+func parseAllowedOrigins(raw string) map[string]struct{} {
+	result := make(map[string]struct{})
+	for _, item := range strings.Split(raw, ",") {
+		origin := strings.TrimRight(strings.TrimSpace(item), "/")
+		if origin != "" {
+			result[strings.ToLower(origin)] = struct{}{}
+		}
+	}
+	return result
+}
+
+type permission string
+
+const (
+	permissionRead    permission = "read"
+	permissionEdit    permission = "edit"
+	permissionApprove permission = "approve"
+	permissionAdmin   permission = "admin"
+)
+
+// requiredPermission maps each request to the minimum server-side role.
+// The section-policy feature can extend this map without relying on UI state.
+func requiredPermission(r *http.Request) permission {
+	if r.URL.Path == "/account" || r.URL.Path == "/logout" || r.URL.Path == "/api/v1/session" || strings.HasPrefix(r.URL.Path, "/assets/") {
+		return permissionRead
+	}
+	if r.URL.Path == "/settings" || strings.HasPrefix(r.URL.Path, "/settings/") ||
+		r.URL.Path == "/audit-log" || strings.HasPrefix(r.URL.Path, "/api/v1/audit-events") {
+		return permissionAdmin
+	}
+	if r.URL.Path == "/approvals" || strings.HasPrefix(r.URL.Path, "/approvals/") {
+		return permissionApprove
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/collector-distributions" {
+		return permissionAdmin
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/configurations" {
+		// Raw complete-document creation bypasses per-section baselines, so it
+		// remains Admin-only. Operators use the policy-enforced agent editor.
+		return permissionAdmin
+	}
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return permissionRead
+	}
+	if r.URL.Path == "/logout" {
+		return permissionRead
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/agents/") &&
+		(strings.Contains(r.URL.Path, "/config") || strings.Contains(r.URL.Path, "/rollback")) {
+		return permissionApprove
+	}
+	if r.URL.Path == "/api/v1/groups" || strings.HasPrefix(r.URL.Path, "/api/v1/groups/") ||
+		strings.HasSuffix(r.URL.Path, "/group") || strings.HasSuffix(r.URL.Path, "/labels") ||
+		strings.HasSuffix(r.URL.Path, "/label") {
+		return permissionAdmin
+	}
+	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/configurations") {
+		// Saving a validated version is an edit operation. Deployment approval is
+		// authorized separately through the group approval workflow.
+		return permissionEdit
+	}
+	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/delete") {
+		return permissionEdit
+	}
+	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/groups/") {
+		if err := r.ParseForm(); err != nil {
+			return permissionAdmin
+		}
+		switch strings.TrimSpace(r.FormValue("action")) {
+		case "request_deployment", "create_configuration", "cancel_deployment":
+			return permissionEdit
+		case "approve_deployment", "reject_deployment", "send_back_deployment":
+			return permissionApprove
+		default:
+			return permissionAdmin
+		}
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/groups" {
+		return permissionAdmin
+	}
+	return permissionEdit
+}
+
+// roleAllows defines the initial OTelPlane authorization hierarchy.
+func roleAllows(principalRole role, required permission) bool {
+	switch principalRole {
+	case roleAdmin:
+		return true
+	case roleOperator:
+		return required == permissionRead || required == permissionEdit
+	case roleGroupOwner:
+		// Approval handlers additionally require ownership and an exact assigned-
+		// reviewer match. Allowing the route here lets an Admin delegate review
+		// to a Group Owner without granting broad approval authority.
+		return required == permissionRead || required == permissionEdit || required == permissionApprove
+	case roleViewer:
+		return required == permissionRead
+	default:
+		return false
+	}
+}
+
+// authorizeRole enforces authorization after authentication and records denied
+// operations without exposing credentials or request bodies.
+func authorizeRole(w http.ResponseWriter, r *http.Request, cfg securityConfig, auth *authManager) bool {
+	principalRole := roleAdmin
+	username := cfg.HTTPUsername
+	if auth != nil {
+		var ok bool
+		principalRole, ok = auth.sessionRole(r)
+		if !ok {
+			if cfg.HTTPUsername == "" || !validBasicAuth(r, cfg) {
+				http.Error(w, "authenticated role is required", http.StatusUnauthorized)
+				return false
+			}
+		} else {
+			username, _ = auth.sessionUsername(r)
+		}
+	}
+	required := requiredPermission(r)
+	if principalRole == roleGroupOwner && !groupOwnerRoute(r.URL.Path) {
+		slog.Warn("group owner route denied", "component", "auth", "event", "authorization_denied",
+			"username", username, "role", principalRole, "method", r.Method, "path", r.URL.Path)
+		writeAuthorizationDenied(w, r)
+		return false
+	}
+	if roleAllows(principalRole, required) {
+		return true
+	}
+	slog.Warn("authorization denied", "component", "auth", "event", "authorization_denied",
+		"username", username, "role", principalRole, "required_permission", required,
+		"method", r.Method, "path", r.URL.Path)
+	writeAuthorizationDenied(w, r)
+	return false
+}
+
+func writeAuthorizationDenied(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") && strings.Contains(r.Header.Get("Accept"), "text/html") {
+		destination := "/agents?access_denied=" + url.QueryEscape("Your role does not permit access to this page.")
+		http.Redirect(w, r, destination, http.StatusSeeOther)
+		return
+	}
+	http.Error(w, "forbidden", http.StatusForbidden)
+}
+
+func groupOwnerRoute(path string) bool {
+	return path == "/account" ||
+		path == "/agents" || strings.HasPrefix(path, "/agents/") ||
+		path == "/api/v1/agents" ||
+		path == "/groups" || strings.HasPrefix(path, "/groups/") ||
+		path == "/ownership-lifecycle" ||
+		path == "/collector-distributions" || strings.HasPrefix(path, "/collector-distributions/") ||
+		(path == "/blueprints" || strings.HasPrefix(path, "/blueprints/")) ||
+		path == "/approvals" || strings.HasPrefix(path, "/approvals/") ||
+		(strings.HasPrefix(path, "/agents/") && strings.HasSuffix(path, "/delete")) ||
+		path == "/api/v1/groups" || strings.HasPrefix(path, "/api/v1/groups/") ||
+		path == "/api/v1/configurations/sections/compose" ||
+		path == "/api/v1/configurations/sections/references" ||
+		path == "/logout" || path == "/api/v1/session" || strings.HasPrefix(path, "/assets/")
+}
+
+// securityMiddleware applies headers, authentication, authorization, origin checks, method restrictions, body limits, and panic recovery to every route.
+func securityMiddleware(cfg securityConfig, auth *authManager, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setSecurityHeaders(w)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				slog.Error("HTTP handler panic recovered", "component", "http", "event", "panic_recovered")
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+			}
+		}()
+		if !allowedMethod(r.Method) {
+			w.Header().Set("Allow", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		publicHealth := r.URL.Path == "/health" || r.URL.Path == "/ready"
+		publicAuthentication := r.URL.Path == "/setup" || r.URL.Path == "/login" || r.URL.Path == "/recover" ||
+			r.URL.Path == "/assets/theme.js" || r.URL.Path == "/assets/otelplane-logo-transparent.png"
+		protected := !publicHealth && !publicAuthentication
+		if protected {
+			if auth != nil && !auth.authorize(w, r, cfg) {
+				return
+			}
+			if auth == nil && cfg.HTTPUsername != "" && !validBasicAuth(r, cfg) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="OTelPlane", charset="UTF-8"`)
+				http.Error(w, "authentication required", http.StatusUnauthorized)
+				return
+			}
+		}
+		if isUnsafeMethod(r.Method) && !validRequestOrigin(r, cfg.AllowedOrigins) {
+			slog.Warn("request origin rejected", "component", "http", "event", "origin_rejected", "origin", r.Header.Get("Origin"), "host", r.Host, "remote_address", r.RemoteAddr, "fetch_site", r.Header.Get("Sec-Fetch-Site"))
+			http.Error(w, "request origin is not allowed", http.StatusForbidden)
+			return
+		}
+		if isUnsafeMethod(r.Method) && r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, cfg.MaxBodyBytes)
+		}
+		if protected && !authorizeRole(w, r, cfg, auth) {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// setSecurityHeaders adds browser hardening and disables caching of authenticated OTelPlane responses.
+func setSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+	w.Header().Set("Cache-Control", "no-store")
+}
+
+// allowedMethod restricts requests to the HTTP verbs used by OTelPlane pages and APIs.
+func allowedMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
+}
+
+// isUnsafeMethod identifies state-changing requests that require origin validation and body limits.
+func isUnsafeMethod(method string) bool {
+	return method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
+}
+
+// validBasicAuth verifies legacy migration credentials using a bounded constant-time comparison.
+func validBasicAuth(r *http.Request, cfg securityConfig) bool {
+	username, password, ok := r.BasicAuth()
+	if !ok {
+		return false
+	}
+	return constantTimeCredentialEqual(username, cfg.HTTPUsername) &&
+		constantTimeCredentialEqual(password, cfg.HTTPPassword)
+}
+
+const maximumCredentialBytes = 1024
+
+// constantTimeCredentialEqual compares legacy environment credentials without
+// repurposing a fast general-purpose hash as a password hashing algorithm.
+func constantTimeCredentialEqual(actual, expected string) bool {
+	if len(actual) > maximumCredentialBytes || len(expected) > maximumCredentialBytes {
+		return false
+	}
+	var actualPadded, expectedPadded [maximumCredentialBytes]byte
+	copy(actualPadded[:], actual)
+	copy(expectedPadded[:], expected)
+	contentsEqual := subtle.ConstantTimeCompare(actualPadded[:], expectedPadded[:])
+	lengthsEqual := subtle.ConstantTimeEq(int32(len(actual)), int32(len(expected)))
+	return contentsEqual&lengthsEqual == 1
+}
+
+// internalServerError logs the detailed error server-side while returning a generic response to the client.
+func internalServerError(w http.ResponseWriter, err error) {
+	slog.Error("HTTP request failed", "component", "http", "event", "internal_error", "error", err)
+	http.Error(w, "internal server error", http.StatusInternalServerError)
+}
+
+// validRequestOrigin permits configured origins, the request's own origin, and safe equivalent loopback aliases.
+func validRequestOrigin(r *http.Request, allowed map[string]struct{}) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		// Modern browsers identify cross-site requests even when an Origin header
+		// is absent. Non-browser API clients normally omit both headers.
+		return !strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site")
+	}
+	if origin == "null" {
+		return validLoopbackNullOrigin(r)
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return false
+	}
+	normalized := strings.ToLower(parsed.Scheme + "://" + parsed.Host)
+	if _, ok := allowed[normalized]; ok {
+		return true
+	}
+	if strings.EqualFold(parsed.Host, r.Host) {
+		return true
+	}
+	return equivalentLoopbackOrigin(parsed, r.Host)
+}
+
+// validLoopbackNullOrigin handles Fedora's Origin:null behavior only for same-site requests that remain entirely on loopback.
+func validLoopbackNullOrigin(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		host = r.Host
+	}
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	fetchSite := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+	return loopbackHost(host) && loopbackHost(remoteHost) &&
+		(fetchSite == "same-origin" || fetchSite == "same-site")
+}
+
+// equivalentLoopbackOrigin treats localhost and loopback IP names as equivalent only when their effective ports match.
+func equivalentLoopbackOrigin(origin *url.URL, requestHost string) bool {
+	host, port, err := net.SplitHostPort(requestHost)
+	if err != nil {
+		host = requestHost
+		port = ""
+	}
+	originPort := origin.Port()
+	if originPort == "" {
+		if origin.Scheme == "http" {
+			originPort = "80"
+		} else if origin.Scheme == "https" {
+			originPort = "443"
+		}
+	}
+	if port == "" {
+		port = originPort
+	}
+	return loopbackHost(origin.Hostname()) && loopbackHost(host) && originPort == port
+}
+
+// loopbackHost reports whether a host name or address represents the local loopback interface.
+func loopbackHost(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	return strings.EqualFold(host, "localhost") || (net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback())
+}

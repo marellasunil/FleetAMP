@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/audit"
+	"github.com/marellasunil/OTelPlane/internal/audit"
 )
 
 func TestAuditStoreAppendsAndFilters(t *testing.T) {
 	ctx := context.Background()
-	database, err := Open(ctx, filepath.Join(t.TempDir(), "fleetamp.db"))
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "otelplane.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

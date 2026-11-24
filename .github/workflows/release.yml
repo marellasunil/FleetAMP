@@ -100,23 +100,23 @@ jobs:
           release="${version#v}"
           commit="${GITHUB_SHA::12}"
           build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          package="fleetamp_${release}_${GOOS}_${GOARCH}"
+          package="otelplane_${release}_${GOOS}_${GOARCH}"
 
           mkdir -p "dist/${package}/deploy/systemd" "dist/${package}/scripts"
 
           CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w -X main.version=${version} -X main.commit=${commit} -X main.buildDate=${build_date}" \
-            -o "dist/${package}/fleetamp" ./cmd/fleetamp
+            -o "dist/${package}/otelplane" ./cmd/otelplane
 
           cp LICENSE README.md "dist/${package}/"
           cp deploy/systemd/* "dist/${package}/deploy/systemd/"
           cp scripts/install-user.sh "dist/${package}/scripts/"
 
           if [[ "${GOARCH}" == "amd64" ]]; then
-            "dist/${package}/fleetamp" --version | grep -F "${version}"
+            "dist/${package}/otelplane" --version | grep -F "${version}"
           else
-            go version -m "dist/${package}/fleetamp" | grep -F "GOOS=linux"
-            go version -m "dist/${package}/fleetamp" | grep -F "GOARCH=arm64"
+            go version -m "dist/${package}/otelplane" | grep -F "GOOS=linux"
+            go version -m "dist/${package}/otelplane" | grep -F "GOARCH=arm64"
           fi
 
           tar -C dist -czf "dist/${package}.tar.gz" "${package}"
@@ -125,7 +125,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: fleetamp-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: otelplane-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.tar.gz
           if-no-files-found: error
           retention-days: 7
@@ -140,7 +140,7 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: fleetamp-*
+          pattern: otelplane-*
           path: dist
           merge-multiple: true
 
@@ -162,13 +162,13 @@ jobs:
           if [[ -f "${notes_file}" ]]; then
             gh release create "${version}" dist/* \
               --target "${GITHUB_SHA}" \
-              --title "FleetAMP ${version}" \
+              --title "OTelPlane ${version}" \
               --notes-file "${notes_file}" \
               --prerelease
           else
             gh release create "${version}" dist/* \
               --target "${GITHUB_SHA}" \
-              --title "FleetAMP ${version}" \
+              --title "OTelPlane ${version}" \
               --generate-notes \
               --prerelease
           fi

@@ -3,7 +3,7 @@ package groups
 import (
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/agents"
 )
 
 func TestDynamicMatchesWildcardAndExclusion(t *testing.T) {
@@ -18,7 +18,7 @@ func TestDynamicMatchesWildcardAndExclusion(t *testing.T) {
 	}
 	agent := &agents.ManagedAgent{
 		Name:       "otelcol",
-		Attributes: map[string]string{"fleetamp.agent.id": "payments-prod-collector-07"},
+		Attributes: map[string]string{"otelplane.agent.id": "payments-prod-collector-07"},
 	}
 	if !DynamicMatches(group, agent) {
 		t.Fatal("expected wildcard rule to match stable Collector ID")

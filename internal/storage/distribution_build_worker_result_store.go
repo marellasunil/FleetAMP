@@ -2,7 +2,7 @@ package storage
 
 import (
 	"context"
-	"github.com/marellasunil/FleetAMP/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
 )
 
 type DistributionBuildWorkerResultStore interface {

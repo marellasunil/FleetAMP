@@ -11,17 +11,17 @@ import (
 	"time"
 )
 
-const testBuilderImage = "example.invalid/fleetamp/ocb-builder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const testBuilderImage = "example.invalid/otelplane/ocb-builder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func inspectedBuildSource() *BuildSourceInspection {
-	manifest := "dist:\n  name: fleetamp-collector\n  output_path: ./_build\n"
+	manifest := "dist:\n  name: otelplane-collector\n  output_path: ./_build\n"
 	sum := sha256.Sum256([]byte(manifest))
 	return &BuildSourceInspection{ID: "inspection-1", ExecutionID: "execution-1", BuildPlanHash: strings.Repeat("b", 64), ManifestYAML: manifest, ManifestSHA256: hex.EncodeToString(sum[:]), Status: BuildSourceInspected}
 }
 
 func TestBuildArtifactBindsExactInspectionAndDigestPinnedBuilder(t *testing.T) {
 	inspection := inspectedBuildSource()
-	result := &OCBRunResult{Runtime: "podman", BuilderImage: testBuilderImage, ArtifactReference: "artifact-cache://" + strings.Repeat("d", 64) + "/fleetamp-collector", ArtifactSHA256: strings.Repeat("d", 64), ArtifactSize: 8}
+	result := &OCBRunResult{Runtime: "podman", BuilderImage: testBuilderImage, ArtifactReference: "artifact-cache://" + strings.Repeat("d", 64) + "/otelplane-collector", ArtifactSHA256: strings.Repeat("d", 64), ArtifactSize: 8}
 	one, err := NewBuildArtifact(inspection, result, "worker", time.Unix(1, 0))
 	if err != nil {
 		t.Fatal(err)
@@ -43,21 +43,21 @@ func TestContainerOCBRunnerUsesConstrainedOfflineContainer(t *testing.T) {
 	binDir := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "args.log")
 	script := `#!/bin/sh
-printf '%s\n' "$@" > "$FLEETAMP_TEST_ARGS"
+printf '%s\n' "$@" > "$OTELPLANE_TEST_ARGS"
 for arg in "$@"; do
   case "$arg" in
     type=bind,src=*,dst=/workspace,rw) workspace=${arg#type=bind,src=}; workspace=${workspace%,dst=/workspace,rw} ;;
   esac
 done
 mkdir -p "$workspace/_build"
-printf 'collector-binary' > "$workspace/_build/fleetamp-collector"
+printf 'collector-binary' > "$workspace/_build/otelplane-collector"
 `
 	runtimePath := filepath.Join(binDir, "podman")
 	if err := os.WriteFile(runtimePath, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("FLEETAMP_TEST_ARGS", logPath)
+	t.Setenv("OTELPLANE_TEST_ARGS", logPath)
 	root := t.TempDir()
 	runner := &ContainerOCBRunner{Runtime: "podman", BuilderImage: testBuilderImage, WorkspaceRoot: filepath.Join(root, "work"), ArtifactRoot: filepath.Join(root, "artifacts"), MaxArtifactBytes: 1024}
 	result, err := runner.Build(context.Background(), inspectedBuildSource())
@@ -72,7 +72,7 @@ printf 'collector-binary' > "$workspace/_build/fleetamp-collector"
 		t.Fatal(err)
 	}
 	text := string(args)
-	for _, required := range []string{"--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=1g", "--cpus=1", "GOPROXY=off", "GOSUMDB=off", "GOMODCACHE=/opt/fleetamp/gomodcache", testBuilderImage} {
+	for _, required := range []string{"--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=1g", "--cpus=1", "GOPROXY=off", "GOSUMDB=off", "GOMODCACHE=/opt/otelplane/gomodcache", testBuilderImage} {
 		if !strings.Contains(text, required) {
 			t.Errorf("missing constrained argument %q in:\n%s", required, text)
 		}

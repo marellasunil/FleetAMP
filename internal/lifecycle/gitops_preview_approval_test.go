@@ -3,7 +3,7 @@ package lifecycle
 import "testing"
 
 func TestGitOpsPreviewApprovalPinsExactEvidence(t *testing.T) {
-	preview := &GitOpsPreview{ID: "preview", PreviewHash: "preview-hash", PlanHash: "plan-hash", Connection: GitConnectionSnapshot{ID: "connection", Branch: "main"}, RepositoryPath: "fleetamp/groups/payments/components/request.json"}
+	preview := &GitOpsPreview{ID: "preview", PreviewHash: "preview-hash", PlanHash: "plan-hash", Connection: GitConnectionSnapshot{ID: "connection", Branch: "main"}, RepositoryPath: "otelplane/groups/payments/components/request.json"}
 	approval, err := NewGitOpsPreviewApproval(preview, "operator", "reviewer", "review exact content")
 	if err != nil {
 		t.Fatal(err)

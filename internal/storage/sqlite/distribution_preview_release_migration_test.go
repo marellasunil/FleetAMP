@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
 )
 
 func TestDistributionPreviewReleaseMigrationPreservesLegacyRows(t *testing.T) {

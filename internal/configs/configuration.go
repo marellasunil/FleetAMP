@@ -1,4 +1,4 @@
-// Immutable FleetAMP configuration artifact model.
+// Immutable OTelPlane configuration artifact model.
 //
 // Purpose:
 //   Represents a versioned configuration payload that can be assigned to a
@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-// Configuration is an immutable configuration artifact managed by FleetAMP.
+// Configuration is an immutable configuration artifact managed by OTelPlane.
 type Configuration struct {
 	ID          string    `json:"id"`
 	GroupID     string    `json:"group_id,omitempty"`
@@ -32,7 +32,7 @@ type Configuration struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// NewGroupConfiguration builds an immutable artifact scoped to one FleetAMP
+// NewGroupConfiguration builds an immutable artifact scoped to one OTelPlane
 // group so Group Owners cannot reuse or deploy another group's versions.
 func NewGroupConfiguration(groupID, name, version, content, contentType string) *Configuration {
 	return newConfiguration(groupID, name, version, content, contentType)

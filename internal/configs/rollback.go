@@ -1,9 +1,9 @@
-// Rollback target validation for immutable FleetAMP configuration history.
+// Rollback target validation for immutable OTelPlane configuration history.
 //
 // Purpose:
 //
 //	Ensures rollback selects an older artifact from the same configuration
-//	lineage before FleetAMP attempts validation or OpAMP delivery.
+//	lineage before OTelPlane attempts validation or OpAMP delivery.
 package configs
 
 import (
