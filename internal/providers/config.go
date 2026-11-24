@@ -8,7 +8,7 @@ package providers
 
 import "context"
 
-// ConfigRef identifies a configuration artifact without coupling FleetAMP to
+// ConfigRef identifies a configuration artifact without coupling OTelPlane to
 // a specific source-control or CI/CD vendor.
 type ConfigRef struct {
 	Provider   string            `json:"provider"`

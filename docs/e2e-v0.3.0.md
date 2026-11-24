@@ -1,4 +1,4 @@
-# FleetAMP v0.3.0 end-to-end validation
+# OTelPlane v0.3.0 end-to-end validation
 
 This checklist verifies the user-visible v0.3.0 workflows after the automated
 release gate passes. Record the result and evidence for every scenario before
@@ -11,7 +11,7 @@ scenarios pass.
 
 ## 1. Test boundaries
 
-- Use a disposable FleetAMP database or a copied v0.2 database.
+- Use a disposable OTelPlane database or a copied v0.2 database.
 - Keep the existing service on `localhost:8080` unchanged when using a separate
   test instance.
 - Use test users, groups, agents and repositories.
@@ -24,8 +24,8 @@ scenarios pass.
 | --- | --- |
 | Clean release branch | `git status --short --branch` |
 | Automated release gate passed | `bash scripts/verify-v0.3.0.sh` |
-| FleetAMP is healthy | `curl --fail http://127.0.0.1:8080/health` |
-| FleetAMP is ready | `curl --fail http://127.0.0.1:8080/ready` |
+| OTelPlane is healthy | `curl --fail http://127.0.0.1:8080/health` |
+| OTelPlane is ready | `curl --fail http://127.0.0.1:8080/ready` |
 | Administrator account exists | Sign in and open Administration |
 | Test ownership group exists | Open **Groups & Labels** |
 | Test agent is assigned | Open the group and confirm its target inventory |
@@ -38,7 +38,7 @@ scenarios pass.
 | Date | |
 | Tester | |
 | Commit | |
-| FleetAMP version | |
+| OTelPlane version | |
 | Database source | Fresh / copied v0.2 |
 | Git provider mode | Dry-run / GitHub PR |
 | Result | Pass / Fail |
@@ -153,7 +153,7 @@ token. GitLab and Azure DevOps remain dry-run delivery providers in v0.3.0.
 
 1. Enable the GitOps worker and GitHub writes.
 2. Queue an approved GitHub pull-request execution.
-3. Confirm FleetAMP creates or reuses the deterministic FleetAMP branch and one
+3. Confirm OTelPlane creates or reuses the deterministic OTelPlane branch and one
    pull request containing exactly the approved files.
 4. Merge or close the pull request.
 5. Confirm status synchronization appends the corresponding change event.

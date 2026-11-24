@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/blueprints"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/blueprints"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 func TestDestinationProfileStoreLifecycle(t *testing.T) {
-	database, err := Open(context.Background(), filepath.Join(t.TempDir(), "fleetamp.db"))
+	database, err := Open(context.Background(), filepath.Join(t.TempDir(), "otelplane.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

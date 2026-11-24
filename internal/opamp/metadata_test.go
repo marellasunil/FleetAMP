@@ -3,14 +3,14 @@ package opamp
 import (
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/agents"
 )
 
-func TestSplitFleetAMPMetadataAcceptsFlexibleGroupKeys(t *testing.T) {
-	groups, labels, unknown := splitFleetAMPMetadata(map[string]string{
-		"fleetamp.group.team":         "payments",
-		"fleetamp.group.cloud.region": "eu-west-1",
-		"fleetamp.label.release-ring": "canary",
+func TestSplitOTelPlaneMetadataAcceptsFlexibleGroupKeys(t *testing.T) {
+	groups, labels, unknown := splitOTelPlaneMetadata(map[string]string{
+		"otelplane.group.team":         "payments",
+		"otelplane.group.cloud.region": "eu-west-1",
+		"otelplane.label.release-ring": "canary",
 	})
 	if groups["team"] != "payments" || groups["cloud.region"] != "eu-west-1" {
 		t.Fatalf("unexpected group fields: %#v", groups)
@@ -31,7 +31,7 @@ func TestMergeAgentPreservesReportedNameOnPartialMessage(t *testing.T) {
 		Version:     "0.149.0",
 		Attributes: map[string]string{
 			"host.name":         "payments-prod-collector-01",
-			"fleetamp.agent.id": "payments-prod-collector-01",
+			"otelplane.agent.id": "payments-prod-collector-01",
 		},
 	}
 	current := &agents.ManagedAgent{
@@ -46,7 +46,7 @@ func TestMergeAgentPreservesReportedNameOnPartialMessage(t *testing.T) {
 	if current.Name != previous.Name || current.Hostname != previous.Hostname {
 		t.Fatalf("partial update replaced reported identity: %#v", current)
 	}
-	if current.Attributes["fleetamp.agent.id"] != "payments-prod-collector-01" {
+	if current.Attributes["otelplane.agent.id"] != "payments-prod-collector-01" {
 		t.Fatalf("partial update lost attributes: %#v", current.Attributes)
 	}
 }

@@ -1,4 +1,4 @@
-// OpenTelemetry OpAMP management adapter for FleetAMP.
+// OpenTelemetry OpAMP management adapter for OTelPlane.
 //
 // Purpose:
 //   Accepts OpAMP WebSocket connections, normalizes agent state into
@@ -6,11 +6,11 @@
 //   configuration only when the agent advertises AcceptsRemoteConfig.
 //
 // Runtime flow:
-//   OpAMP Agent/Supervisor <-> opamp-go server -> Adapter -> FleetAMP events.
-//   FleetAMP Configuration -> Adapter -> OpAMP RemoteConfig -> status report.
+//   OpAMP Agent/Supervisor <-> opamp-go server -> Adapter -> OTelPlane events.
+//   OTelPlane Configuration -> Adapter -> OpAMP RemoteConfig -> status report.
 //
 // Main dependencies:
-//   github.com/open-telemetry/opamp-go plus FleetAMP agents/configs/management.
+//   github.com/open-telemetry/opamp-go plus OTelPlane agents/configs/management.
 //
 // Design constraints:
 //   Missing partial-state fields must not erase previously known health/state.
@@ -32,9 +32,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/management"
+	"github.com/marellasunil/OTelPlane/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/management"
 	"github.com/open-telemetry/opamp-go/protobufs"
 	"github.com/open-telemetry/opamp-go/server"
 	servertypes "github.com/open-telemetry/opamp-go/server/types"
@@ -95,7 +95,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 					Accept:         false,
 					HTTPStatusCode: http.StatusUnauthorized,
 					HTTPResponseHeader: map[string]string{
-						"WWW-Authenticate": `Bearer realm="FleetAMP OpAMP"`,
+						"WWW-Authenticate": `Bearer realm="OTelPlane OpAMP"`,
 					},
 				}
 			}
@@ -119,7 +119,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	slog.Info("FleetAMP OpAMP server listening", "component", "opamp", "event", "server_started", "address", a.listenEndpoint+"/v1/opamp", "tls", a.tlsConfig != nil, "client_cert_required", a.tlsConfig != nil && a.tlsConfig.ClientAuth == tls.RequireAndVerifyClientCert)
+	slog.Info("OTelPlane OpAMP server listening", "component", "opamp", "event", "server_started", "address", a.listenEndpoint+"/v1/opamp", "tls", a.tlsConfig != nil, "client_cert_required", a.tlsConfig != nil && a.tlsConfig.ClientAuth == tls.RequireAndVerifyClientCert)
 	<-ctx.Done()
 	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -265,7 +265,7 @@ func (a *Adapter) onConnectionClose(conn servertypes.Connection) {
 	slog.Info("OpAMP agent disconnected", "component", "opamp", "event", "agent_disconnected", "agent_uid", agent.InstanceUID)
 }
 
-// managedAgentFromMessage translates an OpAMP protobuf message into FleetAMP's protocol-independent agent model.
+// managedAgentFromMessage translates an OpAMP protobuf message into OTelPlane's protocol-independent agent model.
 func managedAgentFromMessage(msg *protobufs.AgentToServer) *agents.ManagedAgent {
 	attrs := map[string]string{}
 	if d := msg.GetAgentDescription(); d != nil {
@@ -288,7 +288,7 @@ func managedAgentFromMessage(msg *protobufs.AgentToServer) *agents.ManagedAgent 
 		healthy = msg.GetHealth().GetHealthy()
 	}
 
-	reportedGroup, reportedLabels, unknownGroup := splitFleetAMPMetadata(attrs)
+	reportedGroup, reportedLabels, unknownGroup := splitOTelPlaneMetadata(attrs)
 	agent := &agents.ManagedAgent{
 		InstanceUID:         uid,
 		Type:                agents.AgentTypeOTelCollector,
@@ -351,23 +351,23 @@ func mergeAgent(current, previous *agents.ManagedAgent) {
 	}
 }
 
-// splitFleetAMPMetadata separates group fields, operator labels, and unknown FleetAMP-prefixed attributes.
-func splitFleetAMPMetadata(attrs map[string]string) (map[string]string, map[string]string, map[string]string) {
+// splitOTelPlaneMetadata separates group fields, operator labels, and unknown OTelPlane-prefixed attributes.
+func splitOTelPlaneMetadata(attrs map[string]string) (map[string]string, map[string]string, map[string]string) {
 	groupFields, labels, unknown := map[string]string{}, map[string]string{}, map[string]string{}
 	for key, value := range attrs {
-		if strings.HasPrefix(key, "fleetamp.group.") {
-			field := strings.TrimSpace(strings.TrimPrefix(key, "fleetamp.group."))
+		if strings.HasPrefix(key, "otelplane.group.") {
+			field := strings.TrimSpace(strings.TrimPrefix(key, "otelplane.group."))
 			if field != "" && strings.TrimSpace(value) != "" {
 				groupFields[field] = value
 			} else {
 				unknown[field] = value
 			}
 		}
-		if strings.HasPrefix(key, "fleetamp.label.") {
-			labels[strings.TrimPrefix(key, "fleetamp.label.")] = value
+		if strings.HasPrefix(key, "otelplane.label.") {
+			labels[strings.TrimPrefix(key, "otelplane.label.")] = value
 		}
 	}
-	// Backward-compatible aliases used by early FleetAMP prototypes.
+	// Backward-compatible aliases used by early OTelPlane prototypes.
 	for _, field := range []string{"application", "environment", "place"} {
 		if groupFields[field] == "" && attrs[field] != "" {
 			groupFields[field] = attrs[field]
@@ -376,7 +376,7 @@ func splitFleetAMPMetadata(attrs map[string]string) (map[string]string, map[stri
 	return groupFields, labels, unknown
 }
 
-// deploymentFromAttributes maps protocol-reported metadata into FleetAMP deployment
+// deploymentFromAttributes maps protocol-reported metadata into OTelPlane deployment
 // context without requiring Kubernetes/cloud SDK dependencies.
 func deploymentFromAttributes(attrs map[string]string) agents.DeploymentContext {
 	d := agents.DeploymentContext{Runtime: agents.RuntimeUnknown}
@@ -392,7 +392,7 @@ func deploymentFromAttributes(attrs map[string]string) agents.DeploymentContext 
 	return d
 }
 
-// capabilityNames converts the OpAMP capability bitmask into stable names used by FleetAMP policy and UI code.
+// capabilityNames converts the OpAMP capability bitmask into stable names used by OTelPlane policy and UI code.
 func capabilityNames(bits uint64) []string {
 	caps := []struct {
 		bit  uint64
@@ -511,7 +511,7 @@ func cloneManagedAgent(agent *agents.ManagedAgent) *agents.ManagedAgent {
 var ErrRemoteConfigUnsupported = errors.New("agent does not advertise accepts_remote_config")
 var ErrAgentNotConnected = errors.New("agent is not connected")
 
-// SendRemoteConfig offers one immutable FleetAMP configuration to a connected agent.
+// SendRemoteConfig offers one immutable OTelPlane configuration to a connected agent.
 func (a *Adapter) SendRemoteConfig(ctx context.Context, instanceUID string, config *configs.Configuration) error {
 	a.mu.Lock()
 	conn, ok := a.byUID[instanceUID]
@@ -533,7 +533,7 @@ func (a *Adapter) SendRemoteConfig(ctx context.Context, instanceUID string, conf
 	}
 	name := config.Name
 	if name == "" {
-		name = "fleetamp.yaml"
+		name = "otelplane.yaml"
 	}
 	message := &protobufs.ServerToAgent{
 		InstanceUid:  uid,
@@ -548,7 +548,7 @@ func (a *Adapter) SendRemoteConfig(ctx context.Context, instanceUID string, conf
 	return conn.Send(ctx, message)
 }
 
-// remoteConfigStatus maps OpAMP protocol status values to FleetAMP delivery states.
+// remoteConfigStatus maps OpAMP protocol status values to OTelPlane delivery states.
 func remoteConfigStatus(status protobufs.RemoteConfigStatuses) configs.DeliveryStatus {
 	switch status {
 	case protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED:
@@ -584,12 +584,12 @@ func parseInstanceUID(value string) ([]byte, error) {
 
 type stdLogger struct{}
 
-// Debugf adapts opamp-go debug messages to FleetAMP structured logging.
+// Debugf adapts opamp-go debug messages to OTelPlane structured logging.
 func (stdLogger) Debugf(_ context.Context, format string, v ...interface{}) {
 	slog.Debug(fmt.Sprintf(format, v...), "component", "opamp", "source", "opamp-go")
 }
 
-// Errorf adapts opamp-go errors to FleetAMP structured logging.
+// Errorf adapts opamp-go errors to OTelPlane structured logging.
 func (stdLogger) Errorf(_ context.Context, format string, v ...interface{}) {
 	slog.Error(fmt.Sprintf(format, v...), "component", "opamp", "source", "opamp-go")
 }

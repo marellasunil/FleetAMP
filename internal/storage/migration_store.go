@@ -3,8 +3,8 @@ package storage
 import (
 	"context"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/migrations"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/migrations"
 )
 
 // MigrationStore atomically saves an immutable configuration artifact and its

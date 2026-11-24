@@ -1,4 +1,4 @@
-# FleetAMP v0.3.0 local release verification
+# OTelPlane v0.3.0 local release verification
 
 This is the automated release gate. It complements, but does not replace, the
 [manual v0.3.0 E2E checklist](e2e-v0.3.0.md).
@@ -58,23 +58,23 @@ finishes.
 ## Existing v0.2 database upgrade
 
 Never test an upgrade against the only copy of a production or personal
-database. Stop the existing FleetAMP instance, make a backup, restart the
+database. Stop the existing OTelPlane instance, make a backup, restart the
 instance, and pass the backup to the verifier. The script copies it into its
 own temporary directory before opening it.
 
 ```bash
-systemctl --user cat fleetamp | grep FLEETAMP_DATABASE_PATH
+systemctl --user cat otelplane | grep OTELPLANE_DATABASE_PATH
 
-SOURCE_DB=/path/shown/by/FLEETAMP_DATABASE_PATH
+SOURCE_DB=/path/shown/by/OTELPLANE_DATABASE_PATH
 cp "$SOURCE_DB" \
-  ~/Desktop/Sunil/FleetAMP-E2E-backup/fleetamp-v0.2-before-v0.3.db
+  ~/Desktop/Sunil/OTelPlane-E2E-backup/otelplane-v0.2-before-v0.3.db
 
-FLEETAMP_VERIFY_EXISTING_DB=\
-~/Desktop/Sunil/FleetAMP-E2E-backup/fleetamp-v0.2-before-v0.3.db \
+OTELPLANE_VERIFY_EXISTING_DB=\
+~/Desktop/Sunil/OTelPlane-E2E-backup/otelplane-v0.2-before-v0.3.db \
   bash scripts/verify-v0.3.0.sh
 ```
 
-The verifier checks that FleetAMP starts, applies idempotent schema changes,
+The verifier checks that OTelPlane starts, applies idempotent schema changes,
 responds on `/health` and `/ready`, stops cleanly, and starts again using the
 same upgraded temporary copy.
 
@@ -85,8 +85,8 @@ The default verification ports are `127.0.0.1:18082` for HTTP and
 service on `localhost:8080`.
 
 ```bash
-FLEETAMP_VERIFY_HTTP_ADDR=127.0.0.1:18083 \
-FLEETAMP_VERIFY_OPAMP_ADDR=127.0.0.1:14323 \
+OTELPLANE_VERIFY_HTTP_ADDR=127.0.0.1:18083 \
+OTELPLANE_VERIFY_OPAMP_ADDR=127.0.0.1:14323 \
   bash scripts/verify-v0.3.0.sh
 ```
 

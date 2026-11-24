@@ -1,4 +1,4 @@
-// Storage contract for immutable FleetAMP configuration artifacts.
+// Storage contract for immutable OTelPlane configuration artifacts.
 //
 // Purpose:
 //   Allows configuration creation/read/list behavior to remain independent of
@@ -10,12 +10,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/configs"
 )
 
 var ErrConfigurationNotFound = errors.New("configuration not found")
 
-// ConfigurationStore persists immutable FleetAMP configuration artifacts.
+// ConfigurationStore persists immutable OTelPlane configuration artifacts.
 type ConfigurationStore interface {
 	Put(ctx context.Context, config *configs.Configuration) error
 	Get(ctx context.Context, id string) (*configs.Configuration, error)

@@ -1,4 +1,4 @@
-// Package addons defines provider-neutral contracts for optional FleetAMP
+// Package addons defines provider-neutral contracts for optional OTelPlane
 // telemetry destinations and Collector interoperability.
 package addons
 
@@ -84,7 +84,7 @@ func NewDefaultCatalog() *Catalog {
 			Capabilities: []Capability{
 				ConfigurationRendering, ConfigurationValidation, HealthReporting, RemoteConfiguration,
 			},
-			Notice: "FleetAMP stores organization-specific endpoints, headers and credentials outside the public capability catalog.",
+			Notice: "OTelPlane stores organization-specific endpoints, headers and credentials outside the public capability catalog.",
 		},
 		Entry{
 			ID:          "external-collector-adapter",

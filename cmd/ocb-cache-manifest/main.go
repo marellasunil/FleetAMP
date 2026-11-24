@@ -1,5 +1,5 @@
 // Command ocb-cache-manifest produces the minimal go.mod used to preload the
-// reviewed FleetAMP OCB component catalog into a version-specific builder image.
+// reviewed OTelPlane OCB component catalog into a version-specific builder image.
 package main
 
 import (
@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/marellasunil/FleetAMP/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
 )
 
 var collectorVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -32,7 +32,7 @@ func main() {
 
 func renderModuleFile(version string, modules []string) string {
 	b := &strings.Builder{}
-	fmt.Fprintln(b, "module fleetamp.local/ocb-offline-cache")
+	fmt.Fprintln(b, "module otelplane.local/ocb-offline-cache")
 	fmt.Fprintln(b)
 	fmt.Fprintln(b, "go 1.25.0")
 	fmt.Fprintln(b)

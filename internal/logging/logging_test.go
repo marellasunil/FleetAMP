@@ -7,7 +7,7 @@ import (
 )
 
 func TestSetupCreatesLogFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "fleetamp.log")
+	path := filepath.Join(t.TempDir(), "otelplane.log")
 	closeLog, err := Setup(Config{Level: "debug", Format: "json", File: path})
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)

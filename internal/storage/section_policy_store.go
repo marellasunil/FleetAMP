@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/configs"
 )
 
 // SectionPolicyStore persists Admin-defined Operator edit permissions.

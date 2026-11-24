@@ -1,14 +1,14 @@
 // In-memory ManagedAgentStore implementation.
 //
 // Purpose:
-//   Provides concurrency-safe current-state storage for the FleetAMP process.
+//   Provides concurrency-safe current-state storage for the OTelPlane process.
 //   Values are cloned on read/write to prevent callers mutating shared state.
 //
 // Lifecycle behavior:
 //   FirstSeen and lifecycle timestamps are preserved across partial updates.
 //
 // Limitation:
-//   Process memory alone is not durable; cmd/fleetamp supplements it with an
+//   Process memory alone is not durable; cmd/otelplane supplements it with an
 //   agents.json snapshot until a database-backed store is introduced.
 
 package memory
@@ -17,8 +17,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type AgentStore struct {

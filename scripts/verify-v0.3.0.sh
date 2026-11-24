@@ -2,9 +2,9 @@
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-VERSION=${FLEETAMP_VERIFY_VERSION:-v0.3.0-rc1}
-HTTP_ADDR=${FLEETAMP_VERIFY_HTTP_ADDR:-127.0.0.1:18082}
-OPAMP_ADDR=${FLEETAMP_VERIFY_OPAMP_ADDR:-127.0.0.1:14322}
+VERSION=${OTELPLANE_VERIFY_VERSION:-v0.3.0-rc1}
+HTTP_ADDR=${OTELPLANE_VERIFY_HTTP_ADDR:-127.0.0.1:18082}
+OPAMP_ADDR=${OTELPLANE_VERIFY_OPAMP_ADDR:-127.0.0.1:14322}
 WITH_RACE=true
 WITH_DOCKER=false
 
@@ -13,13 +13,13 @@ usage() {
     "Usage: scripts/verify-v0.3.0.sh [--quick] [--docker]" \
     "" \
     "  --quick   Skip the race detector." \
-    "  --docker  Build fleetamp:${VERSION} after binary verification." \
+    "  --docker  Build otelplane:${VERSION} after binary verification." \
     "" \
     "Optional environment:" \
-    "  FLEETAMP_VERIFY_EXISTING_DB=/path/to/fleetamp.db" \
-    "  FLEETAMP_VERIFY_HTTP_ADDR=127.0.0.1:18082" \
-    "  FLEETAMP_VERIFY_OPAMP_ADDR=127.0.0.1:14322" \
-    "  FLEETAMP_VERIFY_VERSION=v0.3.0-rc1"
+    "  OTELPLANE_VERIFY_EXISTING_DB=/path/to/otelplane.db" \
+    "  OTELPLANE_VERIFY_HTTP_ADDR=127.0.0.1:18082" \
+    "  OTELPLANE_VERIFY_OPAMP_ADDR=127.0.0.1:14322" \
+    "  OTELPLANE_VERIFY_VERSION=v0.3.0-rc1"
 }
 
 while (($#)); do
@@ -49,8 +49,8 @@ esac
 
 VERIFY_ROOT=$(mktemp -d)
 DATA_DIR="$VERIFY_ROOT/data"
-BINARY="$VERIFY_ROOT/fleetamp"
-LOG_FILE="$VERIFY_ROOT/fleetamp.log"
+BINARY="$VERIFY_ROOT/otelplane"
+LOG_FILE="$VERIFY_ROOT/otelplane.log"
 PID=""
 
 cleanup() {
@@ -76,26 +76,26 @@ wait_for_health() {
   return 1
 }
 
-start_fleetamp() {
+start_otelplane() {
   : >"$LOG_FILE"
-  FLEETAMP_HTTP_ADDR="$HTTP_ADDR" \
-  FLEETAMP_OPAMP_ADDR="$OPAMP_ADDR" \
-  FLEETAMP_DATA_DIR="$DATA_DIR" \
-  FLEETAMP_DATABASE_PATH="$DATA_DIR/fleetamp.db" \
-  FLEETAMP_LOG_FORMAT=json \
-  FLEETAMP_LOG_FILE="$LOG_FILE" \
-  FLEETAMP_GITOPS_WORKER_ENABLED=false \
-  FLEETAMP_GITOPS_GITHUB_WRITES_ENABLED=false \
+  OTELPLANE_HTTP_ADDR="$HTTP_ADDR" \
+  OTELPLANE_OPAMP_ADDR="$OPAMP_ADDR" \
+  OTELPLANE_DATA_DIR="$DATA_DIR" \
+  OTELPLANE_DATABASE_PATH="$DATA_DIR/otelplane.db" \
+  OTELPLANE_LOG_FORMAT=json \
+  OTELPLANE_LOG_FILE="$LOG_FILE" \
+  OTELPLANE_GITOPS_WORKER_ENABLED=false \
+  OTELPLANE_GITOPS_GITHUB_WRITES_ENABLED=false \
     "$BINARY" >"$VERIFY_ROOT/stdout.log" 2>"$VERIFY_ROOT/stderr.log" &
   PID=$!
   if ! wait_for_health; then
     sed -n '1,160p' "$VERIFY_ROOT/stderr.log" >&2 || true
     sed -n '1,160p' "$LOG_FILE" >&2 || true
-    fail "FleetAMP did not become healthy at http://${HTTP_ADDR}/health"
+    fail "OTelPlane did not become healthy at http://${HTTP_ADDR}/health"
   fi
 }
 
-stop_fleetamp() {
+stop_otelplane() {
   if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
     kill "$PID"
     wait "$PID" || true
@@ -121,34 +121,34 @@ fi
 log "building ${VERSION} binary"
 go build -buildvcs=false -trimpath \
   -ldflags="-s -w -X main.version=${VERSION}" \
-  -o "$BINARY" ./cmd/fleetamp
+  -o "$BINARY" ./cmd/otelplane
 
 mkdir -p "$DATA_DIR"
-if [[ -n "${FLEETAMP_VERIFY_EXISTING_DB:-}" ]]; then
-  [[ -f "$FLEETAMP_VERIFY_EXISTING_DB" ]] || fail "existing database does not exist: $FLEETAMP_VERIFY_EXISTING_DB"
+if [[ -n "${OTELPLANE_VERIFY_EXISTING_DB:-}" ]]; then
+  [[ -f "$OTELPLANE_VERIFY_EXISTING_DB" ]] || fail "existing database does not exist: $OTELPLANE_VERIFY_EXISTING_DB"
   log "copying existing database fixture for upgrade verification"
-  cp "$FLEETAMP_VERIFY_EXISTING_DB" "$DATA_DIR/fleetamp.db"
+  cp "$OTELPLANE_VERIFY_EXISTING_DB" "$DATA_DIR/otelplane.db"
 else
-  log "using a fresh database; set FLEETAMP_VERIFY_EXISTING_DB to test a v0.2 copy"
+  log "using a fresh database; set OTELPLANE_VERIFY_EXISTING_DB to test a v0.2 copy"
 fi
 
-log "starting FleetAMP with Git writes disabled"
-start_fleetamp
+log "starting OTelPlane with Git writes disabled"
+start_otelplane
 curl --fail --silent --show-error "http://${HTTP_ADDR}/ready" >/dev/null
-[[ -s "$DATA_DIR/fleetamp.db" ]] || fail "FleetAMP database was not created"
+[[ -s "$DATA_DIR/otelplane.db" ]] || fail "OTelPlane database was not created"
 
-log "restarting FleetAMP against the same database"
-stop_fleetamp
-start_fleetamp
+log "restarting OTelPlane against the same database"
+stop_otelplane
+start_otelplane
 curl --fail --silent --show-error "http://${HTTP_ADDR}/health" >/dev/null
 curl --fail --silent --show-error "http://${HTTP_ADDR}/ready" >/dev/null
-stop_fleetamp
+stop_otelplane
 
 if [[ "$WITH_DOCKER" == true ]]; then
   command -v docker >/dev/null || fail "Docker is required for --docker"
   docker info >/dev/null 2>&1 || fail "Docker daemon is not available"
-  log "building Docker image fleetamp:${VERSION}"
-  docker build --build-arg VERSION="$VERSION" -t "fleetamp:${VERSION}" .
+  log "building Docker image otelplane:${VERSION}"
+  docker build --build-arg VERSION="$VERSION" -t "otelplane:${VERSION}" .
 fi
 
 log "PASS: tests, vet, binary build, health, readiness, database migration and restart"

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
 )
 
 func TestRenderModuleFileUsesReviewedCatalogDeterministically(t *testing.T) {

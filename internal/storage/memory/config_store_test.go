@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/configs"
 )
 
 func TestConfigStorePutGet(t *testing.T) {

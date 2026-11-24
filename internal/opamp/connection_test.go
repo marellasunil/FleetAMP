@@ -5,8 +5,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
-	"github.com/marellasunil/FleetAMP/internal/management"
+	"github.com/marellasunil/OTelPlane/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/management"
 	"github.com/open-telemetry/opamp-go/protobufs"
 )
 

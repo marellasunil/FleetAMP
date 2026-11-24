@@ -1,0 +1,1922 @@
+// OTelPlane group, label, and group-management HTTP/UI handlers.
+//
+// Purpose:
+//
+//	Implements controlled Application/Environment/Place groups, agent group
+//	assignment, managed labels, group CRUD, enable/disable lifecycle, and
+//	membership-aware deletion protection for both REST and web UI routes.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html/template"
+	"net/http"
+	"net/url"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/marellasunil/OTelPlane/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	fleetopamp "github.com/marellasunil/OTelPlane/internal/opamp"
+	"github.com/marellasunil/OTelPlane/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/storage/memory"
+)
+
+type groupRequest struct {
+	Name           string                 `json:"name"`
+	Description    string                 `json:"description,omitempty"`
+	Selector       map[string]string      `json:"selector"`
+	MembershipRule *groups.MembershipRule `json:"membership_rule,omitempty"`
+	Owners         []string               `json:"owners,omitempty"`
+	Enabled        *bool                  `json:"enabled,omitempty"`
+}
+
+type groupSelectorPreviewRequest struct {
+	Selector  map[string]string `json:"selector"`
+	ExcludeID string            `json:"exclude_id,omitempty"`
+}
+
+type groupSelectorPreviewResponse struct {
+	Matched int `json:"matched"`
+}
+
+type groupListItem struct {
+	Group             *groups.Group
+	MemberCount       int
+	ActiveMemberCount int
+	SavedVersions     int
+	ApprovalRequests  int
+	Drifted           int
+	CanManage         bool
+}
+
+type labelCatalogItem struct {
+	Key        string
+	Values     []string
+	GroupCount int
+}
+
+type unassignedCollectorItem struct {
+	Agent    *agents.ManagedAgent
+	Conflict string
+}
+
+type groupsView struct {
+	Page       string
+	Tab        string
+	Items      []groupListItem
+	Labels     []labelCatalogItem
+	Available  []unassignedCollectorItem
+	Query      string
+	Pagination paginationView
+}
+type groupPreviewAgent struct {
+	Agent      *agents.ManagedAgent
+	Reason     string
+	LabelMatch string
+}
+
+type reviewerOption struct {
+	Username string
+	Role     string
+}
+
+type groupDetailView struct {
+	Page                 string
+	Group                *groups.Group
+	Members              []*agents.ManagedAgent
+	ActiveMembers        int
+	Configurations       []*configs.Configuration
+	SelectedConfig       *configs.Configuration
+	SelectedPipeline     *configs.PipelineModel
+	PipelineError        string
+	Preview              []groupPreviewAgent
+	Eligible             int
+	LabelSelector        map[string]string
+	LabelSelectorText    string
+	Requests             []*configs.GroupDeploymentRequest
+	DeploymentHistory    []*configs.Deployment
+	DriftSummary         groupDriftSummary
+	ConfigurationSaved   string
+	RequestCreated       string
+	RequestUpdated       string
+	Error                string
+	CanAdminister        bool
+	CanManage            bool
+	ShowEdit             bool
+	OwnersText           string
+	EditorSections       []configurationSectionView
+	EditorBaseline       string
+	EditorBaseID         string
+	EditorName           string
+	EditorVersion        string
+	EditorVersions       []*configs.Configuration
+	EditorError          string
+	CanEditConfiguration bool
+	CanDeleteAgents      bool
+	EligibleReviewers    []reviewerOption
+	DistributionProfiles []distributionCompletionProfile
+}
+
+type distributionCompletionProfile struct {
+	ID         string
+	Name       string
+	Version    string
+	Components distributions.ComponentSet
+}
+
+const defaultGroupConfiguration = `receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: []
+`
+
+func currentUsername(auth *authManager, r *http.Request) string {
+	if auth != nil {
+		if username, ok := auth.sessionUsername(r); ok {
+			return username
+		}
+	}
+	if username, _, ok := r.BasicAuth(); ok {
+		return username
+	}
+	return ""
+}
+
+func isGroupOwner(group *groups.Group, username string) bool {
+	for _, owner := range group.Owners {
+		if strings.EqualFold(strings.TrimSpace(owner), strings.TrimSpace(username)) {
+			return true
+		}
+	}
+	return false
+}
+
+func userAssignedToGroup(ctx context.Context, auth *authManager, username, groupID string) bool {
+	if auth == nil || auth.store == nil {
+		return false
+	}
+	user, err := auth.store.Get(ctx, username)
+	if err != nil {
+		return false
+	}
+	for _, assigned := range user.GroupIDs {
+		if assigned == groupID {
+			return true
+		}
+	}
+	return false
+}
+
+func userHasGroupRole(ctx context.Context, auth *authManager, username, groupID string, roleIDs ...string) bool {
+	if auth == nil || auth.store == nil {
+		return false
+	}
+	allowed := map[string]bool{}
+	for _, roleID := range roleIDs {
+		allowed[roleID] = true
+	}
+	memberships, err := auth.store.ListMemberships(ctx)
+	if err != nil {
+		return false
+	}
+	for _, membership := range memberships {
+		if !strings.EqualFold(membership.Username, username) || membership.GroupID != groupID {
+			continue
+		}
+		for _, roleID := range membership.RoleIDs {
+			if allowed[roleID] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func eligibleDeploymentReviewers(ctx context.Context, auth *authManager, group *groups.Group, requester string, requesterRole role) ([]reviewerOption, error) {
+	users, err := auth.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]reviewerOption, 0)
+	for _, user := range users {
+		if !user.Enabled || strings.EqualFold(user.Username, requester) {
+			continue
+		}
+		switch requesterRole {
+		case roleAdmin:
+			if user.Role == string(roleAdmin) || userHasGroupRole(ctx, auth, user.Username, group.ID, "group_owner", "deployment_approver") {
+				result = append(result, reviewerOption{Username: user.Username, Role: user.Role})
+			}
+		case roleGroupOwner:
+			if user.Role == string(roleAdmin) {
+				result = append(result, reviewerOption{Username: user.Username, Role: user.Role})
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].Username) < strings.ToLower(result[j].Username) })
+	return result, nil
+}
+
+func validateAssignedReviewer(ctx context.Context, auth *authManager, group *groups.Group, requester, assigned string) error {
+	requesterUser, err := auth.store.Get(ctx, requester)
+	if err != nil {
+		return fmt.Errorf("requester is no longer a valid user")
+	}
+	options, err := eligibleDeploymentReviewers(ctx, auth, group, requester, role(requesterUser.Role))
+	if err != nil {
+		return err
+	}
+	for _, option := range options {
+		if strings.EqualFold(option.Username, assigned) {
+			return nil
+		}
+	}
+	return fmt.Errorf("selected reviewer is not eligible for this group and requester")
+}
+
+func canAccessGroup(auth *authManager, r *http.Request, group *groups.Group) bool {
+	if currentRole(auth, r) == roleAdmin {
+		return true
+	}
+	username := currentUsername(auth, r)
+	return userAssignedToGroup(r.Context(), auth, username, group.ID) ||
+		(currentRole(auth, r) == roleGroupOwner && isGroupOwner(group, username))
+}
+
+func canManageGroup(auth *authManager, r *http.Request, group *groups.Group) bool {
+	principalRole := currentRole(auth, r)
+	return principalRole == roleAdmin || userHasGroupRole(r.Context(), auth, currentUsername(auth, r), group.ID, "group_owner")
+}
+
+func groupsVisibleToUser(ctx context.Context, auth *authManager, username string, principalRole role, all []*groups.Group) []*groups.Group {
+	if principalRole == roleAdmin {
+		return all
+	}
+	result := make([]*groups.Group, 0, len(all))
+	for _, group := range all {
+		if userAssignedToGroup(ctx, auth, username, group.ID) || (principalRole == roleGroupOwner && isGroupOwner(group, username)) {
+			result = append(result, group)
+		}
+	}
+	return result
+}
+
+func requireGroupAccess(w http.ResponseWriter, r *http.Request, auth *authManager, group *groups.Group) bool {
+	if canAccessGroup(auth, r, group) {
+		return true
+	}
+	http.Error(w, "forbidden: you are not an owner of this group", http.StatusForbidden)
+	return false
+}
+
+func normalizeOwners(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, item := range strings.Split(value, ",") {
+			owner := strings.TrimSpace(item)
+			key := strings.ToLower(owner)
+			if owner == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, owner)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func approvalExpiryDays(value string) (int, error) {
+	switch strings.TrimSpace(value) {
+	case "7":
+		return 7, nil
+	case "30", "":
+		return 30, nil
+	case "60":
+		return 60, nil
+	case "90":
+		return 90, nil
+	default:
+		return 0, errors.New("approval validity must be 7, 30, 60, or 90 days")
+	}
+}
+
+// validateConfigurationForApproval enforces the current validation policy before a request enters the approval queue.
+func validateConfigurationForApproval(ctx context.Context, validator *configs.Validator, configuration *configs.Configuration) error {
+	if configuration == nil {
+		return errors.New("configuration is required")
+	}
+	content, err := configurationContentForValidation(ctx, configuration.GroupID, configuration.Content)
+	if err != nil {
+		return err
+	}
+	validation := validator.Validate(ctx, content)
+	if validation.Valid {
+		return nil
+	}
+	message := strings.TrimSpace(validation.Error)
+	if message == "" {
+		message = "configuration validation failed"
+	}
+	return errors.New(message)
+}
+
+func previewGroupMembers(members []*agents.ManagedAgent, enabled bool) ([]groupPreviewAgent, int) {
+	result := make([]groupPreviewAgent, 0, len(members))
+	eligible := 0
+	for _, agent := range members {
+		reason := "Ready"
+		switch {
+		case !enabled:
+			reason = "Group disabled"
+		case agent.Status == agents.LifecycleRetired:
+			reason = "Retired"
+		case !agent.Connected:
+			reason = "Offline"
+		case !hasCapability(agent.Capabilities, "accepts_remote_config"):
+			reason = "Remote configuration unsupported"
+		default:
+			eligible++
+		}
+		result = append(result, groupPreviewAgent{Agent: agent, Reason: reason})
+	}
+	return result, eligible
+}
+
+func activeGroupMemberCount(members []*agents.ManagedAgent) int {
+	active := 0
+	for _, agent := range members {
+		if agent.Connected && agent.Status != agents.LifecycleRetired {
+			active++
+		}
+	}
+	return active
+}
+
+// membersMatchingLabels narrows an owned group using exact-match AND
+// semantics. OTelPlane-managed labels override agent-reported labels through
+// EffectiveLabels. An empty selector retains every group member.
+func membersMatchingLabels(members []*agents.ManagedAgent, selector map[string]string) []*agents.ManagedAgent {
+	if len(selector) == 0 {
+		return members
+	}
+	result := make([]*agents.ManagedAgent, 0, len(members))
+	for _, agent := range members {
+		labels := groups.EffectiveLabels(agent)
+		matched := true
+		for key, expected := range selector {
+			if labels[key] != expected {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			result = append(result, agent)
+		}
+	}
+	return result
+}
+
+func labelSelectorText(selector map[string]string) string {
+	keys := make([]string, 0, len(selector))
+	for key := range selector {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+selector[key])
+	}
+	return strings.Join(parts, ", ")
+}
+
+func previewGroupConfiguration(ctx context.Context, members []*agents.ManagedAgent, enabled bool, configuration *configs.Configuration, assignmentStore storage.AssignmentStore) ([]groupPreviewAgent, int, error) {
+	comparisonConfiguration, err := configurationForDelivery(ctx, configuration)
+	if err != nil {
+		return nil, 0, err
+	}
+	preview, _ := previewGroupMembers(members, enabled)
+	eligible := 0
+	for index := range preview {
+		if preview[index].Reason != "Ready" {
+			continue
+		}
+		latest, err := latestAssignmentForAgent(ctx, assignmentStore, preview[index].Agent.InstanceUID)
+		switch {
+		case err == nil && latest.ConfigurationHash == comparisonConfiguration.Hash && latest.Status == configs.DeliveryApplied:
+			preview[index].Reason = "Already deployed · Latest"
+		case err == nil && latest.ConfigurationHash == comparisonConfiguration.Hash &&
+			(latest.Status == configs.DeliveryPending || latest.Status == configs.DeliverySent || latest.Status == configs.DeliveryApplying):
+			preview[index].Reason = "Deployment already in progress"
+		case err != nil && !errors.Is(err, storage.ErrAssignmentNotFound):
+			return nil, 0, err
+		default:
+			eligible++
+		}
+	}
+	return preview, eligible, nil
+}
+
+func addLabelMatchExplanation(preview []groupPreviewAgent, selector map[string]string) {
+	explanation := "All group members"
+	if len(selector) > 0 {
+		explanation = "Matched " + labelSelectorText(selector)
+	}
+	for index := range preview {
+		preview[index].LabelMatch = explanation
+	}
+}
+
+func commonAppliedConfiguration(ctx context.Context, preview []groupPreviewAgent, assignmentStore storage.AssignmentStore) (string, string, error) {
+	baseID, baseHash := "", ""
+	for _, item := range preview {
+		if item.Reason != "Ready" {
+			continue
+		}
+		assignment, err := latestAssignmentForAgent(ctx, assignmentStore, item.Agent.InstanceUID)
+		if errors.Is(err, storage.ErrAssignmentNotFound) {
+			continue
+		}
+		if err != nil {
+			return "", "", err
+		}
+		if assignment.Status != configs.DeliveryApplied {
+			continue
+		}
+		if baseID == "" {
+			baseID, baseHash = assignment.ConfigurationID, assignment.ConfigurationHash
+			continue
+		}
+		if assignment.ConfigurationID != baseID || assignment.ConfigurationHash != baseHash {
+			return "", "", nil
+		}
+	}
+	return baseID, baseHash, nil
+}
+
+func lastSuccessfulConfigurationID(ctx context.Context, agentUID string, deploymentStore storage.DeploymentStore) (string, error) {
+	deployments, err := deploymentStore.ListByAgent(ctx, agentUID, 100)
+	if err != nil {
+		return "", err
+	}
+	for _, deployment := range deployments {
+		if deployment.Status == configs.DeliveryApplied {
+			return deployment.ConfigurationID, nil
+		}
+	}
+	return "", nil
+}
+
+const maxManagedLabels = 5
+const maxGroupSelectorConditions = 12
+
+// copyStringMap returns an independent map so request updates cannot mutate stored agent metadata by aliasing.
+func copyStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func sameSelector(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+// selectorsOverlap reports whether one agent identity could satisfy both
+// exact-match selectors. Ownership groups must remain mutually exclusive.
+func selectorsOverlap(left, right map[string]string) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	for key, leftValue := range left {
+		if rightValue, shared := right[key]; shared && rightValue != leftValue {
+			return false
+		}
+	}
+	return true
+}
+
+func validateGroupOverlap(ctx context.Context, store storage.GroupStore, candidate *groups.Group, excludeID string) error {
+	if candidate == nil || !candidate.Enabled {
+		return nil
+	}
+	existing, err := store.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, other := range existing {
+		if other == nil || !other.Enabled || other.ID == excludeID {
+			continue
+		}
+		if selectorsOverlap(candidate.Selector, other.Selector) {
+			return fmt.Errorf("selector overlaps active ownership group %q; add or change a condition so membership is exclusive", other.Name)
+		}
+	}
+	return nil
+}
+
+func configurationsForGroup(items []*configs.Configuration, groupID string) []*configs.Configuration {
+	filtered := make([]*configs.Configuration, 0, len(items))
+	for _, configuration := range items {
+		if configuration != nil && configuration.GroupID == groupID {
+			filtered = append(filtered, configuration)
+		}
+	}
+	return filtered
+}
+
+func preferredGroupConfiguration(available []*configs.Configuration, history []*configs.Deployment, requestedID string) *configs.Configuration {
+	if len(available) == 0 {
+		return nil
+	}
+	if requestedID != "" {
+		for _, candidate := range available {
+			if candidate.ID == requestedID {
+				return candidate
+			}
+		}
+	}
+	for _, deployment := range history {
+		if deployment.Status != configs.DeliveryApplied {
+			continue
+		}
+		for _, candidate := range available {
+			if candidate.ID == deployment.ConfigurationID {
+				return candidate
+			}
+		}
+	}
+	return available[0]
+}
+
+func groupNamesForAgent(ctx context.Context, store storage.GroupStore, agent *agents.ManagedAgent) []string {
+	all, err := store.List(ctx)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, 1)
+	for _, group := range all {
+		if groups.MatchesIdentity(group, agent) {
+			names = append(names, group.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// registerGroupRoutes exposes group CRUD APIs, agent metadata updates, membership previews, and group UI pages.
+func registerGroupRoutes(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, distributionStore storage.DistributionStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
+	// /agents/{uid}/group updates operator-managed group identity fields for an agent.
+	mux.HandleFunc("/agents/{uid}/group", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		agent, err := agentStore.Get(r.Context(), r.PathValue("uid"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		previousGroups := groupNamesForAgent(r.Context(), groupStore, agent)
+		group, err := groupStore.Get(r.Context(), strings.TrimSpace(r.FormValue("group_id")))
+		if err != nil {
+			http.Error(w, "group not found", http.StatusNotFound)
+			return
+		}
+		// Assignment replaces the complete OTelPlane-owned identity. Retaining
+		// keys from the previous group can make the agent match stale selectors.
+		agent.GroupFields = copyStringMap(group.Selector)
+		if err := agentStore.Upsert(r.Context(), agent); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if r.Form == nil {
+			_ = r.ParseForm()
+		}
+		previous := "Unassigned"
+		if len(previousGroups) > 0 {
+			previous = strings.Join(previousGroups, ", ")
+		}
+		r.Form.Set("audit_previous_group", previous)
+		r.Form.Set("audit_new_group", group.Name)
+		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
+	})
+	// /agents/{uid}/labels replaces the complete operator-label set submitted by the agent detail form.
+	mux.HandleFunc("/agents/{uid}/labels", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		agent, err := agentStore.Get(r.Context(), r.PathValue("uid"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		labels, err := parseSelectorText(r.FormValue("labels"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		agent.Labels = labels
+		if err := agentStore.Upsert(r.Context(), agent); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
+	})
+	// /agents/{uid}/label adds or removes one label without replacing unrelated labels.
+	mux.HandleFunc("/agents/{uid}/label", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		agent, err := agentStore.Get(r.Context(), r.PathValue("uid"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		key, value := strings.TrimSpace(r.FormValue("key")), strings.TrimSpace(r.FormValue("value"))
+		if key == "" || value == "" {
+			http.Error(w, "label key and value are required", http.StatusBadRequest)
+			return
+		}
+		if agent.Labels == nil {
+			agent.Labels = map[string]string{}
+		}
+		if _, exists := agent.Labels[key]; !exists && len(agent.Labels) >= maxManagedLabels {
+			http.Redirect(w, r, "/agents/"+agent.InstanceUID+"?error=Maximum+of+5+managed+labels+allowed", http.StatusSeeOther)
+			return
+		}
+		agent.Labels[key] = value
+		if err := agentStore.Upsert(r.Context(), agent); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/agents/"+agent.InstanceUID, http.StatusSeeOther)
+	})
+
+	// /api/v1/agents/{uid}/labels provides JSON label replacement for automation clients.
+	mux.HandleFunc("/api/v1/agents/{uid}/labels", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut && r.Method != http.MethodPatch {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		uid := r.PathValue("uid")
+		agent, err := agentStore.Get(r.Context(), uid)
+		if err != nil {
+			http.Error(w, "managed agent not found", http.StatusNotFound)
+			return
+		}
+		var labels map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&labels); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		next := copyStringMap(agent.Labels)
+		if r.Method == http.MethodPut || next == nil {
+			next = map[string]string{}
+		}
+		for k, v := range labels {
+			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+			if k == "" {
+				continue
+			}
+			if v == "" {
+				delete(next, k)
+			} else {
+				next[k] = v
+			}
+		}
+		if len(next) > maxManagedLabels {
+			http.Error(w, "maximum of 5 managed labels allowed", http.StatusUnprocessableEntity)
+			return
+		}
+		agent.Labels = next
+		if err := agentStore.Upsert(r.Context(), agent); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		if err := saveAgentSnapshot(r.Context(), agentStore, dataDir); err != nil {
+			internalServerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, agent)
+	})
+
+	// /api/v1/groups lists groups or creates a validated selector-based group.
+	mux.HandleFunc("/api/v1/groups", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			items, err := groupStore.List(r.Context())
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			items = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), items)
+			writeJSON(w, http.StatusOK, items)
+		case http.MethodPost:
+			var req groupRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid JSON body", 400)
+				return
+			}
+			group, err := newValidatedGroup(req)
+			if err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+			if err := validateGroupOverlap(r.Context(), groupStore, group, ""); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := validateDynamicRuleConflicts(r.Context(), group, groupStore, agentStore); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := groupStore.Create(r.Context(), group); err != nil {
+				http.Error(w, err.Error(), 409)
+				return
+			}
+			writeJSON(w, http.StatusCreated, group)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
+	// /api/v1/groups/{id} reads, updates, deletes, or previews membership for one group.
+	mux.HandleFunc("/api/v1/groups/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/groups/"), "/"), "/")
+		if len(parts) == 0 || parts[0] == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if len(parts) == 1 && parts[0] == "preview" && r.Method == http.MethodPost {
+			var req groupSelectorPreviewRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid JSON body", http.StatusBadRequest)
+				return
+			}
+			selector := cleanSelector(req.Selector)
+			if err := validateGroupSelector(selector); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			candidate := &groups.Group{Selector: selector, Enabled: true}
+			if err := validateGroupOverlap(r.Context(), groupStore, candidate, strings.TrimSpace(req.ExcludeID)); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			members, err := membersForGroupIdentity(r.Context(), candidate, agentStore)
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, groupSelectorPreviewResponse{Matched: len(members)})
+			return
+		}
+		group, err := groupStore.Get(r.Context(), parts[0])
+		if err != nil {
+			http.Error(w, "group not found", 404)
+			return
+		}
+		if !requireGroupAccess(w, r, auth, group) {
+			return
+		}
+		if len(parts) == 2 && parts[1] == "members" && r.Method == http.MethodGet {
+			members, err := membersForGroupIdentity(r.Context(), group, agentStore)
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, members)
+			return
+		}
+		if len(parts) != 1 {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, group)
+		case http.MethodPut:
+			var req groupRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid JSON body", 400)
+				return
+			}
+			selector := cleanSelector(req.Selector)
+			if err := validateGroupSelector(selector); err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+			name := strings.TrimSpace(req.Name)
+			if name == "" {
+				name = group.Name
+			}
+			if err := validateGroupName(name); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := groups.ValidateMembershipRule(req.MembershipRule); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			group.Name, group.Description, group.Selector, group.MembershipRule, group.UpdatedAt = name, strings.TrimSpace(req.Description), selector, req.MembershipRule, time.Now().UTC()
+			if currentRole(auth, r) == roleAdmin && req.Owners != nil {
+				group.Owners = normalizeOwners(req.Owners)
+			}
+			if req.Enabled != nil {
+				group.Enabled = *req.Enabled
+			}
+			if err := validateGroupOverlap(r.Context(), groupStore, group, group.ID); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := validateDynamicRuleConflicts(r.Context(), group, groupStore, agentStore); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := groupStore.Update(r.Context(), group); err != nil {
+				internalServerError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, group)
+		case http.MethodDelete:
+			members, memberErr := membersForGroupIdentity(r.Context(), group, agentStore)
+			if memberErr != nil {
+				http.Error(w, memberErr.Error(), 500)
+				return
+			}
+			if len(members) > 0 {
+				http.Error(w, "group cannot be deleted while agents are assigned; unassign all agents first", http.StatusConflict)
+				return
+			}
+			if err := groupStore.Delete(r.Context(), group.ID); err != nil {
+				internalServerError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
+	registerGroupUI(mux, groupStore, agentStore, configStore, assignmentStore, deploymentStore, requestStore, distributionStore, validator, adapter, sectionPolicyStore, auth, notifier, dataDir)
+}
+
+// newValidatedGroup normalizes a request, validates its selector, and constructs the domain group.
+func newValidatedGroup(req groupRequest) (*groups.Group, error) {
+	req.Name = strings.TrimSpace(req.Name)
+	req.Description = strings.TrimSpace(req.Description)
+	req.Selector = cleanSelector(req.Selector)
+	if err := validateGroupSelector(req.Selector); err != nil {
+		return nil, err
+	}
+	if err := groups.ValidateMembershipRule(req.MembershipRule); err != nil {
+		return nil, err
+	}
+	if req.Name == "" {
+		req.Name = canonicalGroupName(req.Selector)
+	}
+	if err := validateGroupName(req.Name); err != nil {
+		return nil, err
+	}
+	group, err := groups.New(req.Name, req.Description, req.Selector)
+	if err != nil {
+		return nil, err
+	}
+	group.ID = groupIDFromName(req.Name)
+	group.MembershipRule = req.MembershipRule
+	return group, nil
+}
+
+func groupIDFromName(name string) string {
+	value := strings.ToLower(strings.TrimSpace(name))
+	var result strings.Builder
+	dash := false
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') {
+			result.WriteRune(char)
+			dash = false
+		} else if !dash && result.Len() > 0 {
+			result.WriteByte('-')
+			dash = true
+		}
+	}
+	id := strings.Trim(result.String(), "-")
+	if len(id) > 80 {
+		id = strings.Trim(id[:80], "-")
+	}
+	if id == "" {
+		return "group"
+	}
+	return id
+}
+
+// validateGroupSelector rejects empty keys and values that cannot safely target agents.
+func validateGroupSelector(selector map[string]string) error {
+	if len(selector) == 0 {
+		return errors.New("at least one ownership selector condition is required")
+	}
+	if len(selector) > maxGroupSelectorConditions {
+		return fmt.Errorf("ownership selector supports at most %d conditions", maxGroupSelectorConditions)
+	}
+	for key, value := range selector {
+		if !validMetadataKey(key) {
+			return fmt.Errorf("invalid selector key %q; use letters, numbers, dots, underscores, slashes, or hyphens", key)
+		}
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("selector value is required for %q", key)
+		}
+	}
+	return nil
+}
+
+func validateGroupName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("group name is required")
+	}
+	if len(name) > 120 {
+		return errors.New("group name must be 120 characters or fewer")
+	}
+	return nil
+}
+
+func validMetadataKey(key string) bool {
+	if key == "" || len(key) > 128 {
+		return false
+	}
+	for _, char := range key {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '.' || char == '_' || char == '-' || char == '/' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// canonicalGroupName derives a stable display name from a selector when the request omits one.
+func canonicalGroupName(selector map[string]string) string {
+	keys := make([]string, 0, len(selector))
+	for key := range selector {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, selector[key])
+	}
+	for i, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		var b strings.Builder
+		dash := false
+		for _, r := range part {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				b.WriteRune(r)
+				dash = false
+			} else if !dash && b.Len() > 0 {
+				b.WriteByte('-')
+				dash = true
+			}
+		}
+		parts[i] = strings.Trim(b.String(), "-")
+	}
+	return strings.Join(parts, "-")
+}
+
+// cleanSelector trims selector keys and values and drops empty pairs before validation.
+func cleanSelector(in map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range in {
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if k != "" && v != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// membersForGroup returns agents whose effective targeting metadata matches the group's selector.
+func membersForGroup(ctx context.Context, group *groups.Group, store *memory.AgentStore) ([]*agents.ManagedAgent, error) {
+	if group != nil && !group.Enabled {
+		return []*agents.ManagedAgent{}, nil
+	}
+	return membersByMatcher(ctx, group, store, groups.Matches)
+}
+
+// membersForGroupIdentity previews membership using agent-reported identity fields before operator labels are considered.
+func membersForGroupIdentity(ctx context.Context, group *groups.Group, store *memory.AgentStore) ([]*agents.ManagedAgent, error) {
+	return membersByMatcher(ctx, group, store, groups.MatchesIdentity)
+}
+
+// membersByMatcher centralizes agent listing and filtering for the two supported membership semantics.
+func membersByMatcher(ctx context.Context, group *groups.Group, store *memory.AgentStore, matcher func(*groups.Group, *agents.ManagedAgent) bool) ([]*agents.ManagedAgent, error) {
+	all, err := store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*agents.ManagedAgent, 0)
+	for _, agent := range all {
+		if matcher(group, agent) {
+			result = append(result, agent)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
+}
+
+func groupLabelCatalog(items []*groups.Group) []labelCatalogItem {
+	values := map[string]map[string]struct{}{}
+	counts := map[string]int{}
+	for _, group := range items {
+		for key, value := range group.Selector {
+			if values[key] == nil {
+				values[key] = map[string]struct{}{}
+			}
+			values[key][value] = struct{}{}
+			counts[key]++
+		}
+	}
+	catalog := make([]labelCatalogItem, 0, len(values))
+	for key, set := range values {
+		item := labelCatalogItem{Key: key, GroupCount: counts[key]}
+		for value := range set {
+			item.Values = append(item.Values, value)
+		}
+		sort.Strings(item.Values)
+		catalog = append(catalog, item)
+	}
+	sort.Slice(catalog, func(i, j int) bool { return catalog[i].Key < catalog[j].Key })
+	return catalog
+}
+
+// registerGroupUI serves the group list, create/edit form, and group detail pages with current member counts.
+func registerGroupUI(mux *http.ServeMux, groupStore storage.GroupStore, agentStore *memory.AgentStore, configStore storage.ConfigurationStore, assignmentStore storage.AssignmentStore, deploymentStore storage.DeploymentStore, requestStore storage.GroupDeploymentRequestStore, distributionStore storage.DistributionStore, validator *configs.Validator, adapter *fleetopamp.Adapter, sectionPolicyStore storage.SectionPolicyStore, auth *authManager, notifier *approvalNotifier, dataDir string) {
+	// /groups displays all groups and accepts creation form submissions.
+	mux.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/groups" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodPost {
+			selector, err := parseGroupSelectorForm(r)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			rule, err := membershipRuleFromForm(r)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			group, err := newValidatedGroup(groupRequest{Name: r.FormValue("name"), Description: r.FormValue("description"), Selector: selector, MembershipRule: rule})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := validateGroupOverlap(r.Context(), groupStore, group, ""); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := validateDynamicRuleConflicts(r.Context(), group, groupStore, agentStore); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := groupStore.Create(r.Context(), group); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := assignCollectorsDuringGroupCreation(r.Context(), group, r.Form["agent_uid"], groupStore, agentStore, dataDir); err != nil {
+				_ = groupStore.Delete(r.Context(), group.ID)
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			http.Redirect(w, r, "/groups/"+group.ID, http.StatusSeeOther)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		groupsList, err := groupStore.List(r.Context())
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		allGroups := groupsList
+		groupsList = groupsVisibleToUser(r.Context(), auth, currentUsername(auth, r), currentRole(auth, r), groupsList)
+		tab := r.URL.Query().Get("tab")
+		switch tab {
+		case "all", "create", "unassigned", "labels":
+		default:
+			tab = "all"
+		}
+		available, availableErr := buildUnassignedCollectorItems(r.Context(), agentStore, allGroups)
+		if availableErr != nil {
+			internalServerError(w, availableErr)
+			return
+		}
+		view := groupsView{Page: "groups", Tab: tab, Items: make([]groupListItem, 0, len(groupsList)), Labels: groupLabelCatalog(groupsList), Available: available, Query: strings.TrimSpace(r.URL.Query().Get("q"))}
+		allConfigurations, configurationErr := configStore.List(r.Context())
+		if configurationErr != nil {
+			internalServerError(w, configurationErr)
+			return
+		}
+		for _, group := range groupsList {
+			if !groupMatchesQuery(group, view.Query) {
+				continue
+			}
+			members, memberErr := membersForGroupIdentity(r.Context(), group, agentStore)
+			if memberErr != nil {
+				internalServerError(w, memberErr)
+				return
+			}
+			drift, driftErr := buildGroupDrift(r.Context(), members, configStore, assignmentStore, adapter)
+			if driftErr != nil {
+				internalServerError(w, driftErr)
+				return
+			}
+			requests, requestErr := requestStore.ListByGroup(r.Context(), group.ID, 1000)
+			if requestErr != nil {
+				internalServerError(w, requestErr)
+				return
+			}
+			view.Items = append(view.Items, groupListItem{
+				Group: group, MemberCount: len(members), ActiveMemberCount: activeGroupMemberCount(members),
+				SavedVersions: len(configurationsForGroup(allConfigurations, group.ID)), ApprovalRequests: len(requests),
+				Drifted: drift.Drifted, CanManage: canManageGroup(auth, r, group),
+			})
+		}
+		view.Pagination = paginationFromRequest(r, len(view.Items))
+		view.Items = paginateSlice(view.Items, view.Pagination)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = groupsPage.Execute(w, view)
+	})
+
+	// /groups/new renders the creation form; /groups/{id} shows details, editing, membership, and deletion.
+	mux.HandleFunc("/groups/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/groups/"), "/")
+		if id == "" {
+			http.Redirect(w, r, "/groups", http.StatusPermanentRedirect)
+			return
+		}
+		if strings.Contains(id, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		group, err := groupStore.Get(r.Context(), id)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if !requireGroupAccess(w, r, auth, group) {
+			return
+		}
+		if r.Method == http.MethodPost {
+			action := strings.TrimSpace(r.FormValue("action"))
+			if currentRole(auth, r) != roleAdmin {
+				username := currentUsername(auth, r)
+				allowed := true
+				switch action {
+				case "create_configuration", "request_deployment":
+					allowed = userHasGroupRole(r.Context(), auth, username, group.ID, "group_owner", "configuration_editor")
+				case "approve_deployment", "reject_deployment", "send_back_deployment":
+					allowed = userHasGroupRole(r.Context(), auth, username, group.ID, "group_owner", "deployment_approver")
+				case "cancel_deployment":
+					allowed = userHasGroupRole(r.Context(), auth, username, group.ID, "group_owner", "configuration_editor", "deployment_operator")
+				}
+				if !allowed {
+					http.Error(w, "your group role does not allow this action", http.StatusForbidden)
+					return
+				}
+			}
+			if (action == "update" || action == "delete" || action == "disable" || action == "enable") && !canManageGroup(auth, r, group) {
+				http.Error(w, "only an Admin or assigned Group Owner can manage this group", http.StatusForbidden)
+				return
+			}
+			if action == "approve_deployment" || action == "reject_deployment" || action == "send_back_deployment" || action == "cancel_deployment" {
+				expireApprovalRequests(r.Context(), requestStore, groupStore, notifier)
+			}
+			if action == "set_owners" {
+				if currentRole(auth, r) != roleAdmin {
+					http.Error(w, "only Admins can change group owners", http.StatusForbidden)
+					return
+				}
+				owners := normalizeOwners([]string{r.FormValue("owners")})
+				for _, owner := range owners {
+					user, err := auth.store.Get(r.Context(), owner)
+					if err != nil || !user.Enabled || user.Role != string(roleGroupOwner) {
+						http.Error(w, "group owner must be an enabled user with the group_owner role: "+owner, http.StatusUnprocessableEntity)
+						return
+					}
+				}
+				group.Owners = owners
+				group.UpdatedAt = time.Now().UTC()
+				if err := groupStore.Update(r.Context(), group); err != nil {
+					internalServerError(w, err)
+					return
+				}
+				http.Redirect(w, r, "/groups/"+group.ID, http.StatusSeeOther)
+				return
+			}
+			if action == "create_configuration" {
+				name := strings.TrimSpace(r.FormValue("name"))
+				version := strings.TrimSpace(r.FormValue("version"))
+				baseline := defaultGroupConfiguration
+				if baseID := strings.TrimSpace(r.FormValue("base_configuration_id")); baseID != "" {
+					base, baseErr := configStore.Get(r.Context(), baseID)
+					if baseErr != nil || base.GroupID != group.ID {
+						http.Error(w, "group configuration baseline not found", http.StatusNotFound)
+						return
+					}
+					baseline = base.Content
+				}
+				content, composeErr := configs.ComposeConfigurationSections(baseline, sectionValuesFromForm(r))
+				if composeErr != nil {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(composeErr.Error()), http.StatusSeeOther)
+					return
+				}
+				if name == "" || version == "" || strings.TrimSpace(content) == "" {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Name, version and configuration YAML are required."), http.StatusSeeOther)
+					return
+				}
+				if baseID := strings.TrimSpace(r.FormValue("base_configuration_id")); baseID != "" {
+					base, baseErr := configStore.Get(r.Context(), baseID)
+					if baseErr != nil || base.GroupID != group.ID {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Group configuration baseline not found."), http.StatusSeeOther)
+						return
+					}
+					changed, changedErr := configs.ChangedConfigurationSections(base.Content, content)
+					if changedErr != nil {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(changedErr.Error()), http.StatusSeeOther)
+						return
+					}
+					if len(changed) == 0 {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("No configuration changes were detected. The existing version remains current."), http.StatusSeeOther)
+						return
+					}
+					if version == base.Version {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Configuration changed; enter a new version instead of reusing "+base.Version+"."), http.StatusSeeOther)
+						return
+					}
+				}
+				existingConfigurations, listErr := configStore.List(r.Context())
+				if listErr != nil {
+					internalServerError(w, listErr)
+					return
+				}
+				for _, existing := range configurationsForGroup(existingConfigurations, group.ID) {
+					if existing.Name == name && existing.Version == version {
+						http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Configuration name and version already exist. Enter a new version."), http.StatusSeeOther)
+						return
+					}
+				}
+				policies, policyErr := sectionPolicyStore.List(r.Context())
+				if policyErr != nil {
+					internalServerError(w, policyErr)
+					return
+				}
+				if policyErr := enforceSectionPolicies(baseline, content, policies, currentRole(auth, r)); policyErr != nil {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(policyErr.Error()), http.StatusSeeOther)
+					return
+				}
+				validationContent, resolveErr := configurationContentForValidation(r.Context(), group.ID, content)
+				if resolveErr != nil {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(resolveErr.Error()), http.StatusSeeOther)
+					return
+				}
+				validation := validator.Validate(r.Context(), validationContent)
+				if !validation.Valid {
+					message := strings.TrimSpace(validation.Error)
+					if message == "" {
+						message = "configuration validation failed"
+					}
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(message), http.StatusSeeOther)
+					return
+				}
+				configuration := configs.NewGroupConfiguration(group.ID, name, version, content, "text/yaml")
+				if err := configStore.Put(r.Context(), configuration); err != nil {
+					internalServerError(w, err)
+					return
+				}
+				http.Redirect(w, r, "/groups/"+group.ID+"?configuration_saved="+configuration.ID, http.StatusSeeOther)
+				return
+			}
+			if action == "reject_deployment" || action == "send_back_deployment" {
+				request, err := requestStore.Get(r.Context(), strings.TrimSpace(r.FormValue("request_id")))
+				if err != nil || request.GroupID != group.ID {
+					http.Error(w, "deployment request not found", http.StatusNotFound)
+					return
+				}
+				reviewer := currentUsername(auth, r)
+				if strings.EqualFold(reviewer, request.RequestedBy) {
+					http.Error(w, "requesters cannot review their own deployment request", http.StatusForbidden)
+					return
+				}
+				if request.AssignedReviewer != "" && !strings.EqualFold(reviewer, request.AssignedReviewer) {
+					http.Error(w, "only the assigned reviewer can reject this deployment request", http.StatusForbidden)
+					return
+				}
+				if request.AssignedReviewer != "" {
+					if err := validateAssignedReviewer(r.Context(), auth, group, request.RequestedBy, reviewer); err != nil {
+						http.Error(w, err.Error(), http.StatusForbidden)
+						return
+					}
+				}
+				comment := strings.TrimSpace(r.FormValue("review_comment"))
+				if comment == "" {
+					http.Error(w, "review reason is required", http.StatusUnprocessableEntity)
+					return
+				}
+				if len(comment) > 500 {
+					http.Error(w, "review reason must not exceed 500 characters", http.StatusUnprocessableEntity)
+					return
+				}
+				nextStatus := configs.GroupDeploymentRejected
+				event := "rejected"
+				if action == "send_back_deployment" {
+					nextStatus = configs.GroupDeploymentSentBack
+					event = "sent back for changes"
+				}
+				if err := requestStore.Review(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, nextStatus, reviewer, comment); err != nil {
+					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
+					return
+				}
+				request.Status = nextStatus
+				notifier.notify(r.Context(), event, request, group)
+				http.Redirect(w, r, "/groups/"+group.ID+"?request_updated="+url.QueryEscape(string(nextStatus)), http.StatusSeeOther)
+				return
+			}
+			if action == "cancel_deployment" {
+				request, err := requestStore.Get(r.Context(), strings.TrimSpace(r.FormValue("request_id")))
+				if err != nil || request.GroupID != group.ID {
+					http.Error(w, "deployment request not found", http.StatusNotFound)
+					return
+				}
+				actor := currentUsername(auth, r)
+				if currentRole(auth, r) != roleAdmin && !strings.EqualFold(actor, request.RequestedBy) {
+					http.Error(w, "only the requester or an Admin can cancel this deployment request", http.StatusForbidden)
+					return
+				}
+				comment := strings.TrimSpace(r.FormValue("review_comment"))
+				if comment == "" {
+					http.Error(w, "cancellation reason is required", http.StatusUnprocessableEntity)
+					return
+				}
+				if err := requestStore.Review(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentCancelled, actor, comment); err != nil {
+					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
+					return
+				}
+				request.Status = configs.GroupDeploymentCancelled
+				notifier.notify(r.Context(), "cancelled", request, group)
+				http.Redirect(w, r, "/groups/"+group.ID+"?request_updated=cancelled", http.StatusSeeOther)
+				return
+			}
+			if action == "approve_deployment" {
+				request, err := requestStore.Get(r.Context(), strings.TrimSpace(r.FormValue("request_id")))
+				if err != nil || request.GroupID != group.ID {
+					http.Error(w, "deployment request not found", http.StatusNotFound)
+					return
+				}
+				if request.Status != configs.GroupDeploymentPendingApproval {
+					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
+					return
+				}
+				reviewer := currentUsername(auth, r)
+				if strings.EqualFold(reviewer, request.RequestedBy) {
+					http.Error(w, "requesters cannot approve their own deployment request", http.StatusForbidden)
+					return
+				}
+				if request.AssignedReviewer != "" && !strings.EqualFold(reviewer, request.AssignedReviewer) {
+					http.Error(w, "only the assigned reviewer can approve this deployment request", http.StatusForbidden)
+					return
+				}
+				if request.AssignedReviewer != "" {
+					if err := validateAssignedReviewer(r.Context(), auth, group, request.RequestedBy, reviewer); err != nil {
+						http.Error(w, err.Error(), http.StatusForbidden)
+						return
+					}
+				}
+				if !group.Enabled || !sameSelector(group.Selector, request.GroupSelector) {
+					http.Error(w, "group changed after preview; create a new deployment request", http.StatusConflict)
+					return
+				}
+				configuration, err := configStore.Get(r.Context(), request.ConfigurationID)
+				if err != nil || configuration.GroupID != group.ID || configuration.Hash != request.ConfigurationHash {
+					http.Error(w, "approved configuration no longer matches the request", http.StatusConflict)
+					return
+				}
+				if err := validateConfigurationForApproval(r.Context(), validator, configuration); err != nil {
+					http.Error(w, "configuration is not eligible for deployment: "+err.Error(), http.StatusUnprocessableEntity)
+					return
+				}
+				eligibleTargets := make([]configs.GroupDeploymentTarget, 0, len(request.Targets))
+				for _, target := range request.Targets {
+					if target.Eligible {
+						eligibleTargets = append(eligibleTargets, target)
+					}
+				}
+				if len(eligibleTargets) == 0 {
+					http.Error(w, "approval request has no eligible targets", http.StatusConflict)
+					return
+				}
+				currentMembers, err := membersForGroupIdentity(r.Context(), group, agentStore)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				currentMembers = membersMatchingLabels(currentMembers, request.LabelSelector)
+				currentByID := make(map[string]*agents.ManagedAgent, len(currentMembers))
+				for _, member := range currentMembers {
+					currentByID[member.InstanceUID] = member
+				}
+				readyMembers := make([]*agents.ManagedAgent, 0, len(eligibleTargets))
+				for _, target := range eligibleTargets {
+					current := currentByID[target.AgentInstanceUID]
+					if current == nil {
+						http.Error(w, "target agent membership changed; create a new deployment request", http.StatusConflict)
+						return
+					}
+					preview, ready, err := previewGroupConfiguration(r.Context(), []*agents.ManagedAgent{current}, group.Enabled, configuration, assignmentStore)
+					if err != nil {
+						internalServerError(w, err)
+						return
+					}
+					if ready != 1 || len(preview) != 1 || preview[0].Reason != "Ready" {
+						http.Error(w, "target agent membership or readiness changed; create a new deployment request", http.StatusConflict)
+						return
+					}
+					readyMembers = append(readyMembers, current)
+				}
+				if err := requestStore.Review(r.Context(), request.ID, configs.GroupDeploymentPendingApproval, configs.GroupDeploymentDeploying, reviewer, strings.TrimSpace(r.FormValue("review_comment"))); err != nil {
+					http.Error(w, "deployment request is no longer pending approval", http.StatusConflict)
+					return
+				}
+				request.Status = configs.GroupDeploymentDeploying
+				notifier.notify(r.Context(), "approved and deploying", request, group)
+				failures := make([]string, 0)
+				for _, member := range readyMembers {
+					previousID, err := lastSuccessfulConfigurationID(r.Context(), member.InstanceUID, deploymentStore)
+					if err != nil {
+						failures = append(failures, member.Name+": "+err.Error())
+						continue
+					}
+					if _, _, err := deliverConfigurationWithRollback(r.Context(), member.InstanceUID, configuration, configs.DeploymentActionDeploy, previousID, request.ID, assignmentStore, deploymentStore, adapter); err != nil {
+						attemptAutomaticRollback(r.Context(), member.InstanceUID, configuration.Hash, configStore, assignmentStore, deploymentStore, adapter)
+						failures = append(failures, member.Name+": "+err.Error())
+					}
+				}
+				if len(failures) > 0 {
+					_ = requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentFailed)
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape("Deployment failed for "+strings.Join(failures, "; ")), http.StatusSeeOther)
+					return
+				}
+				http.Redirect(w, r, "/groups/"+group.ID+"?request_updated=deploying", http.StatusSeeOther)
+				return
+			}
+			if action == "request_deployment" {
+				if !group.Enabled {
+					http.Error(w, "group must be enabled before requesting deployment", http.StatusConflict)
+					return
+				}
+				configuration, err := configStore.Get(r.Context(), strings.TrimSpace(r.FormValue("configuration_id")))
+				if err != nil || configuration.GroupID != group.ID {
+					http.Error(w, "configuration not found", http.StatusNotFound)
+					return
+				}
+				// Revalidate the immutable artifact at the approval boundary. This
+				// protects the queue if validation policy or Collector binaries
+				// changed after the version was originally saved.
+				if err := validateConfigurationForApproval(r.Context(), validator, configuration); err != nil {
+					http.Error(w, "configuration is not eligible for approval: "+err.Error(), http.StatusUnprocessableEntity)
+					return
+				}
+				members, err := membersForGroupIdentity(r.Context(), group, agentStore)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				labelSelector, err := parseOptionalLabelSelector(r.FormValue("label_selector"))
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				members = membersMatchingLabels(members, labelSelector)
+				preview, eligible, err := previewGroupConfiguration(r.Context(), members, group.Enabled, configuration, assignmentStore)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				if eligible == 0 {
+					http.Error(w, "selected configuration is already deployed and latest, already in progress, or has no ready target", http.StatusConflict)
+					return
+				}
+				targets := make([]configs.GroupDeploymentTarget, 0, len(preview))
+				for _, item := range preview {
+					targets = append(targets, configs.GroupDeploymentTarget{
+						AgentInstanceUID: item.Agent.InstanceUID, AgentName: item.Agent.Name,
+						Readiness: item.Reason, Eligible: item.Reason == "Ready",
+					})
+				}
+				requestedBy, ok := auth.sessionUsername(r)
+				if !ok {
+					requestedBy, _, ok = r.BasicAuth()
+				}
+				if !ok || strings.TrimSpace(requestedBy) == "" {
+					http.Error(w, "authenticated requester identity is required", http.StatusUnauthorized)
+					return
+				}
+				assignedReviewer := strings.TrimSpace(r.FormValue("assigned_reviewer"))
+				changeReason := strings.TrimSpace(r.FormValue("change_reason"))
+				if changeReason == "" {
+					http.Error(w, "change reason is required", http.StatusUnprocessableEntity)
+					return
+				}
+				if len(changeReason) > 1000 {
+					http.Error(w, "change reason must not exceed 1000 characters", http.StatusUnprocessableEntity)
+					return
+				}
+				if err := validateAssignedReviewer(r.Context(), auth, group, requestedBy, assignedReviewer); err != nil {
+					http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+					return
+				}
+				request, err := configs.NewGroupDeploymentRequest(group.ID, group.Name, group.Selector, configuration, targets, requestedBy, assignedReviewer, changeReason)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				request.LabelSelector = labelSelector
+				expiryDays, err := approvalExpiryDays(r.FormValue("expiry_days"))
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				request.ExpiresAt = request.CreatedAt.Add(time.Duration(expiryDays) * 24 * time.Hour)
+				request.BaseConfigurationID, request.BaseConfigurationHash, err = commonAppliedConfiguration(r.Context(), preview, assignmentStore)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				if err := requestStore.Create(r.Context(), request); err != nil {
+					internalServerError(w, err)
+					return
+				}
+				notifier.notify(r.Context(), "submitted", request, group)
+				http.Redirect(w, r, "/groups/"+group.ID+"?request_created="+request.ID, http.StatusSeeOther)
+				return
+			}
+			if action == "delete" {
+				members, err := membersForGroupIdentity(r.Context(), group, agentStore)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				if len(members) > 0 {
+					active := activeGroupMemberCount(members)
+					message := fmt.Sprintf("Cannot delete group: %d Collector(s) still belong to this group, including %d active. Reassign or remove them first to prevent orphaned Collectors.", len(members), active)
+					http.Redirect(w, r, "/groups/"+group.ID+"?error="+url.QueryEscape(message), http.StatusSeeOther)
+					return
+				}
+				requests, err := requestStore.ListByGroup(r.Context(), group.ID, 1)
+				if err != nil {
+					internalServerError(w, err)
+					return
+				}
+				if len(requests) > 0 {
+					http.Redirect(w, r, "/groups/"+group.ID+"?error=Cannot+delete+group%3A+approval+history+must+be+preserved", http.StatusSeeOther)
+					return
+				}
+				if err := groupStore.Delete(r.Context(), group.ID); err != nil {
+					internalServerError(w, err)
+					return
+				}
+				http.Redirect(w, r, "/groups", http.StatusSeeOther)
+				return
+			}
+			if action == "disable" || action == "enable" {
+				group.Enabled = action == "enable"
+				group.UpdatedAt = time.Now().UTC()
+				if err := validateGroupOverlap(r.Context(), groupStore, group, group.ID); err != nil {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
+				if err := groupStore.Update(r.Context(), group); err != nil {
+					internalServerError(w, err)
+					return
+				}
+				http.Redirect(w, r, "/groups/"+group.ID, http.StatusSeeOther)
+				return
+			}
+			if action == "update" {
+				selector, err := parseGroupSelectorForm(r)
+				if err != nil {
+					http.Error(w, err.Error(), 400)
+					return
+				}
+				group.Selector = selector
+				group.Name = strings.TrimSpace(r.FormValue("name"))
+				if err := validateGroupName(group.Name); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				group.UpdatedAt = time.Now().UTC()
+				if err := validateGroupOverlap(r.Context(), groupStore, group, group.ID); err != nil {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
+				if err := groupStore.Update(r.Context(), group); err != nil {
+					http.Error(w, err.Error(), 409)
+					return
+				}
+				http.Redirect(w, r, "/groups/"+group.ID, http.StatusSeeOther)
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		members, err := membersForGroupIdentity(r.Context(), group, agentStore)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		allConfigurations, err := configStore.List(r.Context())
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		available := configurationsForGroup(allConfigurations, group.ID)
+		requests, err := requestStore.ListByGroup(r.Context(), group.ID, 20)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		for _, request := range requests {
+			if request.Status != configs.GroupDeploymentDeploying {
+				continue
+			}
+			eligible, applied, failed := 0, 0, 0
+			for index, target := range request.Targets {
+				if !target.Eligible {
+					continue
+				}
+				eligible++
+				deployments, listErr := deploymentStore.ListByAgent(r.Context(), target.AgentInstanceUID, 20)
+				if listErr != nil {
+					internalServerError(w, listErr)
+					return
+				}
+				for _, deployment := range deployments {
+					if deployment.ConfigurationHash != request.ConfigurationHash || deployment.CreatedAt.Before(request.CreatedAt) {
+						continue
+					}
+					request.Targets[index].Readiness = string(deployment.Status)
+					switch deployment.Status {
+					case configs.DeliveryApplied:
+						applied++
+					case configs.DeliveryFailed, configs.DeliveryUnsupported:
+						failed++
+					}
+					break
+				}
+			}
+			switch {
+			case failed > 0:
+				if err := requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentFailed); err == nil {
+					request.Status = configs.GroupDeploymentFailed
+					notifier.notify(r.Context(), "deployment failed; rollback evaluated", request, group)
+				}
+			case eligible > 0 && applied == eligible:
+				if err := requestStore.UpdateStatus(r.Context(), request.ID, configs.GroupDeploymentDeploying, configs.GroupDeploymentCompleted); err == nil {
+					request.Status = configs.GroupDeploymentCompleted
+					notifier.notify(r.Context(), "deployment completed", request, group)
+				}
+			}
+		}
+		driftSummary, err := buildGroupDrift(r.Context(), members, configStore, assignmentStore, adapter)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		deploymentHistory, err := groupDeploymentHistory(r.Context(), members, deploymentStore, 50)
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		editorBaseline := defaultGroupConfiguration
+		editorBaseID := ""
+		editorName := group.Name + ".yaml"
+		editorVersion := ""
+		distributionProfiles := []distributionCompletionProfile{}
+		if distributionStore != nil {
+			published, distributionErr := distributionStore.List(r.Context())
+			if distributionErr != nil {
+				internalServerError(w, distributionErr)
+				return
+			}
+			for _, item := range published {
+				distributionProfiles = append(distributionProfiles, distributionCompletionProfile{
+					ID: item.ID, Name: item.Name, Version: item.CollectorVersion, Components: item.Components,
+				})
+			}
+			sort.Slice(distributionProfiles, func(i, j int) bool {
+				if distributionProfiles[i].Name == distributionProfiles[j].Name {
+					return distributionProfiles[i].Version > distributionProfiles[j].Version
+				}
+				return distributionProfiles[i].Name < distributionProfiles[j].Name
+			})
+		}
+		if len(available) > 0 {
+			selectedBase := preferredGroupConfiguration(available, deploymentHistory, strings.TrimSpace(r.URL.Query().Get("editor_base")))
+			editorBaseline = selectedBase.Content
+			editorBaseID = selectedBase.ID
+			editorName = selectedBase.Name
+			editorVersion = selectedBase.Version
+		}
+		view := groupDetailView{
+			Page: "groups", Group: group, Members: members, ActiveMembers: activeGroupMemberCount(members), Configurations: available,
+			Requests: requests, DeploymentHistory: deploymentHistory, DriftSummary: driftSummary,
+			CanAdminister:      currentRole(auth, r) == roleAdmin,
+			CanManage:          canManageGroup(auth, r, group),
+			ShowEdit:           r.URL.Query().Get("edit") == "1",
+			OwnersText:         strings.Join(group.Owners, ", "),
+			ConfigurationSaved: r.URL.Query().Get("configuration_saved"),
+			RequestCreated:     r.URL.Query().Get("request_created"),
+			RequestUpdated:     r.URL.Query().Get("request_updated"), Error: r.URL.Query().Get("error"),
+			EditorBaseline:       editorBaseline,
+			EditorBaseID:         editorBaseID,
+			EditorName:           editorName,
+			EditorVersion:        editorVersion,
+			EditorVersions:       available,
+			DistributionProfiles: distributionProfiles,
+			CanEditConfiguration: true,
+			CanDeleteAgents:      currentRole(auth, r) == roleAdmin || currentRole(auth, r) == roleGroupOwner,
+		}
+		view.EligibleReviewers, err = eligibleDeploymentReviewers(r.Context(), auth, group, currentUsername(auth, r), currentRole(auth, r))
+		if err != nil {
+			internalServerError(w, err)
+			return
+		}
+		policies, policyErr := sectionPolicyStore.List(r.Context())
+		if policyErr != nil {
+			view.EditorError = "Unable to load configuration section policies."
+		} else {
+			view.EditorSections, policyErr = buildConfigurationSectionViews(view.EditorBaseline, policies, currentRole(auth, r))
+			if policyErr != nil {
+				view.EditorError = policyErr.Error()
+			}
+		}
+		if configID := strings.TrimSpace(r.URL.Query().Get("configuration_id")); configID != "" {
+			for _, configuration := range available {
+				if configuration.ID == configID {
+					view.SelectedConfig = configuration
+					break
+				}
+			}
+			if view.SelectedConfig == nil {
+				http.Error(w, "configuration not found", http.StatusNotFound)
+				return
+			}
+			view.LabelSelector, err = parseOptionalLabelSelector(r.URL.Query().Get("labels"))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			view.LabelSelectorText = labelSelectorText(view.LabelSelector)
+			targetMembers := membersMatchingLabels(members, view.LabelSelector)
+			view.Preview, view.Eligible, err = previewGroupConfiguration(r.Context(), targetMembers, group.Enabled, view.SelectedConfig, assignmentStore)
+			if err != nil {
+				internalServerError(w, err)
+				return
+			}
+			addLabelMatchExplanation(view.Preview, view.LabelSelector)
+			view.SelectedPipeline, err = configs.ParsePipelineModel(view.SelectedConfig.Content)
+			if err != nil {
+				view.PipelineError = err.Error()
+			}
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = groupDetailPage.Execute(w, view)
+	})
+}
+
+// parseGroupSelectorForm accepts structured form fields and converts them into a normalized selector map.
+func parseGroupSelectorForm(r *http.Request) (map[string]string, error) {
+	if err := r.ParseForm(); err != nil {
+		return nil, errors.New("invalid group form")
+	}
+	keys, values := r.Form["selector_key"], r.Form["selector_value"]
+	// Compatibility for forms and automation created before flexible selectors.
+	if len(keys) == 0 && len(values) == 0 {
+		keys = []string{"application", "environment", "place"}
+		values = []string{r.FormValue("application"), r.FormValue("environment"), r.FormValue("place")}
+	}
+	if len(keys) != len(values) {
+		return nil, errors.New("each selector key must have one value")
+	}
+	selector := make(map[string]string, len(keys))
+	for index := range keys {
+		key, value := strings.TrimSpace(keys[index]), strings.TrimSpace(values[index])
+		if key == "" && value == "" {
+			continue
+		}
+		if key == "" || value == "" {
+			return nil, errors.New("selector key and value are both required")
+		}
+		if _, duplicate := selector[key]; duplicate {
+			return nil, fmt.Errorf("duplicate selector key: %s", key)
+		}
+		selector[key] = value
+	}
+	if err := validateGroupSelector(selector); err != nil {
+		return nil, err
+	}
+	return selector, nil
+}
+
+// parseSelectorText parses one key=value selector per line and reports malformed or duplicate entries.
+func parseSelectorText(input string) (map[string]string, error) {
+	result := map[string]string{}
+	for _, part := range strings.Split(input, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		pieces := strings.SplitN(part, "=", 2)
+		if len(pieces) != 2 || strings.TrimSpace(pieces[0]) == "" || strings.TrimSpace(pieces[1]) == "" {
+			return nil, errors.New("selector must use key=value pairs separated by commas")
+		}
+		key := strings.TrimSpace(pieces[0])
+		if _, exists := result[key]; exists {
+			return nil, fmt.Errorf("duplicate selector label: %s", key)
+		}
+		result[key] = strings.TrimSpace(pieces[1])
+	}
+	if len(result) == 0 {
+		return nil, errors.New("at least one selector label is required")
+	}
+	return result, nil
+}
+
+func parseOptionalLabelSelector(input string) (map[string]string, error) {
+	if strings.TrimSpace(input) == "" {
+		return map[string]string{}, nil
+	}
+	selector, err := parseSelectorText(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(selector) > maxManagedLabels {
+		return nil, fmt.Errorf("label deployment selector supports at most %d exact-match labels", maxManagedLabels)
+	}
+	return selector, nil
+}
+
+var legacyGroupDetailPage = template.Must(template.New("group-detail").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>OTelPlane Group</title><style>
+body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;margin:0;padding:32px;max-width:1400px}a{color:#93c5fd;text-decoration:none}.nav{display:flex;gap:16px;margin-bottom:22px}.card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:18px;margin-bottom:18px}table{width:100%;border-collapse:collapse}th,td{padding:12px;text-align:left;border-bottom:1px solid #1f2937}th{color:#93c5fd}code{color:#c4b5fd}.muted{color:#94a3b8}.ok{color:#86efac}.bad{color:#fca5a5}input{background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:7px;padding:9px;margin:4px;min-width:220px}button{padding:9px 14px;border-radius:7px;border:0;cursor:pointer}.danger{background:#7f1d1d;color:white}.warning{background:#422006;border:1px solid #92400e;color:#fde68a}.status{display:inline-block;padding:4px 9px;border-radius:999px;font-size:12px;font-weight:700}.enabled{background:#14532d;color:#bbf7d0}.disabled{background:#3f3f46;color:#d4d4d8}.actionrow{display:flex;gap:8px;flex-wrap:wrap}.iconaction{display:inline-flex;gap:7px;align-items:center}
+</style></head><body><div class="nav"><a href="/agents">Agents</a><a href="/groups">Groups</a></div><h1>{{.Group.Name}}</h1><p>{{if .Group.Enabled}}<span class="status enabled">Enabled</span>{{else}}<span class="status disabled">Disabled</span>{{end}}</p>{{if .Error}}<section class="card warning"><strong>⚠️ {{.Error}}</strong></section>{{end}}
+<section class="card"><h2>✏️ Edit group</h2><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="update"><label>Application<br><input name="application" value="{{index .Group.Selector "application"}}" required></label><label>Environment<br><input name="environment" value="{{index .Group.Selector "environment"}}" required></label><label>Place<br><input name="place" value="{{index .Group.Selector "place"}}" required></label><p class="muted">Group name is regenerated automatically from Application, Environment and Place.</p><button type="submit">💾 Update group</button></form><div class="actionrow" style="margin-top:14px"><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="{{if .Group.Enabled}}disable{{else}}enable{{end}}"><button type="submit" class="iconaction">{{if .Group.Enabled}}⏸️ Disable group{{else}}▶️ Enable group{{end}}</button></form><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="delete"><button class="danger iconaction" type="submit">🗑️ Delete group</button></form></div>{{if .Members}}<p class="muted" style="margin-top:12px">Delete protection is active: {{len .Members}} agent(s) currently match this group identity. Unassign them before deleting the group.</p>{{end}}</section>
+<section class="card"><h2>Assigned agents ({{len .Members}})</h2>{{if .Members}}<table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Health</th><th>Managed labels</th></tr></thead><tbody>{{range .Members}}<tr><td><a href="/agents/{{.InstanceUID}}">{{.Name}}</a></td><td>{{.Type}}</td><td>{{.Status}}</td><td class="{{if .Healthy}}ok{{else}}bad{{end}}">{{if .Healthy}}Healthy{{else}}Unhealthy{{end}}</td><td>{{range $k,$v := .Labels}}<code>{{$k}}={{$v}}</code> {{end}}</td></tr>{{end}}</tbody></table>{{else}}<p class="muted">No agents currently match this group identity.</p>{{end}}</section></body></html>`))

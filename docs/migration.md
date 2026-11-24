@@ -1,7 +1,7 @@
 # Configuration migration
 
 Migration converts an existing OpenTelemetry Collector configuration into a
-governed FleetAMP group configuration version. It does not deploy the imported
+governed OTelPlane group configuration version. It does not deploy the imported
 configuration automatically.
 
 ## Before you begin
@@ -14,14 +14,14 @@ configuration automatically.
 
 ## Workflow
 
-| Stage | What FleetAMP does | What the user checks |
+| Stage | What OTelPlane does | What the user checks |
 | --- | --- | --- |
 | Import | Accepts pasted or uploaded Collector YAML | Correct source configuration |
 | Parse | Reads the Collector document and its component sections | YAML syntax and recognized sections |
 | Normalize | Produces a consistent internal representation | No intended behavior was lost |
 | Standardize | Applies governed recommendations and reports changes | Every added, changed or retained item |
 | Pattern match | Compares the configuration with reusable patterns | Suggested pattern is appropriate |
-| Validate | Runs FleetAMP policy and optional Collector validation | No blocking errors remain |
+| Validate | Runs OTelPlane policy and optional Collector validation | No blocking errors remain |
 | Preview | Shows the final content before persistence | Preview matches the intended result |
 | Save | Creates an immutable group configuration version | Group, version identity and content |
 | History | Preserves previous migration results | Actor, time and result are traceable |
@@ -29,11 +29,11 @@ configuration automatically.
 
 ## Step-by-step
 
-1. Open **Migration** from the FleetAMP navigation.
+1. Open **Migration** from the OTelPlane navigation.
 2. Select the target group.
 3. Paste the existing Collector YAML or upload the configuration file.
 4. Parse and normalize it.
-5. Review FleetAMP's standardization findings. A recommendation is not a
+5. Review OTelPlane's standardization findings. A recommendation is not a
    deployment; confirm it matches the organization's policy.
 6. Review any recognized governed pattern and adoption impact.
 7. Run **Validate**. Resolve all blocking findings.
@@ -45,8 +45,8 @@ configuration automatically.
 
 ## Validation levels
 
-FleetAMP always validates YAML and its governance rules. When
-`FLEETAMP_OTELCOL_BINARY` points to the intended Collector executable, FleetAMP
+OTelPlane always validates YAML and its governance rules. When
+`OTELPLANE_OTELCOL_BINARY` points to the intended Collector executable, OTelPlane
 can also validate distribution-specific components and pipeline settings.
 
 A configuration that passed previously can be rejected at the approval

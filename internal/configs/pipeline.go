@@ -69,7 +69,7 @@ func ParseComponentCatalog(content string) (*ComponentCatalog, error) {
 }
 
 // ParsePipelineModel parses Collector YAML into the relationship-only model
-// used by FleetAMP's validation and visualization layers.
+// used by OTelPlane's validation and visualization layers.
 func ParsePipelineModel(content string) (*PipelineModel, error) {
 	var document collectorPipelineDocument
 	if err := yaml.Unmarshal([]byte(content), &document); err != nil {

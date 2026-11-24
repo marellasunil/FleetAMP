@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"github.com/marellasunil/FleetAMP/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
 )
 
 type DistributionStore struct { mu sync.RWMutex; items map[string]*distributions.Distribution }

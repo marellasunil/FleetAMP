@@ -14,9 +14,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/marellasunil/FleetAMP/internal/integrations"
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/integrations"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 const defaultGitHubAPI = "https://api.github.com"
@@ -122,7 +122,7 @@ func (a *GitHubAdapter) Execute(ctx context.Context, request *lifecycle.GitOpsEx
 	if err != nil {
 		return Result{}, err
 	}
-	branch := "fleetamp/" + request.ID
+	branch := "otelplane/" + request.ID
 	if err := github.ensureBranch(ctx, connection.Organization, connection.Repository, branch, baseSHA); err != nil {
 		return Result{}, err
 	}
@@ -214,14 +214,14 @@ func (c githubClient) ensureBranch(ctx context.Context, owner, repository, branc
 	var existing githubRef
 	err := c.doJSON(ctx, http.MethodGet, c.repoURL(owner, repository, "git/ref/heads/"+branch), nil, &existing, http.StatusOK, http.StatusNotFound)
 	if err != nil {
-		return fmt.Errorf("check GitHub FleetAMP branch: %w", err)
+		return fmt.Errorf("check GitHub OTelPlane branch: %w", err)
 	}
 	if existing.Object.SHA != "" {
 		return nil
 	}
 	payload := map[string]string{"ref": "refs/heads/" + branch, "sha": sha}
 	if err := c.doJSON(ctx, http.MethodPost, c.repoURL(owner, repository, "git/refs"), payload, nil, http.StatusCreated); err != nil {
-		return fmt.Errorf("create GitHub FleetAMP branch: %w", err)
+		return fmt.Errorf("create GitHub OTelPlane branch: %w", err)
 	}
 	return nil
 }
@@ -247,7 +247,7 @@ func (c githubClient) putFile(ctx context.Context, owner, repository, branch str
 		}
 	}
 	payload := map[string]string{
-		"message": "FleetAMP: apply approved execution " + executionID,
+		"message": "OTelPlane: apply approved execution " + executionID,
 		"content": base64.StdEncoding.EncodeToString([]byte(file.Content)),
 		"branch":  branch,
 	}
@@ -295,10 +295,10 @@ func (c githubClient) ensurePullRequest(ctx context.Context, owner, repository, 
 		return existing[0].HTMLURL, existing[0].Number, nil
 	}
 	payload := map[string]string{
-		"title": "FleetAMP approved change " + request.ID,
+		"title": "OTelPlane approved change " + request.ID,
 		"head":  headBranch,
 		"base":  baseBranch,
-		"body":  "Created by FleetAMP after approval of immutable preview `" + request.PreviewHash + "`.\n\nExecution: `" + request.ID + "`",
+		"body":  "Created by OTelPlane after approval of immutable preview `" + request.PreviewHash + "`.\n\nExecution: `" + request.ID + "`",
 	}
 	var created githubPullRequest
 	if err := c.doJSON(ctx, http.MethodPost, c.repoURL(owner, repository, "pulls"), payload, &created, http.StatusCreated); err != nil {

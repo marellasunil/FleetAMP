@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/runtimes"
+	"github.com/marellasunil/OTelPlane/internal/runtimes"
 )
 
 type Operation string

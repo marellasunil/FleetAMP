@@ -1,4 +1,4 @@
-# FleetAMP documentation
+# OTelPlane documentation
 
 This index separates operator instructions, user workflows, release information
 and contributor verification. Start with the section that matches your task.
@@ -7,9 +7,9 @@ and contributor verification. Start with the section that matches your task.
 
 | Goal | Documentation |
 | --- | --- |
-| Understand FleetAMP and its architecture | [Project overview](../README.md) |
-| Install FleetAMP as a Linux service | [systemd deployment](../deploy/systemd/README.md) |
-| Run the local FleetAMP and Collector lab | [Compose lab](../deploy/compose/README.md) |
+| Understand OTelPlane and its architecture | [Project overview](../README.md) |
+| Install OTelPlane as a Linux service | [systemd deployment](../deploy/systemd/README.md) |
+| Run the local OTelPlane and Collector lab | [Compose lab](../deploy/compose/README.md) |
 | Understand the console navigation and roles | [Scalable console](scalable-console.md) |
 | Recover or change a password | [Password management and recovery](password-recovery.md) |
 

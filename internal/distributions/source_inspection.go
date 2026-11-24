@@ -181,7 +181,7 @@ func GenerateOCBManifest(execution *BuildExecution) (string, error) {
 		return "", errors.New("Collector version is required")
 	}
 	b := &strings.Builder{}
-	fmt.Fprintf(b, "dist:\n  module: fleetamp.local/collector/%s\n  name: fleetamp-collector\n  description: FleetAMP governed Collector build %s\n  output_path: ./_build\n", execution.BuildPlanHash[:16], execution.BuildPlanHash[:16])
+	fmt.Fprintf(b, "dist:\n  module: otelplane.local/collector/%s\n  name: otelplane-collector\n  description: OTelPlane governed Collector build %s\n  output_path: ./_build\n", execution.BuildPlanHash[:16], execution.BuildPlanHash[:16])
 	types := []struct {
 		name   string
 		values []string

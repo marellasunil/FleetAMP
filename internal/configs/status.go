@@ -2,7 +2,7 @@
 //
 // Purpose:
 //   Carries asynchronous configuration status from a management adapter back
-//   into FleetAMP assignment tracking without exposing protocol protobuf types.
+//   into OTelPlane assignment tracking without exposing protocol protobuf types.
 //
 // Flow:
 //   agent status -> adapter normalization -> StatusReport -> AssignmentStore.

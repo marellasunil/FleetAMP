@@ -3,9 +3,9 @@ package lifecycle
 import (
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
-	"github.com/marellasunil/FleetAMP/internal/groups"
-	"github.com/marellasunil/FleetAMP/internal/runtimes"
+	"github.com/marellasunil/OTelPlane/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/runtimes"
 )
 
 func TestValidateRequestSnapshotsResolvedTargets(t *testing.T) {

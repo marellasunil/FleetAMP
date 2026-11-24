@@ -2,14 +2,14 @@
 //
 // Purpose:
 //
-//	Compares a FleetAMP desired configuration fragment with the effective
+//	Compares a OTelPlane desired configuration fragment with the effective
 //	configuration reported by a managed agent through OpAMP and identifies
 //	exact YAML paths that are missing or have different values.
 //
 // Comparison model:
 //
 //	OpAMP Supervisors can merge remote configuration with local/base config.
-//	Extra effective settings are therefore allowed; FleetAMP only requires the
+//	Extra effective settings are therefore allowed; OTelPlane only requires the
 //	desired subtree to exist with matching values.
 package configs
 

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	groupsecrets "github.com/marellasunil/FleetAMP/internal/secrets"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	groupsecrets "github.com/marellasunil/OTelPlane/internal/secrets"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type GroupSecretStore struct{ db *sql.DB }

@@ -1,4 +1,4 @@
-# Contributing to FleetAMP
+# Contributing to OTelPlane
 
 Thanks for considering a contribution.
 
@@ -12,7 +12,7 @@ Thanks for considering a contribution.
 
 ## Current contribution areas
 
-FleetAMP v0.2 establishes the governed fleet-management loop: inventory,
+OTelPlane v0.2 establishes the governed fleet-management loop: inventory,
 groups, Group Owners, configuration validation, approval, deployment,
 rollback, drift and audit. Useful contribution areas now include:
 

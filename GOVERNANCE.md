@@ -1,6 +1,6 @@
-# FleetAMP governance and licensing
+# OTelPlane governance and licensing
 
-FleetAMP is an independent, vendor-neutral community project. It is not an
+OTelPlane is an independent, vendor-neutral community project. It is not an
 official OpenTelemetry project and does not grant special authority over the
 OpenTelemetry specification or upstream implementations.
 
@@ -18,18 +18,18 @@ public API, managed-agent adapter or incompatible behavior.
 
 ## Roles
 
-- **Users** evaluate FleetAMP and report operational experience.
+- **Users** evaluate OTelPlane and report operational experience.
 - **Contributors** submit documentation, tests, fixes or proposals.
 - **Reviewers** provide recurring technical review in an area of the project.
 - **Maintainers** merge changes, manage releases and make final scope and
   security decisions.
 
 These roles describe participation rather than employment, support entitlement
-or ownership of the FleetAMP name.
+or ownership of the OTelPlane name.
 
 ## Licensing
 
-FleetAMP source code and repository documentation are currently licensed under
+OTelPlane source code and repository documentation are currently licensed under
 the [Apache License 2.0](LICENSE). It permits use, modification, distribution,
 forking and commercial use, subject to its copyright, license and notice terms.
 The license does not require modified versions or hosted services to publish
@@ -48,9 +48,9 @@ No Contributor License Agreement is currently required.
 ## Name and compatibility claims
 
 The Apache license covers copyright permissions; it does not grant rights to
-misrepresent a fork as an official FleetAMP release. Forks should use a distinct
+misrepresent a fork as an official OTelPlane release. Forks should use a distinct
 name when their behavior or compatibility differs materially and must not imply
-endorsement by FleetAMP maintainers or the OpenTelemetry project.
+endorsement by OTelPlane maintainers or the OpenTelemetry project.
 
 ## Releases and support
 

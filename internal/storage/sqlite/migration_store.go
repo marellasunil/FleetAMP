@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/migrations"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/migrations"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 // MigrationStore persists migration provenance beside immutable configurations.

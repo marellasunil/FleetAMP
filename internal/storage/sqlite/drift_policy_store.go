@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/configs"
 )
 
 type DriftPolicyStore struct{ db *sql.DB }

@@ -1,13 +1,13 @@
-// SQLite persistence backend for FleetAMP configuration state.
+// SQLite persistence backend for OTelPlane configuration state.
 //
 // Purpose:
 //
-//	Opens the embedded FleetAMP database and owns schema initialization for
+//	Opens the embedded OTelPlane database and owns schema initialization for
 //	configuration artifacts, current assignments, and append-only deployment history.
 //
 // Packaging:
 //
-//	Uses modernc.org/sqlite, a CGo-free SQLite driver, so FleetAMP can ship as
+//	Uses modernc.org/sqlite, a CGo-free SQLite driver, so OTelPlane can ship as
 //	a single Go binary without requiring a system SQLite installation.
 package sqlite
 

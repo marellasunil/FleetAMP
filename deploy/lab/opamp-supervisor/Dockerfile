@@ -6,4 +6,4 @@ COPY --from=supervisor /usr/local/bin/opampsupervisor /opampsupervisor
 COPY --from=collector /otelcol-contrib /otelcol-contrib
 RUN mkdir -p /var/lib/otel-supervisor && chmod 0777 /var/lib/otel-supervisor
 ENTRYPOINT ["/opampsupervisor"]
-CMD ["--config", "/etc/fleetamp-supervisor/supervisor.yaml"]
+CMD ["--config", "/etc/otelplane-supervisor/supervisor.yaml"]

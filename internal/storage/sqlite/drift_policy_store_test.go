@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/configs"
 )
 
 func TestDriftPolicyDefaultsToReportOnlyAndPersists(t *testing.T) {
 	ctx := context.Background()
-	database, err := Open(ctx, filepath.Join(t.TempDir(), "fleetamp.db"))
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "otelplane.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

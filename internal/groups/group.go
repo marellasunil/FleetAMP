@@ -1,7 +1,7 @@
-// FleetAMP dynamic ownership-group domain model.
+// OTelPlane dynamic ownership-group domain model.
 //
 // Groups target managed agents through flexible exact-match identity metadata.
-// Reported group fields participate in targeting, while FleetAMP-owned group
+// Reported group fields participate in targeting, while OTelPlane-owned group
 // fields override reported values with the same key. Membership is dynamic.
 package groups
 
@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/agents"
 )
 
 type Group struct {
@@ -67,7 +67,7 @@ func MatchesIdentity(group *Group, agent *agents.ManagedAgent) bool {
 }
 
 // GroupIdentity returns the controlled group identity used for membership.
-// Reported values provide the base and FleetAMP-managed values override them.
+// Reported values provide the base and OTelPlane-managed values override them.
 func GroupIdentity(agent *agents.ManagedAgent) map[string]string {
 	out := map[string]string{}
 	if agent == nil {
@@ -82,7 +82,7 @@ func GroupIdentity(agent *agents.ManagedAgent) map[string]string {
 	return out
 }
 
-// EffectiveLabels returns optional labels, with FleetAMP-managed values overriding
+// EffectiveLabels returns optional labels, with OTelPlane-managed values overriding
 // labels reported by the Collector. Labels do not define group identity.
 func EffectiveLabels(agent *agents.ManagedAgent) map[string]string {
 	out := map[string]string{}

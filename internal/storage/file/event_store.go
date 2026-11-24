@@ -28,8 +28,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/events"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/events"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type EventStore struct {
@@ -37,7 +37,7 @@ type EventStore struct {
 	path string
 }
 
-// NewEventStore prepares the FleetAMP data directory and uses agent-events.jsonl
+// NewEventStore prepares the OTelPlane data directory and uses agent-events.jsonl
 // as the append-only history file.
 // NewEventStore prepares the append-only JSON event file beneath the configured data directory.
 func NewEventStore(dataDir string) (*EventStore, error) {

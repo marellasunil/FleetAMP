@@ -1,0 +1,903 @@
+// OTelPlane web control-plane shell and primary dashboard templates.
+package main
+
+import (
+	"html/template"
+	"net/http"
+	"strings"
+)
+
+const baseControlPlaneCSS = `
+:root{color-scheme:dark;--bg:#08111f;--panel:#101b2b;--panel2:#0c1726;--line:#203047;--muted:#8293ad;--text:#edf3ff;--blue:#6d8dff;--green:#35d6a1;--amber:#f5ad45;--red:#f56a79;--purple:#9a79ff}
+*{box-sizing:border-box}[hidden]{display:none!important}.access-toast{position:fixed;z-index:1000;right:24px;top:24px;display:grid;grid-template-columns:1fr auto;gap:3px 18px;min-width:300px;max-width:min(440px,calc(100vw - 32px));padding:14px 16px;border:1px solid #9c4d58;border-radius:10px;background:#351921;color:#ffe7ea;box-shadow:0 18px 50px #0009}.access-toast strong{grid-column:1}.access-toast span{grid-column:1;color:#ffc1c8;font-size:13px}.access-toast button{grid-column:2;grid-row:1/3;align-self:center;border:0;background:transparent;color:#ffe7ea;font-size:22px;cursor:pointer}body{margin:0;background:radial-gradient(circle at 55% 0,#111b2d 0,#08111f 42%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:15px;line-height:1.45}a{color:inherit;text-decoration:none}.shell{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}.side{border-right:1px solid var(--line);background:#091322;padding:18px 12px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:hidden}.side nav{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#304664 transparent;padding-right:4px}.side nav::-webkit-scrollbar{width:7px}.side nav::-webkit-scrollbar-thumb{background:#304664;border-radius:999px}.side nav::-webkit-scrollbar-track{background:transparent}.brand{display:block;padding:2px 5px 20px}.brandmark{display:block;width:100%;max-width:198px;height:auto;border-radius:0;background:none;box-shadow:none;object-fit:contain}.brandname{font-size:18px;font-weight:800}.brandsub{font-size:12px;letter-spacing:.18em;color:var(--muted);margin-top:2px}.navlabel{font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:#566780;padding:18px 8px 8px}.navitem{display:flex;align-items:center;gap:11px;padding:10px 11px;color:#a9b7cc;border-radius:8px;margin:2px 0}.navitem:hover,.navitem.active{color:#dce7ff;background:linear-gradient(90deg,#17294a,#111d31);box-shadow:inset 3px 0 #6b8cff}.navicon{width:18px;text-align:center;color:#93a8c8}.soon{margin-left:auto;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#7084a3;background:#18263a;padding:4px 7px;border-radius:999px}.sidebottom{margin-top:auto}.mode{border:1px solid #2b405e;background:#101c2e;border-radius:9px;padding:12px;color:#7fa4ff;font-size:12px}.mode small{display:block;color:var(--muted);margin-top:4px}.main{min-width:0}.top{height:106px;border-bottom:1px solid var(--line);padding:20px 30px;display:flex;align-items:center;justify-content:space-between}.crumb{font-size:11px;color:#63748f;letter-spacing:.16em;text-transform:uppercase}.pagetitle{font-size:23px;font-weight:800;margin:7px 0 2px}.subtitle{color:var(--muted);font-size:13px}.topactions{display:flex;gap:10px;align-items:center}.profile-menu{position:relative}.profile-menu>summary{list-style:none;display:flex;align-items:center;gap:9px;padding:6px 9px;border:1px solid #2a3b52;border-radius:10px;background:#101c2e;cursor:pointer}.profile-menu>summary::-webkit-details-marker{display:none}.profile-avatar{display:grid;place-items:center;width:31px;height:31px;border-radius:50%;background:linear-gradient(135deg,#426ed9,#9a79ff);color:#fff;font-weight:800;text-transform:uppercase}.profile-summary{display:grid;line-height:1.2;text-align:left}.profile-summary small{color:var(--muted)}.profile-popover{position:absolute;z-index:90;right:0;top:calc(100% + 8px);width:260px;padding:8px;border:1px solid #304664;border-radius:11px;background:#101d30;box-shadow:0 18px 45px #0009}.profile-popover-head{padding:10px;border-bottom:1px solid var(--line);margin-bottom:5px}.profile-popover a,.profile-popover button{display:flex;width:100%;gap:9px;align-items:center;padding:10px;border:0;border-radius:7px;background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}.profile-popover a:hover,.profile-popover button:hover{background:#192b47}.profile-popover form{margin:0}.profile-popover .profile-danger{color:#ff9aa5}@media(max-width:720px){.profile-summary{display:none}.profile-popover{position:fixed;right:16px;top:78px}}.connection{border:1px solid #2a3b52;border-radius:8px;padding:8px 10px;color:#a9b8cf;font-size:12px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:7px;box-shadow:0 0 8px #35d6a1}.btn{border:1px solid #36507a;border-radius:8px;background:#13213a;color:#dce7ff;padding:9px 13px;font-weight:650;cursor:pointer}.btn.primary{background:linear-gradient(135deg,#426ed9,#6e91f2);border-color:#7499ef}.content{padding:24px 28px 42px}.page-description{display:grid;grid-template-columns:auto minmax(0,1fr);gap:13px;align-items:start;margin:0 0 18px;padding:15px 17px;border:1px solid #2b4567;border-radius:11px;background:linear-gradient(145deg,#10213a,#0c192a)}.page-description-icon{display:grid;place-items:center;width:28px;height:28px;border:1px solid #5076b3;border-radius:50%;background:#172d4d;color:#a9c4ff;font-weight:800}.page-description-title{font-size:14px;font-weight:750;margin-bottom:4px}.page-description p{margin:0;color:#9bacc4;font-size:13px;line-height:1.55}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}.metric,.card{background:linear-gradient(145deg,#111e2e,#0d1827);border:1px solid #25374f;border-radius:11px}.metric{padding:17px}.metriclabel{font-size:12px;color:var(--muted)}.metricvalue{font-size:26px;font-weight:800;margin:5px 0}.metricnote{font-size:12px;color:#71839e}.green{color:var(--green)}.amber{color:var(--amber)}.red{color:var(--red)}.purple{color:var(--purple)}.grid2{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:14px;margin-bottom:16px}.cardhead{padding:15px 17px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.cardtitle{font-size:14px;font-weight:750}.cardsub{font-size:12px;color:var(--muted);margin-top:3px}.cardbody{padding:16px 17px}.healthbar{height:10px;border-radius:99px;background:#1a2a40;overflow:hidden;margin:16px 0 7px}.healthfill{height:100%;background:linear-gradient(90deg,#4776ea,#6f8fff);border-radius:99px}.callout{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid #1d2c40}.callout:last-child{border:0}.badge{font-size:11px;border-radius:999px;padding:3px 7px;border:1px solid}.badge.ok{color:#6ae2b8;border-color:#25785f;background:#10392f}.badge.warn{color:#ffc063;border-color:#735225;background:#392b17}.badge.off{color:#aab6c9;border-color:#3a485e;background:#172131}.toolbar{display:flex;gap:8px}.select,.input{background:#0a1524;border:1px solid #2a3d57;color:#dce6f8;border-radius:8px;padding:8px 10px}.input{min-width:220px}table{width:100%;border-collapse:collapse}th{font-size:11px;letter-spacing:.08em;color:#657995;text-transform:uppercase;font-weight:600}th,td{text-align:left;padding:12px 14px;border-bottom:1px solid #1c2c40}tr:last-child td{border-bottom:0}.agentname{font-weight:700}.tiny{font-size:12px;color:var(--muted);margin-top:3px}.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#8aa8e8;font-size:12px}.sectionhead{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:17px}.eyebrow{color:#6d8dff;font-size:11px;letter-spacing:.17em;text-transform:uppercase;font-weight:800}.sectiontitle{font-size:22px;font-weight:800;margin:5px 0}.groupgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.groupcard{padding:17px}.groupselector{background:#091523;border:1px solid #20334b;padding:9px;border-radius:7px;margin:18px 0 14px}.groupstats{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid #203047;border-bottom:1px solid #203047;padding:13px 0}.groupstats>*+*{border-left:1px solid #203047;padding-left:14px}.linked-stats a{border-radius:7px;padding:5px 8px;margin:-5px 8px -5px 0}.linked-stats a:hover{background:#17294a}.statvalue{font-weight:750;font-size:15px}.selector-footer{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-top:16px}.action-menu{position:relative}.action-menu summary{list-style:none}.action-menu summary::-webkit-details-marker{display:none}.icon-only{font-size:16px;letter-spacing:2px}.action-menu-panel{position:absolute;right:0;top:44px;z-index:20;min-width:210px;padding:7px;background:#101d30;border:1px solid #304664;border-radius:10px;box-shadow:0 18px 45px #0008}.action-menu-panel a,.action-menu-panel button{display:block;width:100%;padding:10px;border:0;border-radius:7px;background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}.action-menu-panel a:hover,.action-menu-panel button:hover{background:#192b47}.action-menu-panel .danger-link{color:#ff8995}.action-warning{margin:6px;padding:9px;border:1px solid #735225;border-radius:7px;background:#392b17;color:#ffc063;font-size:11px;line-height:1.45}.upcoming{opacity:.8}.upcominggrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.upcomingitem{border:1px solid #21334b;border-radius:9px;padding:14px;background:#0c1726}.empty{padding:30px;text-align:center;color:var(--muted)}@media(max-width:1050px){.metrics{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}.groupgrid{grid-template-columns:1fr}}@media(max-width:720px){.shell{grid-template-columns:1fr}.side{position:relative;height:auto;overflow:visible}.side nav{overflow:visible;padding-right:0}.top{height:auto;align-items:flex-start}.metrics{grid-template-columns:1fr}.topactions{display:flex}.content{padding:18px}.groupgrid{grid-template-columns:1fr}.selector-footer{align-items:flex-start;flex-direction:column}}
+`
+const scalableControlPlaneCSS = `
+.tabs{display:flex;gap:5px;overflow:auto;border-bottom:1px solid var(--line);margin:0 0 18px;padding:0 2px}.tab{white-space:nowrap;padding:11px 14px;color:var(--muted);border-bottom:2px solid transparent;font-weight:700}.tab:hover{color:var(--text);background:#14233a}.tab.active{color:#dce7ff;border-color:var(--blue);background:linear-gradient(180deg,transparent,#17294a66)}.tab .soon{margin-left:7px}.list-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.list-tools .input{min-width:240px}.pagination{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:14px 17px;border-top:1px solid var(--line)}.page-links{display:flex;gap:6px;align-items:center}.page-link{min-width:36px;text-align:center;padding:7px 9px;border:1px solid #304664;border-radius:7px;color:#b9c7da}.page-link:hover,.page-link.current{background:#20385e;color:#fff;border-color:#668dec}.page-link.disabled{opacity:.4;pointer-events:none}.page-size{display:flex;gap:7px;align-items:center}.preview-panel{padding:24px;border:1px dashed #304664;border-radius:10px;background:#0b1727}.result-count{font-size:12px;color:var(--muted)}
+`
+
+const controlPlaneCSS = baseControlPlaneCSS + scalableControlPlaneCSS + themeCSS
+
+const sideNav = `<aside class="side"><a class="brand" href="/agents"><img class="brandmark" src="/assets/otelplane-logo-transparent.png" alt="OTelPlane — Telemetry Control Plane"></a><nav><div class="navlabel">Management</div><a class="navitem {{if eq .Page "fleet"}}active{{end}}" href="/agents"><span class="navicon">▦</span>Fleet</a><a class="navitem {{if eq .Page "groups"}}active{{end}}" href="/groups"><span class="navicon">♙</span>Groups & Labels</a><div class="navlabel">Lifecycle</div><a class="navitem {{if eq .Page "deployments"}}active{{end}}" href="/deployments"><span class="navicon">↻</span>Collector Lifecycle</a><a class="navitem {{if eq .Page "ownership-lifecycle"}}active{{end}}" href="/ownership-lifecycle"><span class="navicon">♙</span>Ownership Lifecycle</a><a class="navitem {{if eq .Page "collector-distributions"}}active{{end}}" href="/collector-distributions"><span class="navicon">⬡</span>Collector Packages</a><div class="navlabel">Delivery</div><a class="navitem {{if eq .Page "approvals"}}active{{end}}" href="/approvals"><span class="navicon">✓</span>Approvals</a><a class="navitem {{if eq .Page "settings-integrations"}}active{{end}} admin-settings-link" href="/settings/integrations"><span class="navicon">⇄</span>Git Integrations</a><div class="navlabel">Configuration</div><a class="navitem {{if eq .Page "blueprints"}}active{{end}}" href="/blueprints"><span class="navicon">▤</span>Configuration Builder</a><a class="navitem {{if eq .Page "migration"}}active{{end}}" href="/migration"><span class="navicon">⇥</span>Migration</a><a class="navitem {{if eq .Page "addons"}}active{{end}}" href="/addons"><span class="navicon">＋</span>Telemetry Integrations</a><div class="navlabel">Intelligence</div><a class="navitem" href="/agents?tab=ai-insights"><span class="navicon">✦</span>AI Insights<span class="soon">Preview</span></a><a class="navitem" href="/agents?tab=slos"><span class="navicon">◎</span>SLOs & Alerts<span class="soon">Preview</span></a><a class="navitem {{if eq .Page "mcp"}}active{{end}}" href="/mcp"><span class="navicon">⎔</span>MCP Server<span class="soon">Upcoming</span></a><div class="navlabel">Observe</div><a class="navitem" href="/agents?tab=pipelines"><span class="navicon">⇄</span>Pipelines</a><a class="navitem {{if eq .Page "audit"}}active{{end}} admin-settings-link" href="/audit-log"><span class="navicon">◷</span>Audit log</a><div class="navlabel admin-settings-link">Administration</div><a class="navitem {{if eq .Page "settings-users"}}active{{end}} admin-settings-link" href="/settings/users"><span class="navicon">☷</span>Users, groups & roles</a><a class="navitem {{if eq .Page "settings-sections"}}active{{end}} admin-settings-link" href="/settings/configuration-sections"><span class="navicon">⚙</span>Config policies</a><a class="navitem {{if eq .Page "settings-drift"}}active{{end}} admin-settings-link" href="/settings/configuration-drift"><span class="navicon">↻</span>Drift policy</a></nav><div class="sidebottom"><div class="mode">◉ Community preview<small>Live data unless marked Upcoming.</small></div></div></aside><script src="/assets/theme.js" defer></script><script src="/assets/session.js" defer></script>`
+
+const fleetHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OTelPlane Fleet</title><style>` + controlPlaneCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">OTelPlane / Fleet</div><div class="pagetitle">Fleet</div><div class="subtitle">Monitor Collector identity, connectivity, health, configuration state and drift.</div></div><div class="topactions"><div class="connection"><span class="dot"></span>OpAMP listening</div><a class="btn primary" href="/deployments">➤ Deploy configuration</a></div></header><div class="content"><nav class="tabs" aria-label="Fleet views"><a class="tab {{if or (eq .Tab "agents") (eq .Tab "")}}active{{end}}" href="/agents?tab=agents">Agents</a><a class="tab {{if eq .Tab "pipelines"}}active{{end}}" href="/agents?tab=pipelines">Pipelines</a><a class="tab {{if eq .Tab "ai-insights"}}active{{end}}" href="/agents?tab=ai-insights">AI Insights <span class="soon">Preview</span></a><a class="tab {{if eq .Tab "slos"}}active{{end}}" href="/agents?tab=slos">SLOs &amp; Alerts <span class="soon">Preview</span></a></nav>
+<section class="page-description" aria-labelledby="fleet-view-description"><div class="page-description-icon" aria-hidden="true">i</div><div><div class="page-description-title" id="fleet-view-description">{{if or (eq .Tab "agents") (eq .Tab "")}}About the Agents view{{else if eq .Tab "pipelines"}}About the Pipelines view{{else if eq .Tab "ai-insights"}}About AI Insights{{else}}About SLOs &amp; Alerts{{end}}</div>{{if or (eq .Tab "agents") (eq .Tab "")}}<p>Monitor OpenTelemetry Collectors registered with OTelPlane through OpAMP. Review each Collector's stable identity, connection and health status, ownership group, runtime and version, current configuration, and whether it needs attention. Open a Collector to investigate its reported attributes, capabilities, desired and effective configuration, drift, and deployment history.</p>{{else if eq .Tab "pipelines"}}<p>Review how telemetry signals are collected and delivered across the managed Collector fleet. This view is currently a preview; pipeline inventory and health will be derived from deployed configurations without exposing protected exporter credentials.</p>{{else if eq .Tab "ai-insights"}}<p>Review governed recommendations for Collector configuration, drift, cardinality, cost, compatibility, and deployment risk. This capability is currently a preview and does not yet generate live findings or make changes to the fleet.</p>{{else}}<p>Define and monitor control-plane objectives for Collector availability, deployment success, drift compliance, rollback outcomes, and approval age. This capability is currently a preview; external observability platforms remain the primary alerting systems.</p>{{end}}</div></section>
+{{if or (eq .Tab "agents") (eq .Tab "")}}<div class="metrics"><div class="metric"><div class="metriclabel">Managed agents</div><div class="metricvalue">{{.Known}}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:7px 0"><span class="badge ok">{{.Active}} Active</span><span class="badge off">{{.Offline}} Offline</span><span class="badge warn">{{.Retired}} Retired</span></div>{{if .LastConnectedAgent}}<div class="metricnote">Last connected: {{.LastConnectedAgent}} · Group: {{.LastConnectedGroup}}</div>{{else}}<div class="metricnote">No connection event recorded</div>{{end}}</div><div class="metric"><div class="metriclabel">Fleet health</div><div class="metricvalue green">{{.HealthyPercent}}%</div><div class="metricnote">{{.Healthy}} agents healthy</div></div><div class="metric"><div class="metriclabel">Needs attention</div><div class="metricvalue amber">{{.Attention}}</div><div class="metricnote">Disconnected or unhealthy</div></div><div class="metric upcoming"><div class="metriclabel">Signal throughput · Upcoming</div><div class="metricvalue purple">—</div><div class="metricnote">Collector self-telemetry integration planned</div></div></div>
+<div class="grid2"><section class="card"><div class="cardhead"><div><div class="cardtitle">Fleet health</div><div class="cardsub">Connected and healthy managed agents</div></div><strong>{{.HealthyPercent}}%</strong></div><div class="cardbody"><div class="healthbar"><div class="healthfill" style="width:{{.HealthyPercent}}%"></div></div><div class="tiny">Calculated from live OTelPlane agent state. Historical charting is Upcoming.</div></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Control-plane status</div><div class="cardsub">Current capabilities</div></div></div><div class="cardbody"><div class="callout"><span class="green">●</span><div><strong>OpAMP management</strong><div class="tiny">Connected agents, health and remote config</div></div></div><div class="callout"><span class="green">●</span><div><strong>Persistent state</strong><div class="tiny">SQLite + agent snapshots</div></div></div><div class="callout upcoming"><span class="amber">●</span><div><strong>Fleet analytics · Upcoming</strong><div class="tiny">Historical health and throughput</div></div></div></div></section></div>
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Managed agents</div><div class="cardsub">Live inventory normalized through OpAMP</div></div><form class="toolbar" method="get"><select class="select" name="status"><option value="all" {{if eq .StatusFilter "all"}}selected{{end}}>All agents</option><option value="active" {{if eq .StatusFilter "active"}}selected{{end}}>Active</option><option value="offline" {{if eq .StatusFilter "offline"}}selected{{end}}>Offline</option><option value="retired" {{if eq .StatusFilter "retired"}}selected{{end}}>Retired</option></select><button class="btn" type="submit">Apply</button></form></div>{{if .Items}}<div style="overflow:auto"><table><thead><tr><th>Agent</th><th>Status</th><th>Group name</th><th>Runtime</th><th>Version</th><th>Configuration</th><th>Action</th></tr></thead><tbody>{{range .Items}}<tr><td><a class="agentname" href="/agents/{{.Agent.InstanceUID}}">{{.Agent.Name}}</a><div class="tiny">{{.Agent.Type}} · <span class="code">{{.Agent.InstanceUID}}</span></div></td><td>{{if and .Agent.Connected .Agent.Healthy}}<span class="badge ok">● Healthy</span>{{else if .Agent.Connected}}<span class="badge warn">● Warning</span>{{else}}<span class="badge off">● Offline</span>{{end}}<div class="tiny">{{.Agent.Status}}</div></td><td>{{if .Groups}}{{range .Groups}}<a href="/groups/{{.ID}}">{{.Name}}</a><br>{{end}}{{else}}<span class="tiny">Unassigned</span>{{end}}</td><td>{{.Agent.Deployment.Runtime}}<div class="tiny">{{index .Agent.Attributes "os.type"}} / {{index .Agent.Attributes "host.arch"}}</div></td><td>{{.Agent.Version}}</td><td>{{if .LastDeployment}}<strong>{{.LastDeployment.ConfigurationName}} v{{.LastDeployment.ConfigurationVersion}}</strong><div class="tiny">{{.LastDeployment.Status}}</div>{{else}}<span class="tiny">No deployment</span>{{end}}</td><td>{{if .CanDelete}}<form method="post" action="/agents/{{.Agent.InstanceUID}}/delete" onsubmit="return confirm('Delete this Collector from OTelPlane inventory?')"><button class="btn" type="submit">Delete</button></form>{{else}}<span class="tiny">{{if .Agent.Connected}}Connected{{else}}Restricted{{end}}</span>{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No managed agents found for this lifecycle status.</div>{{end}}` + paginationHTML + `</section>{{else if eq .Tab "pipelines"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Telemetry pipelines</div><div class="cardsub">Understand what is collected, from where, and where it is delivered</div></div></div><div class="preview-panel"><strong>Pipeline inventory is being prepared from deployed Collector configurations.</strong><div class="tiny">The first release will show signal, source group, destination, agent count and health without exposing secret exporter values.</div></div></section>{{else if eq .Tab "ai-insights"}}<section class="card"><div class="cardhead"><div><div class="cardtitle">AI Insights · Preview</div><div class="cardsub">Configuration, drift, cardinality, cost and deployment-risk recommendations</div></div></div><div class="preview-panel">This governed preview makes the roadmap visible without presenting synthetic findings as live data.</div></section>{{else}}<section class="card"><div class="cardhead"><div><div class="cardtitle">Fleet SLOs &amp; Alerts · Preview</div><div class="cardsub">Availability, deployment success, drift compliance, rollback and approval-age objectives</div></div></div><div class="preview-panel">OTelPlane will focus on control-plane and Collector fleet objectives, while external observability platforms remain the primary alerting systems.</div></section>{{end}}</div></main></div></body></html>`
+
+// fleetTail is retained for compatibility with theme and template tests.
+const fleetTail = ""
+
+var agentsPage = template.Must(template.New("agents").Parse(fleetHTML + fleetTail))
+
+const groupsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OTelPlane Groups &amp; Labels</title><style>` + controlPlaneCSS + `
+.group-workspace{display:grid;gap:16px}.searchbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.searchbar .input{max-width:520px}.collector-choice{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}.collector-choice:last-child{border-bottom:0}.rule-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.rule-help{padding:12px;border:1px solid var(--line);border-radius:8px;background:#0a1626}.hidden{display:none!important}@media(max-width:800px){.rule-grid{grid-template-columns:1fr}.collector-choice{grid-template-columns:auto 1fr}.collector-choice .badge{grid-column:2}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">OTelPlane / Groups &amp; Labels</div><div class="pagetitle">Groups &amp; Labels</div><div class="subtitle">Create exclusive ownership groups, place available Collectors, and govern dynamic fleets.</div></div><div class="topactions"><div class="connection"><span class="dot"></span>OpAMP listening</div><a class="btn primary" href="/groups?tab=create">＋ New group</a></div></header><div class="content group-workspace"><section class="page-description" aria-label="About this page"><div class="page-description-icon" aria-hidden="true">i</div><div><div class="page-description-title">About Groups &amp; Labels</div><p>Organize OpenTelemetry Collectors into exclusive ownership and configuration boundaries. Search existing groups and labels, create a group, assign currently unowned Collectors, define dynamic identity or label selectors, and review Collectors that remain unassigned. Group permissions determine which users may view, configure and approve changes for each fleet.</p></div></section>
+<nav class="tabs" aria-label="Group workspace"><a class="tab {{if eq .Tab "all"}}active{{end}}" href="/groups?tab=all">All Groups</a><a class="tab {{if eq .Tab "create"}}active{{end}}" href="/groups?tab=create">Create Group</a><a class="tab {{if eq .Tab "unassigned"}}active{{end}}" href="/groups?tab=unassigned">Unassigned Collectors <span class="badge off">{{len .Available}}</span></a><a class="tab {{if eq .Tab "labels"}}active{{end}}" href="/groups?tab=labels">Labels</a></nav>
+{{if eq .Tab "all"}}
+<section class="card"><div class="cardhead"><div><div class="cardtitle">All ownership groups</div><div class="cardsub">Search by group name, description, label key, label value, selector, or dynamic rule.</div></div></div><div class="cardbody"><form class="searchbar" method="get"><input type="hidden" name="tab" value="all"><input class="input" name="q" value="{{.Query}}" placeholder="Search groups or labels…" data-live-search="groups" autofocus><button class="btn" type="submit">Search</button>{{if .Query}}<a class="btn" href="/groups?tab=all">Clear</a>{{end}}</form></div></section>
+{{if .Items}}<div class="groupgrid" data-search-list="groups">{{range .Items}}<section class="card groupcard" data-search-item="{{.Group.Name}} {{.Group.Description}} {{range $k,$v := .Group.Selector}}{{$k}} {{$v}} {{$k}}={{$v}} {{end}}{{with .Group.MembershipRule}}{{.Field}} {{.MatchType}} {{.Pattern}}{{end}}"><div style="display:flex;justify-content:space-between;gap:12px"><div><div class="agentname"><a href="/groups/{{.Group.ID}}">{{.Group.Name}}</a> {{if .Group.Enabled}}<span class="badge ok">● Active</span>{{else}}<span class="badge off">Disabled</span>{{end}}</div><div class="tiny">{{if .Group.Description}}{{.Group.Description}}{{else}}Exclusive OTelPlane ownership group{{end}}</div></div>{{if .CanManage}}<details class="action-menu"><summary class="icon-only" aria-label="Actions for {{.Group.Name}}">•••</summary><div class="action-menu-panel"><a href="/groups/{{.Group.ID}}?edit=1#edit-group">Edit group</a><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="{{if .Group.Enabled}}disable{{else}}enable{{end}}"><button type="submit">{{if .Group.Enabled}}Disable group{{else}}Enable group{{end}}</button></form>{{if gt .MemberCount 0}}<div class="action-warning">Deletion blocked: {{.MemberCount}} Collector(s) still belong to this group{{if gt .ActiveMemberCount 0}}, including {{.ActiveMemberCount}} active{{end}}. Reassign or remove them first.</div>{{else}}<form method="post" action="/groups/{{.Group.ID}}" onsubmit="return confirm('Delete this empty ownership group?')"><input type="hidden" name="action" value="delete"><button class="danger-link" type="submit">Delete group</button></form>{{end}}</div></details>{{end}}</div><div class="groupselector">{{range $k,$v := .Group.Selector}}<span class="chip code">{{$k}}={{$v}}</span> {{end}}</div>{{with .Group.MembershipRule}}<div class="notice"><strong>Dynamic membership:</strong> <span class="code">{{.Field}} {{.MatchType}} {{.Pattern}}</span></div>{{end}}<div class="tiny" style="margin:14px 0 7px">Configuration state</div><div class="groupstats" style="grid-template-columns:repeat(5,1fr)"><div><div class="statvalue">{{.MemberCount}}</div><div class="tiny">Collectors</div></div><div><div class="statvalue">{{.ActiveMemberCount}}</div><div class="tiny">Active</div></div><div><div class="statvalue">{{.SavedVersions}}</div><div class="tiny">Versions</div></div><div><div class="statvalue">{{.ApprovalRequests}}</div><div class="tiny">Requests</div></div><div><div class="statvalue {{if gt .Drifted 0}}red{{else}}green{{end}}">{{.Drifted}}</div><div class="tiny">Drifted</div></div></div><div style="display:flex;justify-content:flex-end;margin-top:14px"><a class="purple" href="/groups/{{.Group.ID}}">Manage group →</a></div></section>{{end}}</div>{{else}}<div class="card empty">No groups match this search. <a href="/groups?tab=create">Create a group</a>.</div>{{end}}` + paginationHTML + `
+{{else if eq .Tab "create"}}
+<section class="card" id="new-group"><div class="cardhead"><div><div class="cardtitle">Create ownership group</div><div class="cardsub">Define the group first, then optionally select available Collectors or a safe dynamic rule.</div></div></div><div class="cardbody"><form method="post" action="/groups" data-selector-form>
+<div class="detailform"><label>Group name<input class="input" name="name" placeholder="Payments production" required maxlength="120"></label><label>Description<input class="input" name="description" placeholder="Purpose, owner, or scope"></label></div>
+<h3>Group identity</h3><div class="selector-rows" data-selector-rows><div class="detailform selector-row"><input class="input" name="selector_key" value="application" aria-label="Selector key" required><input class="input" name="selector_value" placeholder="payment-api" aria-label="Selector value" required><button class="btn" type="button" data-remove-selector>−</button></div><div class="detailform selector-row"><input class="input" name="selector_key" value="environment" aria-label="Selector key" required><input class="input" name="selector_value" placeholder="prod" aria-label="Selector value" required><button class="btn" type="button" data-remove-selector>−</button></div></div><div class="detailactions"><button class="btn" type="button" data-add-selector>＋ Add condition</button><button class="btn" type="button" data-preview-selector>Preview exact selector</button></div><div class="tiny" data-selector-preview aria-live="polite"></div>
+<h3>Available Collectors</h3>{{if .Available}}<div class="searchbar"><input class="input" type="search" placeholder="Search available Collectors…" data-live-search="create-collectors" aria-label="Search available Collectors"></div><div data-search-list="create-collectors">{{range .Available}}{{if not .Conflict}}<label class="collector-choice" data-search-item="{{.Agent.Name}} {{.Agent.DisplayName}} {{.Agent.InstanceUID}} {{.Agent.Deployment.Runtime}}"><input type="checkbox" name="agent_uid" value="{{.Agent.InstanceUID}}"><span><strong>{{if .Agent.DisplayName}}{{.Agent.DisplayName}}{{else}}{{.Agent.Name}}{{end}}</strong><span class="tiny code">{{.Agent.InstanceUID}}</span></span>{{if .Agent.Connected}}<span class="badge ok">Connected</span>{{else}}<span class="badge off">Offline</span>{{end}}</label>{{end}}{{end}}</div><p class="tiny">Only Collectors that do not belong to another enabled group can be selected.</p>{{else}}<div class="empty">Every known Collector currently belongs to a group.</div>{{end}}
+<h3>Dynamic fleet membership</h3><label class="collector-choice"><input type="checkbox" name="dynamic_membership" value="true" data-dynamic-toggle><span><strong>Automatically match new or rebuilt Collectors</strong><span class="tiny">Use one controlled wildcard or regular expression. Explicitly removed Collectors remain excluded.</span></span></label><div class="rule-help hidden" data-dynamic-fields><div class="rule-grid"><label>Reported identity<select class="select" name="membership_field" data-membership-field><option value="stable_id">Stable Collector ID</option><option value="name">Collector name</option><option value="display_name">OTelPlane display name</option><option value="host.name">Reported host.name</option><option value="attribute">Another reported attribute</option></select></label><label class="hidden" data-attribute-key>Attribute key<input class="input" name="membership_attribute" placeholder="k8s.deployment.name"></label><label>Match method<select class="select" name="membership_match_type"><option value="wildcard">Wildcard</option><option value="regex">Regular expression</option></select></label><label>Pattern<input class="input" name="membership_pattern" placeholder="payments-prod-collector-*"></label></div><p class="tiny">Example wildcard: <span class="code">payments-prod-collector-*</span>. OTelPlane rejects rules that overlap a current enabled group.</p></div>
+<div class="detailactions" style="margin-top:18px"><button class="btn primary" type="submit">Validate and create group</button><a class="btn" href="/groups?tab=all">Cancel</a></div></form></div></section>
+{{else if eq .Tab "unassigned"}}
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Unassigned Collectors</div><div class="cardsub">Collectors available for manual placement, plus ambiguous dynamic matches that require attention.</div></div></div><div class="cardbody"><div class="searchbar"><input class="input" placeholder="Search collector name, ID, or runtime…" data-live-search="collectors"></div></div>{{if .Available}}<div style="overflow:auto" data-search-list="collectors"><table><thead><tr><th>Collector</th><th>Runtime</th><th>Connection</th><th>Reason</th><th>Action</th></tr></thead><tbody>{{range .Available}}<tr data-search-item="{{.Agent.Name}} {{.Agent.DisplayName}} {{.Agent.InstanceUID}} {{.Agent.Deployment.Runtime}} {{.Conflict}}"><td><strong>{{if .Agent.DisplayName}}{{.Agent.DisplayName}}{{else}}{{.Agent.Name}}{{end}}</strong><div class="tiny code">{{.Agent.InstanceUID}}</div></td><td>{{.Agent.Deployment.Runtime}}<div class="tiny">{{.Agent.Deployment.Namespace}}</div></td><td>{{if .Agent.Connected}}<span class="badge ok">Connected</span>{{else}}<span class="badge off">Offline</span>{{end}}</td><td>{{if .Conflict}}<span class="badge warn">Conflict</span><div class="tiny">{{.Conflict}}</div>{{else}}<span class="tiny">No enabled group matches</span>{{end}}</td><td><a class="btn" href="/agents/{{.Agent.InstanceUID}}">View Collector</a></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No unassigned Collectors. Every known Collector resolves to exactly one enabled group.</div>{{end}}</section>
+{{else}}
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Label catalogue</div><div class="cardsub">Keys and values currently used by accessible ownership groups.</div></div></div>{{if .Labels}}<div style="overflow:auto"><table><thead><tr><th>Label key</th><th>Known values</th><th>Groups</th></tr></thead><tbody>{{range .Labels}}<tr><td class="code">{{.Key}}</td><td>{{range .Values}}<span class="chip">{{.}}</span> {{end}}</td><td>{{.GroupCount}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No managed labels are in use.</div>{{end}}</section>
+{{end}}</div></main></div><script src="/assets/group-selectors.js" defer></script></body></html>`
+
+var groupsPage = template.Must(template.New("groups").Parse(groupsHTML))
+
+const groupSelectorsJS = `(() => {
+  const initialize = (form) => {
+    const rows = form.querySelector("[data-selector-rows]");
+    const updateRemoveButtons = () => {
+      const buttons = rows.querySelectorAll("[data-remove-selector]");
+      buttons.forEach((button) => { button.disabled = buttons.length === 1; });
+    };
+    form.addEventListener("click", (event) => {
+      const add = event.target.closest("[data-add-selector]");
+      if (add) {
+        const row = document.createElement("div");
+        row.className = "detailform selector-row";
+        row.innerHTML = '<input class="input" name="selector_key" placeholder="key · team" aria-label="Selector key" required><input class="input" name="selector_value" placeholder="value · payments" aria-label="Selector value" required><button class="btn" type="button" data-remove-selector aria-label="Remove condition">−</button>';
+        rows.appendChild(row);
+        row.querySelector("input").focus();
+        updateRemoveButtons();
+        return;
+      }
+      const remove = event.target.closest("[data-remove-selector]");
+      if (remove && rows.querySelectorAll(".selector-row").length > 1) {
+        remove.closest(".selector-row").remove();
+        updateRemoveButtons();
+		return;
+	  }
+	  const previewButton = event.target.closest("[data-preview-selector]");
+	  if (previewButton) {
+		const output = form.querySelector("[data-selector-preview]");
+		const keys = [...form.querySelectorAll('[name="selector_key"]')];
+		const values = [...form.querySelectorAll('[name="selector_value"]')];
+		const selector = {};
+		keys.forEach((input, index) => {
+		  if (input.value.trim()) selector[input.value.trim()] = (values[index]?.value || "").trim();
+		});
+		previewButton.disabled = true;
+		if (output) output.textContent = "Validating selector…";
+		fetch("/api/v1/groups/preview", {
+		  method: "POST",
+		  credentials: "same-origin",
+		  headers: {"Content-Type":"application/json", "Accept":"application/json"},
+		  body: JSON.stringify({selector, exclude_id: form.dataset.groupId || ""})
+		})
+		  .then(async (response) => {
+			if (!response.ok) throw new Error((await response.text()).trim() || "Unable to preview selector");
+			return response.json();
+		  })
+		  .then((result) => { if (output) output.textContent = "✓ Valid selector · " + result.matched + " Collector(s) currently match"; })
+		  .catch((error) => { if (output) output.textContent = "⚠ " + error.message; })
+		  .finally(() => { previewButton.disabled = false; });
+      }
+    });
+    updateRemoveButtons();
+  };
+  document.querySelectorAll("[data-selector-form]").forEach(initialize);
+
+  document.querySelectorAll("[data-live-search]").forEach((input) => {
+    const name = input.dataset.liveSearch;
+    const list = document.querySelector('[data-search-list="' + name + '"]');
+    if (!list) return;
+    const filter = () => {
+      const query = input.value.trim().toLowerCase();
+      list.querySelectorAll("[data-search-item]").forEach((item) => {
+        item.hidden = query !== "" && !item.dataset.searchItem.toLowerCase().includes(query);
+      });
+    };
+    input.addEventListener("input", filter);
+  });
+
+  const dynamicToggle = document.querySelector("[data-dynamic-toggle]");
+  const dynamicFields = document.querySelector("[data-dynamic-fields]");
+  const membershipField = document.querySelector("[data-membership-field]");
+  const attributeKey = document.querySelector("[data-attribute-key]");
+  const updateDynamicFields = () => {
+    if (dynamicFields && dynamicToggle) dynamicFields.classList.toggle("hidden", !dynamicToggle.checked);
+    if (attributeKey && membershipField) attributeKey.classList.toggle("hidden", membershipField.value !== "attribute");
+  };
+  dynamicToggle?.addEventListener("change", updateDynamicFields);
+  membershipField?.addEventListener("change", updateDynamicFields);
+  updateDynamicFields();
+})();`
+
+type upcomingView struct{ Page, Title, Subtitle, Current, Upcoming string }
+
+const configurationEditorJS = `(() => {
+  const form = document.getElementById("configuration-editor-form");
+  const content = document.getElementById("configuration-content");
+  const baseline = document.getElementById("configuration-baseline");
+  const preview = document.getElementById("configuration-preview");
+  const previewButton = document.getElementById("configuration-preview-button");
+  const versionInput = document.getElementById("configuration-new-version");
+  const errorBox = document.getElementById("configuration-validation-error");
+  const referenceStatus = document.getElementById("configuration-reference-status");
+  const distributionProfile = document.getElementById("configuration-distribution-profile");
+  if (!form || !content || !baseline || !errorBox) return;
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  const editors = Array.from(form.querySelectorAll("[data-section-key]"));
+  const tabs = Array.from(form.querySelectorAll("[data-section-tab]"));
+  const panels = Array.from(form.querySelectorAll("[data-section-panel]"));
+  const modeButtons = Array.from(form.querySelectorAll("[data-editor-mode-button]"));
+  const modePanels = Array.from(form.querySelectorAll("[data-editor-mode-panel]"));
+  const visualList = document.getElementById("visual-pipeline-list");
+  const visualWarnings = document.getElementById("visual-builder-warnings");
+  const visualSignal = document.getElementById("visual-signal");
+  const visualName = document.getElementById("visual-pipeline-name");
+  const visualReceiver = document.getElementById("visual-receiver");
+  const visualProcessors = document.getElementById("visual-processors");
+  const visualExporter = document.getElementById("visual-exporter");
+  const visualAdd = document.getElementById("visual-add-pipeline");
+  const topologyFilter = document.getElementById("topology-signal-filter");
+  const topologyCanvas = document.getElementById("configuration-topology-canvas");
+  const topologySummary = document.getElementById("configuration-topology-summary");
+  const topologyWarnings = document.getElementById("configuration-topology-warnings");
+  const pipelineEditor = editors.find((editor) => editor.dataset.sectionKey === "service_pipelines");
+  const hasBaseline = form.dataset.hasBaseline === "true";
+  const initialSections = editors.map((editor) => editor.value);
+  let validated = false;
+  let visualModel = {pipelines: [], warnings: []};
+  let componentCatalog = {receivers: [], processors: [], exporters: []};
+  let referenceValidationTimer = null;
+  let referenceValidationRequest = 0;
+
+  const hasChanges = () => !hasBaseline || editors.some((editor, index) => editor.value !== initialSections[index]);
+  const updateActionState = () => {
+    const enabled = hasChanges();
+    if (versionInput) versionInput.disabled = !enabled;
+    if (previewButton) previewButton.disabled = !enabled;
+    if (submitButton) submitButton.disabled = !enabled;
+  };
+
+  const selectTab = (key) => {
+    tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.sectionTab === key));
+    panels.forEach((panel) => panel.classList.toggle("active", panel.dataset.sectionPanel === key));
+  };
+  tabs.forEach((tab) => tab.addEventListener("click", () => selectTab(tab.dataset.sectionTab)));
+
+  const escapeHTML = (value) => String(value).replace(/[&<>\"']/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"})[character]);
+  const yamlCompletions = {
+    receivers: [
+      ["otlp:\n  protocols:\n    grpc:\n      endpoint: 0.0.0.0:4317\n    http:\n      endpoint: 0.0.0.0:4318", "OTLP gRPC and HTTP receiver"],
+      ["hostmetrics:", "Host CPU, memory, disk and network metrics"],
+      ["filelog:", "Tail and parse log files"],
+      ["prometheus:", "Scrape Prometheus metrics"],
+      ["zipkin:", "Receive Zipkin traces"]
+    ],
+    processors: [
+      ["batch:", "Batch telemetry before export"],
+      ["memory_limiter:", "Protect the Collector from memory exhaustion"],
+      ["resource:", "Add, update or remove resource attributes"],
+      ["attributes:", "Transform span, metric or log attributes"],
+      ["filter:", "Drop telemetry using OTTL conditions"],
+      ["transform:", "Transform telemetry using OTTL"],
+      ["tail_sampling:", "Make trace sampling decisions after collection"]
+    ],
+    exporters: [
+      ["otlp:", "Export telemetry using OTLP/gRPC"],
+      ["otlphttp:", "Export telemetry using OTLP/HTTP"],
+      ["debug:", "Write telemetry summaries to Collector logs"],
+      ["prometheusremotewrite:", "Export metrics using Prometheus remote write"],
+      ["file:", "Write telemetry to a local file"]
+    ],
+    connectors: [
+      ["forward:", "Forward telemetry between pipelines"],
+      ["routing:", "Route telemetry to selected pipelines"],
+      ["count:", "Generate metrics by counting telemetry"],
+      ["spanmetrics:", "Generate RED metrics from spans"],
+      ["servicegraph:", "Generate service graph metrics from spans"]
+    ],
+    extensions: [
+      ["health_check:", "Expose Collector health status"],
+      ["pprof:", "Expose Go performance profiles"],
+      ["zpages:", "Expose live diagnostic pages"]
+    ],
+    service_pipelines: [
+      ["receivers: []", "Components that feed this pipeline"],
+      ["processors: []", "Ordered processors applied to telemetry"],
+      ["exporters: []", "Components that receive pipeline output"]
+    ],
+    service_extensions: [],
+    service_telemetry: [
+      ["logs:", "Collector internal log settings"],
+      ["metrics:", "Collector internal metrics settings"],
+      ["traces:", "Collector internal trace settings"]
+    ]
+  };
+  const componentProperties = {
+    "receivers:otlp": [["protocols:", "Enabled OTLP transports"]],
+    "receivers:hostmetrics": [["collection_interval: 60s", "Host metric collection interval"], ["scrapers:", "Host metric scraper configuration"]],
+    "receivers:filelog": [["include: []", "Files to include"], ["exclude: []", "Files to exclude"], ["start_at: end", "Initial read position"], ["operators: []", "Log parsing operators"]],
+    "receivers:prometheus": [["config:", "Prometheus scrape configuration"]],
+    "processors:batch": [["timeout: 200ms", "Maximum batch wait"], ["send_batch_size: 8192", "Preferred batch size"], ["send_batch_max_size: 0", "Maximum batch size"]],
+    "processors:memory_limiter": [["check_interval: 1s", "Memory check interval"], ["limit_mib: 512", "Hard memory limit"], ["spike_limit_mib: 128", "Allowed memory spike"]],
+    "processors:resource": [["attributes: []", "Resource attribute actions"]],
+    "processors:attributes": [["actions: []", "Telemetry attribute actions"]],
+    "processors:filter": [["error_mode: propagate", "OTTL error handling"], ["traces:", "Trace filter conditions"], ["metrics:", "Metric filter conditions"], ["logs:", "Log filter conditions"]],
+    "processors:transform": [["error_mode: propagate", "OTTL error handling"], ["trace_statements: []", "Trace transformations"], ["metric_statements: []", "Metric transformations"], ["log_statements: []", "Log transformations"]],
+    "exporters:otlp": [["endpoint:", "OTLP/gRPC destination"], ["headers:", "Authentication headers using secret references"], ["tls:", "TLS settings"], ["compression: gzip", "Payload compression"]],
+    "exporters:otlphttp": [["endpoint:", "OTLP/HTTP destination"], ["headers:", "Authentication headers using secret references"], ["tls:", "TLS settings"], ["compression: gzip", "Payload compression"]],
+    "exporters:prometheusremotewrite": [["endpoint:", "Prometheus remote-write destination"], ["headers:", "Authentication headers using secret references"], ["tls:", "TLS settings"]],
+    "exporters:debug": [["verbosity: normal", "Diagnostic output detail"], ["sampling_initial: 2", "Initially logged items"], ["sampling_thereafter: 500", "Later sampling interval"]],
+    "extensions:health_check": [["endpoint: 0.0.0.0:13133", "Health endpoint"]],
+    "extensions:pprof": [["endpoint: 0.0.0.0:1777", "Profiling endpoint"]],
+    "extensions:zpages": [["endpoint: 0.0.0.0:55679", "Diagnostic pages endpoint"]],
+    "connectors:routing": [["default_pipelines: []", "Fallback pipelines"], ["table: []", "Routing rules"]]
+  };
+  const propertyValues = {
+    start_at: [["beginning", "Read existing and new entries"], ["end", "Read only new entries"]],
+    compression: [["gzip", "Gzip compression"], ["none", "No compression"]],
+    error_mode: [["propagate", "Return transformation errors"], ["ignore", "Ignore and continue"], ["silent", "Continue without error logs"]],
+    verbosity: [["basic", "Basic diagnostic output"], ["normal", "Normal diagnostic output"], ["detailed", "Detailed diagnostic output"]],
+    insecure: [["false", "Require TLS"], ["true", "Disable TLS; development only"]],
+    insecure_skip_verify: [["false", "Verify the server certificate"], ["true", "Skip verification; development only"]]
+  };
+  const selectedDistributionComponents = (sectionKey) => {
+    if (!distributionProfile || !distributionProfile.value) return null;
+    const option = distributionProfile.selectedOptions[0];
+    const value = option && option.dataset[sectionKey];
+    return new Set((value || "").split(",").map((item) => item.trim()).filter(Boolean));
+  };
+  const distributionOptions = (sectionKey, options) => {
+    const allowed = selectedDistributionComponents(sectionKey);
+    if (!allowed) return options;
+    return options.filter((option) => {
+      const component = option[0].replace(/^-\s+/, "").split(":", 1)[0].split("/", 1)[0];
+      return allowed.has(component);
+    }).map((option) => [option[0], option[1] + " · included in selected package"]);
+  };
+  const propertyContext = (editor, before) => {
+    const sectionKey = editor.dataset.sectionKey;
+    if (!["receivers", "processors", "exporters", "extensions", "connectors"].includes(sectionKey)) return null;
+    const lines = before.split("\n");
+    const currentLine = lines[lines.length - 1];
+    const indent = (currentLine.match(/^\s*/) || [""])[0].length;
+    if (indent < 2) return null;
+    let component = "";
+    for (let index = lines.length - 2; index >= 0; index -= 1) {
+      const match = lines[index].match(/^ {0,2}([A-Za-z0-9_.\/-]+):(?:\s|$)/);
+      if (match) { component = match[1].split("/", 1)[0]; break; }
+    }
+    if (!component) return null;
+    const valueMatch = currentLine.match(/^\s*([A-Za-z0-9_.-]+):\s+[A-Za-z0-9_.-]*$/);
+    if (valueMatch && propertyValues[valueMatch[1]]) return propertyValues[valueMatch[1]];
+    return componentProperties[sectionKey + ":" + component] || [];
+  };
+  const componentTypeLabels = {
+    receivers: "Receiver",
+    processors: "Processor",
+    exporters: "Exporter",
+    connectors: "Connector",
+    extensions: "Extension"
+  };
+  const sectionComponentNames = (sectionKeys, usedNames, prefixDash) => {
+    const components = new Map();
+    editors.filter((editor) => sectionKeys.includes(editor.dataset.sectionKey)).forEach((editor) => {
+      editor.value.split("\n").forEach((line) => {
+        const match = line.match(/^ {0,2}([A-Za-z0-9_.\/-]+):(?:\s|$)/);
+        if (match && !components.has(match[1])) {
+          components.set(match[1], componentTypeLabels[editor.dataset.sectionKey] || "Component");
+        }
+      });
+    });
+    const used = new Set(usedNames || []);
+    return Array.from(components.entries())
+      .filter((entry) => !used.has(entry[0]))
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .map((entry) => [(prefixDash ? "- " : "") + entry[0], entry[1] + " defined in this configuration"]);
+  };
+  const referenceSections = (field) => {
+    if (field === "receivers") return ["receivers", "connectors"];
+    if (field === "processors") return ["processors"];
+    if (field === "exporters") return ["exporters", "connectors"];
+    if (field === "extensions") return ["extensions"];
+    return [];
+  };
+  const normalizedReferences = (value) => value.split(",")
+    .map((name) => name.trim().replace(/^['\"]|['\"]$/g, ""))
+    .filter(Boolean);
+  const referenceContext = (editor, before) => {
+    const sectionKey = editor.dataset.sectionKey;
+    if (sectionKey !== "service_pipelines" && sectionKey !== "service_extensions") return null;
+    const lines = before.split("\n");
+    const currentLine = lines[lines.length - 1];
+    const currentIndent = (currentLine.match(/^\s*/) || [""])[0].length;
+    const isListItem = /^\s*-\s*[A-Za-z0-9_.\/-]*$/.test(currentLine);
+    const isEmptyLine = currentLine.trim() === "";
+
+    if (sectionKey === "service_extensions") {
+      const inlineExtensions = currentLine.match(/^\s*\[([^\]]*)$/);
+      if (inlineExtensions) {
+        return {field: "extensions", used: normalizedReferences(inlineExtensions[1]), prefixDash: false};
+      }
+      const isDirectExtensionToken = /^\s*[A-Za-z0-9_.\/-]*$/.test(currentLine);
+      if (isListItem || isEmptyLine || isDirectExtensionToken) {
+        const used = lines.slice(0, -1).map((candidate) => {
+          const item = candidate.match(/^\s*-\s*([A-Za-z0-9_.\/-]+)/);
+          return item ? item[1] : "";
+        }).filter(Boolean);
+        return {field: "extensions", used: used, prefixDash: !isListItem};
+      }
+      return null;
+    }
+
+    const inline = currentLine.match(/\b(receivers|processors|exporters):\s*\[([^\]]*)$/);
+    if (inline) {
+      return {field: inline[1], used: normalizedReferences(inline[2]), prefixDash: false};
+    }
+    const isEmptyIndentedLine = currentIndent > 0 && isEmptyLine;
+    if (!isListItem && !isEmptyIndentedLine) return null;
+    for (let index = lines.length - 2; index >= 0; index -= 1) {
+      const line = lines[index];
+      const header = line.match(/^(\s*)(receivers|processors|exporters):\s*$/);
+      if (header && header[1].length < currentIndent) {
+        const used = lines.slice(index + 1, -1).map((candidate) => {
+          const item = candidate.match(/^\s*-\s*([A-Za-z0-9_.\/-]+)/);
+          return item ? item[1] : "";
+        }).filter(Boolean);
+        return {field: header[2], used: used, prefixDash: isEmptyIndentedLine};
+      }
+      const indent = (line.match(/^\s*/) || [""])[0].length;
+      if (line.trim() && indent < currentIndent && !/^\s*-/.test(line)) break;
+    }
+    return null;
+  };
+  const completionOptions = (editor, before) => {
+    const reference = referenceContext(editor, before);
+    if (reference) {
+      return sectionComponentNames(referenceSections(reference.field), reference.used, reference.prefixDash);
+    }
+    const properties = propertyContext(editor, before);
+    if (properties && properties.length) return properties;
+    return distributionOptions(editor.dataset.sectionKey, yamlCompletions[editor.dataset.sectionKey] || []);
+  };
+  const completionStates = new WeakMap();
+  const closeCompletion = (editor) => {
+    const state = completionStates.get(editor);
+    if (!state) return;
+    state.panel.hidden = true;
+    editor.classList.remove("completion-open");
+    state.options = [];
+    state.active = 0;
+  };
+  const acceptCompletion = (editor, index) => {
+    const state = completionStates.get(editor);
+    const option = state && state.options[index];
+    if (!option) return;
+    const start = editor.selectionStart;
+    const before = editor.value.slice(0, start);
+    const after = editor.value.slice(editor.selectionEnd);
+    const token = (before.match(/[A-Za-z0-9_.\/-]*$/) || [""])[0];
+    const lineStart = before.lastIndexOf("\n") + 1;
+    const indent = (before.slice(lineStart).match(/^\s*/) || [""])[0];
+    const inserted = option[0].replace(/\n/g, "\n" + indent);
+    const replaceStart = start - token.length;
+    editor.value = editor.value.slice(0, replaceStart) + inserted + after;
+    const caret = replaceStart + inserted.length;
+    editor.setSelectionRange(caret, caret);
+    editor.dispatchEvent(new Event("input", {bubbles: true}));
+    closeCompletion(editor);
+    editor.focus();
+  };
+  const renderCompletion = (editor, showAll) => {
+    const state = completionStates.get(editor);
+    if (!state || editor.readOnly) return;
+    const before = editor.value.slice(0, editor.selectionStart);
+    const token = (before.match(/[A-Za-z0-9_.\/-]*$/) || [""])[0].toLowerCase();
+    if (!showAll && !token) {
+      closeCompletion(editor);
+      return;
+    }
+    state.options = completionOptions(editor, before).filter((option) => {
+      const candidate = option[0].replace(/^-\s+/, "").toLowerCase();
+      return showAll || candidate.startsWith(token);
+    }).slice(0, 8);
+    state.active = 0;
+    if (!state.options.length) {
+      closeCompletion(editor);
+      return;
+    }
+    state.list.innerHTML = state.options.map((option, index) =>
+      '<button class="yaml-completion-item' + (index === 0 ? ' active' : '') + '" type="button" data-completion-index="' + index + '"><span class="yaml-completion-value">' + escapeHTML(option[0].split("\n")[0]) + '</span><span class="yaml-completion-description">' + escapeHTML(option[1]) + '</span></button>'
+    ).join("");
+    state.list.querySelectorAll("[data-completion-index]").forEach((button) =>
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        acceptCompletion(editor, Number(button.dataset.completionIndex));
+      })
+    );
+    state.panel.hidden = false;
+    editor.classList.add("completion-open");
+  };
+  const selectCompletion = (editor, direction) => {
+    const state = completionStates.get(editor);
+    if (!state || state.panel.hidden || !state.options.length) return;
+    state.active = (state.active + direction + state.options.length) % state.options.length;
+    state.list.querySelectorAll("[data-completion-index]").forEach((button, index) =>
+      button.classList.toggle("active", index === state.active)
+    );
+  };
+  editors.forEach((editor) => {
+    if (editor.readOnly) return;
+    const panel = document.createElement("div");
+    panel.className = "yaml-completion";
+    panel.hidden = true;
+    panel.innerHTML = '<div class="yaml-completion-head"><span>Suggestions</span><span class="yaml-completion-hint">↑↓ select · Tab/Enter complete · Esc close · Ctrl+Space show all</span></div><div class="yaml-completion-list"></div>';
+    editor.insertAdjacentElement("afterend", panel);
+    completionStates.set(editor, {panel: panel, list: panel.querySelector(".yaml-completion-list"), options: [], active: 0});
+    editor.addEventListener("input", () => renderCompletion(editor, false));
+    editor.addEventListener("click", () => renderCompletion(editor, false));
+    editor.addEventListener("blur", () => window.setTimeout(() => closeCompletion(editor), 120));
+    editor.addEventListener("keydown", (event) => {
+      const state = completionStates.get(editor);
+      if ((event.ctrlKey || event.metaKey) && event.code === "Space") {
+        event.preventDefault();
+        renderCompletion(editor, true);
+        return;
+      }
+      if (!state || state.panel.hidden) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        selectCompletion(editor, event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Tab" || event.key === "Enter") {
+        event.preventDefault();
+        acceptCompletion(editor, state.active);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeCompletion(editor);
+      }
+    });
+  });
+  const chips = (values, empty) => values && values.length
+    ? values.map((value) => '<span class="chip">' + escapeHTML(value) + '</span>').join("")
+    : '<span class="tiny">' + empty + '</span>';
+  const fillSelect = (select, values, placeholder) => {
+    if (!select) return;
+    select.replaceChildren();
+    if (!select.multiple) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = placeholder;
+      select.append(option);
+    }
+    (values || []).forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      select.append(option);
+    });
+  };
+  const pipelineYAML = () => (visualModel.pipelines || []).map((pipeline) => {
+    const processors = pipeline.processors && pipeline.processors.length
+      ? "\n  processors: [" + pipeline.processors.map(JSON.stringify).join(", ") + "]"
+      : "";
+    return JSON.stringify(pipeline.name) + ":\n  receivers: [" + pipeline.receivers.map(JSON.stringify).join(", ") + "]" + processors + "\n  exporters: [" + pipeline.exporters.map(JSON.stringify).join(", ") + "]";
+  }).join("\n");
+  const renderVisualBuilder = () => {
+    if (!visualList) return;
+    const canEditPipelines = Boolean(pipelineEditor && !pipelineEditor.readOnly);
+    fillSelect(visualReceiver, componentCatalog.receivers, "Select receiver");
+    fillSelect(visualProcessors, componentCatalog.processors, "");
+    fillSelect(visualExporter, componentCatalog.exporters, "Select exporter");
+    if (visualAdd) visualAdd.disabled = !canEditPipelines;
+    const pipelines = visualModel.pipelines || [];
+    if (!pipelines.length) {
+      visualList.innerHTML = '<div class="visual-empty">No service pipelines yet. Define receiver and exporter components in YAML Editor, then add the first pipeline here.</div>';
+    } else {
+      visualList.innerHTML = pipelines.map((pipeline, index) => '<article class="visual-pipeline"><div class="visual-pipeline-head"><div><strong>' + escapeHTML(pipeline.name) + '</strong><div class="tiny">' + escapeHTML(pipeline.signal) + ' telemetry</div></div>' + (canEditPipelines ? '<button class="btn" type="button" data-remove-visual-pipeline="' + index + '">Remove</button>' : '') + '</div><div class="visual-flow"><div class="visual-node"><div class="visual-node-title">Collect</div><div class="visual-node-items">' + chips(pipeline.receivers, "No receivers") + '</div></div><div class="visual-arrow" aria-hidden="true">→</div><div class="visual-node"><div class="visual-node-title">Process</div><div class="visual-node-items">' + chips(pipeline.processors, "No processors") + '</div></div><div class="visual-arrow" aria-hidden="true">→</div><div class="visual-node"><div class="visual-node-title">Send</div><div class="visual-node-items">' + chips(pipeline.exporters, "No exporters") + '</div></div></div></article>').join("");
+    }
+    visualList.querySelectorAll("[data-remove-visual-pipeline]").forEach((button) => button.addEventListener("click", () => {
+      visualModel.pipelines.splice(Number(button.dataset.removeVisualPipeline), 1);
+      pipelineEditor.value = pipelineYAML();
+      pipelineEditor.dispatchEvent(new Event("input", {bubbles: true}));
+      renderVisualBuilder();
+    }));
+    const warnings = [...(visualModel.warnings || [])];
+    if (!canEditPipelines) warnings.unshift("Service pipelines are read-only under the active group policy.");
+    if (visualWarnings) visualWarnings.textContent = warnings.join(" · ");
+  };
+  const topologyNode = (name, kind) => {
+    const connectors = componentCatalog.connectors || [];
+    const nodeKind = connectors.includes(name) ? "connector" : kind;
+    return '<div class="topology-node ' + nodeKind + '"><div class="topology-node-kind">' + escapeHTML(nodeKind) + '</div><div class="topology-node-name">' + escapeHTML(name) + '</div></div>';
+  };
+  const topologyStage = (names, kind) => '<div class="topology-stage">' +
+    (names || []).map((name) => topologyNode(name, kind)).join("") + '</div>';
+  const renderTopology = () => {
+    if (!topologyCanvas || !topologySummary) return;
+    const signal = topologyFilter ? topologyFilter.value : "all";
+    const pipelines = (visualModel.pipelines || []).filter((pipeline) => signal === "all" || pipeline.signal === signal);
+    const unique = (kind) => new Set((visualModel.pipelines || []).flatMap((pipeline) => pipeline[kind] || [])).size;
+    const stats = [
+      ["Pipelines", (visualModel.pipelines || []).length],
+      ["Receivers", unique("receivers")],
+      ["Processors", unique("processors")],
+      ["Exporters", unique("exporters")],
+      ["Extensions", (visualModel.extensions || []).length]
+    ];
+    topologySummary.innerHTML = stats.map((stat) => '<div class="topology-stat"><strong>' + stat[1] + '</strong><span>' + stat[0] + '</span></div>').join("");
+    if (!pipelines.length) {
+      topologyCanvas.innerHTML = '<div class="visual-empty">No pipelines match this signal filter.</div>';
+    } else {
+      topologyCanvas.innerHTML = pipelines.map((pipeline) => {
+        const stages = [topologyStage(pipeline.receivers, "receiver")];
+        if (pipeline.processors && pipeline.processors.length) stages.push(topologyStage(pipeline.processors, "processor"));
+        stages.push(topologyStage(pipeline.exporters, "exporter"));
+        return '<article class="topology-pipeline"><div class="topology-pipeline-head"><strong>' + escapeHTML(pipeline.name) + '</strong><span class="topology-signal">' + escapeHTML(pipeline.signal) + '</span></div><div class="topology-flow">' + stages.join('<div class="topology-edge" aria-hidden="true">→</div>') + '</div></article>';
+      }).join("");
+    }
+    if (topologyWarnings) topologyWarnings.textContent = (visualModel.warnings || []).join(" · ");
+  };
+  if (topologyFilter) topologyFilter.addEventListener("change", renderTopology);
+
+  const setMode = async (mode) => {
+    if (mode === "visual" || mode === "topology") {
+      try {
+        const result = await composeAndValidate();
+        visualModel = result.pipeline || {pipelines: [], warnings: []};
+        componentCatalog = result.components || {receivers: [], processors: [], exporters: [], connectors: []};
+        if (mode === "visual") renderVisualBuilder();
+        if (mode === "topology") renderTopology();
+      } catch (error) {
+        showError(error.message);
+        return;
+      }
+    }
+    modeButtons.forEach((button) => {
+      const active = button.dataset.editorModeButton === mode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    modePanels.forEach((panel) => panel.hidden = panel.dataset.editorModePanel !== mode);
+  };
+  modeButtons.forEach((button) => button.addEventListener("click", () => setMode(button.dataset.editorModeButton)));
+  if (visualAdd) visualAdd.addEventListener("click", async () => {
+    clearValidation();
+    if (!pipelineEditor || pipelineEditor.readOnly) {
+      showError("Service pipelines are read-only under the active group policy.");
+      return;
+    }
+    const signal = visualSignal ? visualSignal.value : "";
+    const suffix = visualName ? visualName.value.trim() : "";
+    const receiver = visualReceiver ? visualReceiver.value : "";
+    const exporter = visualExporter ? visualExporter.value : "";
+    if (!receiver || !exporter) {
+      showError("Select both a receiver and an exporter before adding a pipeline.");
+      return;
+    }
+    if (suffix && !/^[A-Za-z0-9._-]+$/.test(suffix)) {
+      showError("Pipeline names may contain only letters, numbers, dots, underscores and hyphens.");
+      return;
+    }
+    const name = suffix ? signal + "/" + suffix : signal;
+    if ((visualModel.pipelines || []).some((pipeline) => pipeline.name === name)) {
+      showError("A pipeline named " + name + " already exists.");
+      return;
+    }
+    const processors = visualProcessors
+      ? Array.from(visualProcessors.selectedOptions).map((option) => option.value)
+      : [];
+    visualModel.pipelines = [...(visualModel.pipelines || []), {
+      name: name,
+      signal: signal,
+      receivers: [receiver],
+      processors: processors,
+      exporters: [exporter]
+    }];
+    pipelineEditor.value = pipelineYAML();
+    pipelineEditor.dispatchEvent(new Event("input", {bubbles: true}));
+    if (visualName) visualName.value = "";
+    try {
+      const result = await composeAndValidate();
+      visualModel = result.pipeline || visualModel;
+      componentCatalog = result.components || componentCatalog;
+      renderVisualBuilder();
+    } catch (error) {
+      showError(error.message);
+    }
+  });
+
+  const clearValidation = () => {
+    errorBox.hidden = true;
+    errorBox.textContent = "";
+    validated = false;
+  };
+  editors.forEach((editor) => editor.addEventListener("input", () => {
+    clearValidation();
+    updateActionState();
+    scheduleReferenceValidation();
+  }));
+  updateActionState();
+
+  const showError = (message) => {
+    errorBox.textContent = message || "Configuration validation failed.";
+    errorBox.hidden = false;
+    errorBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+  const sections = () => Object.fromEntries(
+    editors.map((editor) => [editor.dataset.sectionKey, editor.value])
+  );
+  const composeAndValidate = async () => {
+    const response = await fetch("/api/v1/configurations/sections/compose", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ baseline: baseline.value, sections: sections(), group_id: new URL(form.action, window.location.href).pathname.split("/").filter(Boolean).pop() || "" })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.validation || !result.validation.valid) {
+      throw new Error((result.validation && result.validation.error) || "Configuration validation failed.");
+    }
+    content.value = result.content;
+    if (preview) preview.value = result.content;
+    return result;
+  };
+  const goToDiagnostic = (diagnostic) => {
+    const editor = editors.find((candidate) => candidate.dataset.sectionKey === diagnostic.section);
+    if (!editor) return;
+    setMode("yaml");
+    selectTab(diagnostic.section);
+    const lines = editor.value.split("\n");
+    const line = Math.max(1, Math.min(Number(diagnostic.line) || 1, lines.length));
+    const column = Math.max(1, Number(diagnostic.column) || 1);
+    let lineStart = 0;
+    for (let index = 0; index < line - 1; index += 1) lineStart += lines[index].length + 1;
+    const start = Math.min(lineStart + column - 1, lineStart + lines[line - 1].length);
+    const end = lineStart + lines[line - 1].length;
+    editor.focus();
+    editor.setSelectionRange(start, end);
+    const lineHeight = parseFloat(window.getComputedStyle(editor).lineHeight) || 18;
+    editor.scrollTop = Math.max(0, (line - 3) * lineHeight);
+  };
+  const referenceSection = (kind) => ({receiver: "receivers", processor: "processors", exporter: "exporters", extension: "extensions"})[kind] || "";
+  const canCreateReference = (diagnostic) => {
+    const section = referenceSection(diagnostic.reference_type);
+    const editor = editors.find((candidate) => candidate.dataset.sectionKey === section);
+    if (!section || !editor || editor.readOnly) return false;
+    const allowed = selectedDistributionComponents(section);
+    return !allowed || allowed.has(String(diagnostic.reference_name || "").split("/", 1)[0]);
+  };
+  const createMissingReference = (diagnostic) => {
+    const section = referenceSection(diagnostic.reference_type);
+    const editor = editors.find((candidate) => candidate.dataset.sectionKey === section);
+    if (!editor || editor.readOnly || !diagnostic.reference_name) return;
+    const suffix = editor.value && !editor.value.endsWith("\n") ? "\n" : "";
+    editor.value += suffix + diagnostic.reference_name + ": {}\n";
+    editor.dispatchEvent(new Event("input", {bubbles: true}));
+    selectTab(section);
+    editor.focus();
+    editor.setSelectionRange(editor.value.length, editor.value.length);
+  };
+  const removeInvalidReference = (diagnostic) => {
+    const editor = editors.find((candidate) => candidate.dataset.sectionKey === diagnostic.section);
+    if (!editor || editor.readOnly || !diagnostic.reference_name) return;
+    const lines = editor.value.split("\n");
+    const index = Math.max(0, Math.min((Number(diagnostic.line) || 1) - 1, lines.length - 1));
+    const name = diagnostic.reference_name;
+    if (/^\s*-\s*/.test(lines[index])) {
+      lines.splice(index, 1);
+    } else if (lines[index].includes("[") && lines[index].includes("]")) {
+      lines[index] = lines[index].replace(/\[([^\]]*)\]/, (_match, values) => "[" + values.split(",").map((value) => value.trim()).filter((value) => value.replace(/^['\"]|['\"]$/g, "") !== name).join(", ") + "]");
+    } else {
+      lines[index] = lines[index].replace(name, "");
+    }
+    editor.value = lines.join("\n");
+    editor.dispatchEvent(new Event("input", {bubbles: true}));
+    selectTab(diagnostic.section);
+    editor.focus();
+  };
+  const renderReferenceStatus = (state, message, diagnostics) => {
+    if (!referenceStatus) return;
+    referenceStatus.hidden = !message;
+    referenceStatus.dataset.state = state;
+    if (!diagnostics || !diagnostics.length) {
+      referenceStatus.textContent = message;
+      return;
+    }
+    referenceStatus.innerHTML = '<div class="diagnostic-list">' + diagnostics.map((diagnostic, index) =>
+      '<div class="diagnostic-item"><div class="diagnostic-message">' + escapeHTML(diagnostic.message || message) + '<span class="diagnostic-location">' + escapeHTML(diagnostic.section_title || diagnostic.section) + ' · line ' + Number(diagnostic.line || 1) + ', column ' + Number(diagnostic.column || 1) + '</span></div><div class="diagnostic-actions"><button class="diagnostic-action" type="button" data-diagnostic-index="' + index + '">Go to error</button>' + (diagnostic.code === "undefined_reference" ? '<button class="diagnostic-action secondary" type="button" data-create-reference="' + index + '"' + (canCreateReference(diagnostic) ? '' : ' disabled title="Component is unavailable in the selected package or section is read-only"') + '>Create component</button><button class="diagnostic-action secondary" type="button" data-remove-reference="' + index + '">Remove reference</button>' : '') + '</div></div>'
+    ).join("") + '</div>';
+    referenceStatus.querySelectorAll("[data-diagnostic-index]").forEach((button) =>
+      button.addEventListener("click", () => goToDiagnostic(diagnostics[Number(button.dataset.diagnosticIndex)]))
+    );
+    referenceStatus.querySelectorAll("[data-create-reference]").forEach((button) =>
+      button.addEventListener("click", () => createMissingReference(diagnostics[Number(button.dataset.createReference)]))
+    );
+    referenceStatus.querySelectorAll("[data-remove-reference]").forEach((button) =>
+      button.addEventListener("click", () => removeInvalidReference(diagnostics[Number(button.dataset.removeReference)]))
+    );
+  };
+  const validateReferences = async (requestID) => {
+    const response = await fetch("/api/v1/configurations/sections/references", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({baseline: baseline.value, sections: sections()})
+    });
+    const result = await response.json().catch(() => ({}));
+    if (requestID !== referenceValidationRequest) return;
+    if (response.ok && result.valid) {
+      const warningCount = (result.warnings || []).length;
+      if (warningCount) {
+        renderReferenceStatus("warning", "All references resolve. " + warningCount + " defined component(s) are not connected to an active pipeline.");
+      } else {
+        renderReferenceStatus("valid", "All pipeline and service references resolve to compatible defined components.");
+      }
+      return;
+    }
+    const message = result.error || "Reference validation is unavailable.";
+    if (/references undefined (receiver|processor|exporter|extension)/i.test(message)) {
+      renderReferenceStatus("invalid", message, result.diagnostics || []);
+    } else {
+      renderReferenceStatus("paused", "Reference check paused until the current YAML is complete.");
+    }
+  };
+  const scheduleReferenceValidation = () => {
+    if (!referenceStatus) return;
+    window.clearTimeout(referenceValidationTimer);
+    const requestID = ++referenceValidationRequest;
+    renderReferenceStatus("checking", "Checking component references…");
+    referenceValidationTimer = window.setTimeout(() => {
+      validateReferences(requestID).catch(() => {
+        if (requestID === referenceValidationRequest) {
+          renderReferenceStatus("paused", "Reference validation is temporarily unavailable.");
+        }
+      });
+    }, 650);
+  };
+
+  if (previewButton) previewButton.addEventListener("click", async () => {
+    clearValidation();
+    previewButton.disabled = true;
+    try {
+      await composeAndValidate();
+      selectTab("complete_preview");
+    } catch (error) {
+      showError(error.message);
+    } finally {
+      updateActionState();
+    }
+  });
+
+  form.addEventListener("submit", async (event) => {
+    if (validated) return;
+    event.preventDefault();
+    clearValidation();
+    if (submitButton) submitButton.disabled = true;
+    try {
+      await composeAndValidate();
+      validated = true;
+      form.requestSubmit(submitButton);
+    } catch (error) {
+      showError(error.message || "Unable to validate the configuration.");
+    } finally {
+      updateActionState();
+    }
+  });
+})();`
+
+const upcomingHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OTelPlane</title><style>` + controlPlaneCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">OTelPlane / {{.Title}}</div><div class="pagetitle">{{.Title}}</div><div class="subtitle">{{.Subtitle}}</div></div><div class="topactions"><div class="connection"><span class="dot"></span>OpAMP listening</div></div></header><div class="content"><section class="page-description" aria-label="About this capability"><div class="page-description-icon" aria-hidden="true">i</div><div><div class="page-description-title">About {{.Title}}</div><p>{{.Subtitle}} This capability is clearly marked Upcoming and cannot make changes until its operational and security contracts are implemented.</p></div></section><section class="card"><div class="cardhead"><div><div class="cardtitle">Capability status</div><div class="cardsub">OTelPlane community preview</div></div><span class="badge warn">Upcoming</span></div><div class="cardbody"><h2 style="margin-top:0">Not production-ready yet</h2><p class="subtitle">{{.Upcoming}}</p>{{if .Current}}<div class="groupselector"><strong>Available today</strong><div class="tiny" style="margin-top:7px">{{.Current}}</div></div>{{end}}<p class="tiny">This page is intentionally visible so the product navigation reflects the planned control-plane experience without presenting unfinished functionality as available.</p></div></section></div></main></div></body></html>`
+
+var upcomingPage = template.Must(template.New("upcoming").Parse(upcomingHTML))
+
+// registerUIRoutes serves the dashboard and informational placeholder pages that are not backed by dedicated resource handlers.
+func registerUIRoutes(mux *http.ServeMux, _ ...any) {
+	mux.HandleFunc("GET /assets/otelplane-logo-transparent.png", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		_, _ = w.Write(otelPlaneLogoPNG)
+	})
+	mux.HandleFunc("GET /assets/configuration-editor.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(configurationEditorJS))
+	})
+	mux.HandleFunc("GET /assets/group-selectors.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(groupSelectorsJS))
+	})
+
+	mux.HandleFunc("GET /assets/theme.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(themeJS))
+	})
+
+	pages := map[string]upcomingView{
+		"/ai-insights": {Page: "ai-insights", Title: "AI Insights", Subtitle: "Explore explainable fleet risks, anomalies and operational recommendations.", Current: "OTelPlane already records configuration state, validation results, drift, deployment outcomes and audit history—the evidence future analysis will use.", Upcoming: "Contributor opportunities include fleet anomaly detection, configuration risk scoring, capacity and cardinality recommendations, failure correlation and explainable remediation suggestions. AI output will remain advisory and subject to OTelPlane validation, RBAC and approval controls."},
+		"/mcp":         {Page: "mcp", Title: "MCP Server", Subtitle: "Connect AI assistants to governed OTelPlane diagnostics and workflows.", Current: "OTelPlane's validation, scoped ownership, approvals, rollback and audit records provide the safety boundaries required for future tool access.", Upcoming: "A future Model Context Protocol server could expose read-only fleet discovery and diagnostics first, followed by tightly scoped change proposals. Mutating operations will respect RBAC, validate before submission, require approval where configured and remain fully audited."},
+		"/pipelines":   {Page: "pipelines", Title: "Pipelines", Subtitle: "Visualize how telemetry is collected, processed and sent to destinations.", Upcoming: "Pipeline topology, receiver/processor/exporter visualization and policy management are Upcoming."},
+		"/settings":    {Page: "settings", Title: "Settings", Subtitle: "Manage OTelPlane identity, authorization, policies and integrations.", Upcoming: "UI-managed platform settings, identity, RBAC and integration configuration are Upcoming."},
+	}
+	for path, view := range pages {
+		path, view := path, view
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != path {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_ = upcomingPage.Execute(w, view)
+		})
+	}
+}
+
+const detailCSS = sectionEditorCSS + `
+.detailgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.wide{grid-column:1/-1}.kv{display:grid;grid-template-columns:145px minmax(0,1fr);gap:9px 14px}.kv>span:nth-child(odd){color:var(--muted)}.chips{display:flex;gap:7px;flex-wrap:wrap}.configeditor{display:grid;gap:12px}.configerror{padding:12px 14px;border:1px solid #a63d4a;background:#35151b;border-radius:8px;color:#ff9dab;font-weight:650}.configerror[hidden]{display:none}.configeditor textarea{width:100%;min-height:440px;resize:vertical;background:#07111e;border:1px solid #29405f;border-radius:8px;padding:13px;color:#d8e5ff;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.chip{background:#152237;border:1px solid #293c57;border-radius:999px;padding:5px 9px;font-size:12px}.detailactions{display:flex;gap:8px;flex-wrap:wrap}.detailform{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.detailform label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:12px}.detailform .input{min-width:190px}.notice{padding:12px 14px;border:1px solid #704e26;background:#382817;border-radius:8px;color:#ffd08a;margin-bottom:14px}pre{margin:0;white-space:pre-wrap;overflow:auto;background:#07111e;border:1px solid #203047;border-radius:8px;padding:13px;max-height:430px;color:#b9caf0;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}.driftitem{padding:10px 0;border-bottom:1px solid #1d2c40}.driftitem:last-child{border:0}@media(max-width:900px){.detailgrid{grid-template-columns:1fr}.wide{grid-column:auto}.kv{grid-template-columns:1fr}}
+`
+
+const agentDetailHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OTelPlane Agent</title><style>` + controlPlaneCSS + detailCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main">
+<header class="top"><div><div class="crumb">OTelPlane / Fleet / Agent</div><div class="pagetitle">{{.Agent.Name}}</div><div class="subtitle"><span class="code">{{.Agent.InstanceUID}}</span></div></div><div class="topactions"><div class="connection"><span class="dot"></span>OpAMP listening</div><a class="btn" href="/agents">← Fleet</a></div></header>
+<div class="content">{{if .Error}}<div class="notice">⚠ {{.Error}}</div>{{end}}{{if .DisplayNameSaved}}<div class="notice">✓ Collector display name saved. Protocol identity and reported metadata were not changed.</div>{{end}}{{if .AuthoritySaved}}<div class="notice">✓ Collector management authority saved. Future lifecycle validation will enforce this boundary.</div>{{end}}{{if .ConfigurationSaved}}<div class="notice">✓ Configuration version validated and saved. It is now available for group deployment preview. <code>{{.ConfigurationSaved}}</code></div>{{end}}
+<section class="page-description" aria-labelledby="agent-page-description"><div class="page-description-icon" aria-hidden="true">i</div><div><div class="page-description-title" id="agent-page-description">About this Collector</div><p>Investigate this OpenTelemetry Collector's OTelPlane identity, reported runtime metadata, connectivity, health and management capabilities. Review its ownership groups and labels, choose the permitted management authority, compare desired and effective configuration, identify drift, and inspect configuration deployment history. Display-name changes affect only the OTelPlane alias and never change the Collector's OpAMP identity.</p></div></section>
+<div class="sectionhead"><div><div class="eyebrow">Managed agent</div><div class="sectiontitle">Agent details</div><div class="subtitle">Runtime identity, health, metadata and configuration state.</div></div><div class="detailactions">{{if and .Agent.Connected .Agent.Healthy}}<span class="badge ok">● Healthy</span>{{else if .Agent.Connected}}<span class="badge warn">● Warning</span>{{else}}<span class="badge off">● Offline</span>{{end}}{{if .RemoteConfigSupported}}<span class="badge ok">Remote config supported</span>{{else}}<span class="badge warn">Remote config unavailable</span>{{end}}</div></div>
+<div class="detailgrid">
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Overview</div><div class="cardsub">OTelPlane identity and reported runtime metadata</div></div></div><div class="cardbody"><div class="kv"><span>Display name</span><span>{{if .Agent.DisplayName}}{{.Agent.DisplayName}}{{else}}Using reported name{{end}}</span><span>Reported hostname</span><span>{{.Agent.Hostname}}</span><span>Stable agent ID</span><span class="code">{{index .Agent.Attributes "otelplane.agent.id"}}</span><span>Instance UID</span><span class="code">{{.Agent.InstanceUID}}</span><span>Type</span><span>{{.Agent.Type}}</span><span>Version</span><span>{{.Agent.Version}}</span><span>OS / Arch</span><span>{{index .Agent.Attributes "os.type"}} / {{index .Agent.Attributes "host.arch"}}</span><span>Runtime</span><span>{{.Agent.Deployment.Runtime}}</span><span>Cluster</span><span>{{.Agent.Deployment.Cluster}}</span><span>Status</span><span>{{.Agent.Status}}</span><span>Last seen</span><span>{{.Agent.LastSeen}}</span></div>{{if .CanManageIdentity}}<form class="detailform" method="post" action="/agents/{{.Agent.InstanceUID}}/display-name" style="margin-top:16px"><label>Collector display name<input class="input" name="display_name" value="{{.Agent.DisplayName}}" placeholder="payments-prod-collector-01" minlength="3" maxlength="63" pattern="[a-z0-9]+(-[a-z0-9]+)*" required></label><button class="btn primary" type="submit">Save display name</button></form><div class="tiny" style="margin-top:8px">Format: application-environment-role-number. This alias does not change OpAMP identity.</div>{{end}}</div></section>
+<section class="card"><div class="cardhead"><div class="cardtitle">Capabilities</div></div><div class="cardbody">{{if .Agent.Capabilities}}<div class="chips">{{range .Agent.Capabilities}}<span class="chip">{{.}}</span>{{end}}</div>{{else}}<div class="tiny">No capabilities reported.</div>{{end}}</div></section>
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Management authority</div><div class="cardsub">Explicit boundary for Collector configuration and process lifecycle</div></div></div><div class="cardbody"><div class="kv"><span>Current authority</span><span>{{if .Agent.ManagementAuthority}}{{.Agent.ManagementAuthority}}{{else}}observe_only{{end}}</span><span>Updated by</span><span>{{if .Agent.AuthorityUpdatedBy}}{{.Agent.AuthorityUpdatedBy}}{{else}}Not explicitly assigned{{end}}</span><span>Updated at</span><span>{{if .Agent.AuthorityUpdatedAt}}{{.Agent.AuthorityUpdatedAt}}{{else}}—{{end}}</span></div><div class="notice" style="margin-top:12px">Group ownership controls who may target this Collector. Management authority separately controls what OTelPlane may do to its process.</div>{{if .CanManageIdentity}}<form class="detailform" method="post" action="/agents/{{.Agent.InstanceUID}}/management-authority" style="margin-top:14px"><label>Authority<select class="select" name="management_authority" required><option value="observe_only">Observe only</option><option value="configuration_managed">Configuration managed</option><option value="lifecycle_managed">Lifecycle managed</option></select></label><label><input type="checkbox" name="confirm_lifecycle" value="yes"> I confirm OTelPlane is the authoritative lifecycle manager for this Collector.</label><button class="btn primary" type="submit">Save management authority</button></form>{{end}}</div></section>
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Ownership identity</div><div class="cardsub">Flexible managed key/value metadata</div></div></div><div class="cardbody">{{if .GroupIdentity}}<div class="chips">{{range $k,$v := .GroupIdentity}}<span class="chip"><span class="code">{{$k}}={{$v}}</span></span>{{end}}</div>{{else}}<div class="tiny">No ownership identity available.</div>{{end}}{{if .UnknownGroupFields}}<div class="notice" style="margin-top:12px">Malformed group metadata was reported and is not used for membership.</div>{{end}}</div></section>
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Groups</div><div class="cardsub">Dynamic membership</div></div></div><div class="cardbody">{{if .Groups}}<div class="chips">{{range .Groups}}<a class="chip" href="/groups/{{.ID}}">{{.Name}}</a>{{end}}</div>{{else}}<div class="tiny">This agent does not match an active group.</div>{{end}}{{if .AllGroups}}<form class="detailform" method="post" action="/agents/{{.Agent.InstanceUID}}/group" style="margin-top:14px"><label>Assign controlled identity<select class="select" name="group_id" required><option value="">Select group</option>{{range .AllGroups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><button class="btn" type="submit">Assign</button></form>{{end}}</div></section>
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Labels</div><div class="cardsub">OTelPlane-managed metadata</div></div></div><div class="cardbody">{{if .EffectiveLabels}}<div class="chips">{{range $k,$v := .EffectiveLabels}}<span class="chip"><span class="code">{{$k}}={{$v}}</span></span>{{end}}</div>{{else}}<div class="tiny">No labels available.</div>{{end}}<form class="detailform" method="post" action="/agents/{{.Agent.InstanceUID}}/label" style="margin-top:14px"><label>Key<input class="input" name="key" placeholder="team" required></label><label>Value<input class="input" name="value" placeholder="payments" required></label><button class="btn" type="submit">＋ Add label</button></form></div></section>
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Reported OTel attributes</div><div class="cardsub">Raw AgentDescription metadata</div></div></div><div class="cardbody">{{if .Agent.Attributes}}<div class="chips">{{range $k,$v := .Agent.Attributes}}<span class="chip"><span class="code">{{$k}}={{$v}}</span></span>{{end}}</div>{{else}}<div class="tiny">No reported attributes available.</div>{{end}}</div></section>
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Deployment status</div><div class="cardsub">Latest configuration delivery state</div></div></div><div class="cardbody">{{if .DeploymentSummary.LastDeployment}}<div class="kv"><span>Current deployed</span><span>{{if .DeploymentSummary.CurrentDeployedVersion}}v{{.DeploymentSummary.CurrentDeployedVersion}}{{else}}Unknown{{end}}</span><span>Last deployment</span><span>{{.DeploymentSummary.LastDeployment.ConfigurationName}} v{{.DeploymentSummary.LastDeployment.ConfigurationVersion}}</span><span>Status</span><span>{{.DeploymentSummary.LastDeployment.Status}}</span><span>Duration</span><span>{{if .DeploymentSummary.LastDeploymentDuration}}{{.DeploymentSummary.LastDeploymentDuration}}{{else}}—{{end}}</span></div>{{else}}<div class="tiny">No OTelPlane deployment history recorded yet.</div>{{end}}</div></section>
+<section class="card"><div class="cardhead"><div><div class="cardtitle">Configuration drift</div><div class="cardsub">Desired versus effective state</div></div></div><div class="cardbody"><div class="kv"><span>Status</span><span>{{.Drift.Status}}</span>{{if .Drift.Reason}}<span>Reason</span><span>{{.Drift.Reason}}</span>{{end}}</div>{{if .Drift.Differences}}<div style="margin-top:12px">{{range .Drift.Differences}}<div class="driftitem"><span class="code">{{.Path}}</span> <span class="amber">{{.Kind}}</span><div class="tiny">Desired: {{printf "%v" .Desired}}</div><div class="tiny">Effective: {{printf "%v" .Effective}}</div></div>{{end}}</div>{{end}}</div></section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Configuration state</div><div class="cardsub">Central desired version compared with the agent-reported version</div></div></div><div class="cardbody" style="display:grid;grid-template-columns:1fr 1fr;gap:14px"><div><div class="agentname" style="margin-bottom:8px">Central version</div>{{if .DesiredConfig}}<div class="tiny" style="margin-bottom:8px">{{.DesiredConfig.Name}} · version {{.DesiredConfig.Version}}</div><pre>{{.DesiredConfig.Content}}</pre>{{else}}<div class="tiny">No desired OTelPlane configuration.</div>{{end}}</div><div><div class="agentname" style="margin-bottom:8px">Agent version</div><div class="tiny" style="margin-bottom:8px">Effective configuration reported through OpAMP</div>{{if .EffectiveConfig}}<pre>{{.EffectiveConfig}}</pre>{{else}}<div class="tiny">No effective configuration reported yet.</div>{{end}}</div></div></section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Deployment history</div><div class="cardsub">Latest configuration attempts for this agent</div></div></div>{{if .Deployments}}<div style="overflow:auto"><table><thead><tr><th>Configuration</th><th>Action</th><th>Status</th><th>Created</th><th>Applied / Failed</th></tr></thead><tbody>{{range .Deployments}}<tr><td><strong>{{.ConfigurationName}} v{{.ConfigurationVersion}}</strong><div class="tiny code">{{.ID}}</div></td><td>{{.Action}}</td><td>{{.Status}}{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</td><td>{{.CreatedAt}}</td><td>{{if .AppliedAt}}{{.AppliedAt}}{{else if .FailedAt}}{{.FailedAt}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No deployment history recorded.</div>{{end}}</section>
+</div></div></main></div></body></html>`
+
+var agentDetailPage = template.Must(template.New("agent-detail-modern").Parse(agentDetailHTML))
+
+const groupDetailBaseHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OTelPlane Group</title><style>` + controlPlaneCSS + detailCSS + pipelineCSS + sectionEditorCSS + `</style></head><body><div class="shell">` + sideNav + `<main class="main">
+<header class="top"><div><div class="crumb">OTelPlane / Groups &amp; Labels / Group</div><div class="pagetitle">{{.Group.Name}}</div><div class="subtitle">Ownership group · backend ID <span class="code">{{.Group.ID}}</span></div></div><div class="topactions"><a class="btn" href="/groups">← Groups &amp; Labels</a>{{if .CanManage}}<a class="btn" href="/groups/{{.Group.ID}}/collectors">Manage Collectors</a><a class="btn" href="/groups/{{.Group.ID}}/secrets">Secrets</a><details class="action-menu"><summary class="btn icon-only" aria-label="Group actions">•••</summary><div class="action-menu-panel"><a href="/groups/{{.Group.ID}}?edit=1#edit-group">Edit group</a><form method="post" action="/groups/{{.Group.ID}}"><input type="hidden" name="action" value="{{if .Group.Enabled}}disable{{else}}enable{{end}}"><button type="submit">{{if .Group.Enabled}}Disable group{{else}}Enable group{{end}}</button></form>{{if .Members}}<div class="action-warning" role="status">Deletion blocked: {{len .Members}} Collector(s) still belong to this group{{if gt .ActiveMembers 0}}, including {{.ActiveMembers}} active{{end}}. Reassign or remove them first.</div>{{else}}<form method="post" action="/groups/{{.Group.ID}}" onsubmit="return confirm('Delete this empty ownership group? This cannot be undone.')"><input type="hidden" name="action" value="delete"><button class="danger-link" type="submit">Delete group</button></form>{{end}}</div></details>{{end}}</div></header>
+<div class="content"><section class="page-description" aria-label="About this group"><div class="page-description-icon" aria-hidden="true">i</div><div><div class="page-description-title">About this ownership group</div><p>Review the Collectors, owners, members, labels and selectors governed by this group. Manage Collector membership and protected secrets, create immutable configuration versions, preview target readiness and drift, request approval, and inspect deployment history without crossing the group's authorization boundary.</p></div></section>{{if .Error}}<div class="notice">⚠ {{.Error}}</div>{{end}}{{if .ConfigurationSaved}}<div class="notice">✓ Configuration version validated and saved. <code>{{.ConfigurationSaved}}</code></div>{{end}}{{if .RequestCreated}}<div class="notice">✓ Deployment request saved and pending approval. <code>{{.RequestCreated}}</code></div>{{end}}{{if .RequestUpdated}}<div class="notice">✓ Deployment request updated: <strong>{{.RequestUpdated}}</strong>.</div>{{end}}
+<div class="sectionhead"><div><div class="eyebrow">Group identity</div><div class="sectiontitle">{{.Group.Name}}</div><div class="subtitle">Selector-driven membership managed by OTelPlane.</div></div><div>{{if .Group.Enabled}}<span class="badge ok">● Active</span>{{else}}<span class="badge off">Disabled</span>{{end}}</div></div>
+<div class="detailgrid">
+{{if and .CanManage .ShowEdit}}<section class="card wide" id="edit-group"><div class="cardhead"><div><div class="cardtitle">Edit ownership group</div><div class="cardsub">Change the display name or exact-match managed metadata conditions</div></div><a href="/groups/{{.Group.ID}}" class="btn">Close</a></div><div class="cardbody"><form method="post" action="/groups/{{.Group.ID}}" data-selector-form data-group-id="{{.Group.ID}}"><input type="hidden" name="action" value="update"><div class="detailform"><label>Group name<input class="input" name="name" value="{{.Group.Name}}" required maxlength="120"></label></div><div class="selector-rows" data-selector-rows>{{range $key,$value := .Group.Selector}}<div class="detailform selector-row"><input class="input" name="selector_key" value="{{$key}}" aria-label="Selector key" required><input class="input" name="selector_value" value="{{$value}}" aria-label="Selector value" required><button class="btn" type="button" data-remove-selector aria-label="Remove condition">−</button></div>{{end}}</div><div class="detailactions" style="margin-top:12px"><button class="btn" type="button" data-add-selector>＋ Add condition</button><button class="btn" type="button" data-preview-selector>Preview membership</button><button class="btn primary" type="submit">Validate and save</button></div><div class="tiny" data-selector-preview aria-live="polite"></div><p class="tiny">Changing a selector immediately recalculates membership. OTelPlane rejects overlap with another active ownership group.</p></form></div></section>{{end}}
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Create configuration version</div><div class="cardsub">The latest successfully deployed version is loaded by default</div></div><div class="topactions"><a class="btn" href="/blueprints/templates">Use Template</a><a class="btn" href="/blueprints?group_id={{.Group.ID}}">Use Blueprint</a><a class="btn" href="/migration?group_id={{.Group.ID}}">Import existing configuration</a></div></div><div class="cardbody">{{if .EditorError}}<div class="configerror" role="alert">{{.EditorError}}</div>{{end}}<div id="configuration-validation-error" class="configerror" role="alert" aria-live="polite" hidden></div>{{if .EditorVersions}}<form class="detailform" method="get" action="/groups/{{.Group.ID}}"><label>Base configuration version<select class="select" name="editor_base" onchange="this.form.submit()">{{range .EditorVersions}}<option value="{{.ID}}" {{if eq .ID $.EditorBaseID}}selected{{end}}>{{.Name}} v{{.Version}}{{if eq .ID $.EditorBaseID}} · selected{{end}}</option>{{end}}</select></label><noscript><button class="btn" type="submit">Load version</button></noscript></form><p class="tiny">OTelPlane selects the latest successfully deployed version. Choose an older saved version only when intentionally creating from that baseline.</p>{{end}}<form id="configuration-editor-form" class="configeditor" method="post" action="/groups/{{.Group.ID}}" data-has-baseline="{{if .EditorBaseID}}true{{else}}false{{end}}"><input type="hidden" name="action" value="create_configuration"><input type="hidden" name="base_configuration_id" value="{{.EditorBaseID}}"><textarea id="configuration-baseline" hidden>{{.EditorBaseline}}</textarea><input type="hidden" id="configuration-content" name="content"><div class="detailform"><label>Configuration name<input class="input" name="name" value="{{.EditorName}}" required maxlength="160"></label><label>New version<input class="input" id="configuration-new-version" name="version" value="{{.EditorVersion}}" data-baseline-version="{{.EditorVersion}}" placeholder="Enter a new version after changing configuration" required maxlength="80"></label></div>{{if .EditorSections}}<div class="editor-mode-switch"><div><strong>Configuration editing mode</strong><div class="tiny">Build pipelines visually, inspect the validated topology, or use YAML for advanced Collector settings.</div></div><div class="editor-mode-actions" role="tablist" aria-label="Configuration editing mode"><button class="editor-mode-button active" type="button" role="tab" aria-selected="true" data-editor-mode-button="yaml">YAML Editor</button><button class="editor-mode-button" type="button" role="tab" aria-selected="false" data-editor-mode-button="visual">Visual Builder</button><button class="editor-mode-button" type="button" role="tab" aria-selected="false" data-editor-mode-button="topology">Topology</button></div></div><div class="yaml-builder" data-editor-mode-panel="yaml"><p class="tiny">Each tab displays the selected baseline section. OTelPlane adds its Collector key. A matching wrapper such as <span class="code">receivers:</span> is accepted and normalized, while a section pasted into the wrong tab is rejected. Start typing for suggestions, or press <span class="code">Ctrl+Space</span>; use <span class="code">Tab</span> or <span class="code">Enter</span> to complete. Pipeline and service references only suggest compatible components already defined in this configuration.</p><div id="configuration-reference-status" class="reference-status" role="status" aria-live="polite" hidden></div><div class="section-tabs" role="tablist">{{range $index,$section := .EditorSections}}<button class="section-tab {{if eq $index 0}}active{{end}}" type="button" role="tab" data-section-tab="{{$section.Key}}">{{$section.Title}}</button>{{end}}<button class="section-tab" type="button" role="tab" data-section-tab="complete_preview">Complete YAML</button></div>{{range $index,$section := .EditorSections}}<section class="section-panel {{if eq $index 0}}active{{end}}" data-section-panel="{{$section.Key}}"><div class="section-heading"><div><strong>{{$section.Title}}</strong><div class="tiny">{{$section.Description}}</div></div>{{if $section.Editable}}<span class="badge ok">Editable</span>{{else}}<span class="badge off">Read-only by Admin policy</span>{{end}}</div><textarea class="section-editor" name="section_{{$section.Key}}" data-section-key="{{$section.Key}}" spellcheck="false" {{if not $section.Editable}}readonly{{end}}>{{$section.Content}}</textarea></section>{{end}}<section class="section-panel" data-section-panel="complete_preview"><div class="section-heading"><div><strong>Complete Collector YAML</strong><div class="tiny">Generated and validated from all configuration sections.</div></div><span class="badge off">Generated preview</span></div><textarea id="configuration-preview" class="section-editor preview-editor" readonly spellcheck="false">{{.EditorBaseline}}</textarea></section></div><div id="configuration-visual-builder" class="visual-builder" data-editor-mode-panel="visual" hidden><div class="visual-toolbar"><label>Signal<select class="select" id="visual-signal"><option value="traces">Traces</option><option value="metrics">Metrics</option><option value="logs">Logs</option><option value="profiles">Profiles</option></select></label><label>Pipeline name<input class="input" id="visual-pipeline-name" maxlength="80" placeholder="application"></label><label>Receiver<select class="select" id="visual-receiver"></select></label><label>Processors<select class="select" id="visual-processors" multiple size="3"></select></label><label>Exporter<select class="select" id="visual-exporter"></select></label><button class="btn visual-add" id="visual-add-pipeline" type="button">＋ Add pipeline</button></div><div class="tiny">Component settings remain in YAML Editor. The visual builder connects components that are already defined and permitted by configuration policy.</div><div id="visual-pipeline-list" class="visual-pipelines" aria-live="polite"></div><div id="visual-builder-warnings" class="visual-warning"></div></div><div id="configuration-topology" class="topology-view" data-editor-mode-panel="topology" hidden><div class="topology-toolbar"><label>Filter by signal<select class="select" id="topology-signal-filter"><option value="all">All signals</option><option value="traces">Traces</option><option value="metrics">Metrics</option><option value="logs">Logs</option><option value="profiles">Profiles</option></select></label><div class="topology-legend" aria-label="Topology legend"><span class="topology-legend-item"><span class="topology-legend-dot receiver"></span>Receiver</span><span class="topology-legend-item"><span class="topology-legend-dot processor"></span>Processor</span><span class="topology-legend-item"><span class="topology-legend-dot exporter"></span>Exporter</span><span class="topology-legend-item"><span class="topology-legend-dot connector"></span>Connector</span></div></div><div id="configuration-topology-summary" class="topology-summary"></div><div class="tiny">Read-only topology generated from the validated Collector YAML. Switch to Visual Builder or YAML Editor to make changes.</div><div id="configuration-topology-canvas" class="topology-canvas" aria-live="polite"></div><div id="configuration-topology-warnings" class="visual-warning"></div></div><div class="detailactions"><button class="btn" id="configuration-preview-button" type="button">Validate and preview</button>{{if .CanEditConfiguration}}<button class="btn primary" type="submit">Validate and save version</button>{{end}}</div>{{end}}<p class="tiny">Change at least one editable section and enter a new version. Unchanged content or a reused version is rejected.</p></form></div></section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Saved configuration versions</div><div class="cardsub">Validated versions available to this group workflow</div></div></div>{{if .Configurations}}<div style="overflow:auto"><table><thead><tr><th>Name</th><th>Version</th><th>Hash</th><th>Created</th></tr></thead><tbody>{{range .Configurations}}<tr><td><a class="agentname" href="/configurations/{{.ID}}">{{.Name}}</a></td><td>{{.Version}}</td><td class="tiny code">{{.Hash}}</td><td>{{.CreatedAt}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No saved configuration versions yet.</div>{{end}}</section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Group deployment preview</div><div class="cardsub">Review the group, optional label filter, configuration flow and readiness before approval</div></div><span class="badge warn">Approval required</span></div><div class="cardbody"><form class="detailform" method="get" action="/groups/{{.Group.ID}}"><label>Saved configuration<select class="select" name="configuration_id" required><option value="">Select a version</option>{{range .Configurations}}<option value="{{.ID}}" {{if $.SelectedConfig}}{{if eq .ID $.SelectedConfig.ID}}selected{{end}}{{end}}>{{.Name}} v{{.Version}}</option>{{end}}</select></label><label>Optional label target<input class="input" name="labels" value="{{.LabelSelectorText}}" placeholder="team=payments, tier=backend"></label><button class="btn primary" type="submit">Preview targets</button></form><p class="tiny">Labels narrow this owned group using exact-match AND semantics. OTelPlane-managed labels override reported values. Leave empty to target every group member.</p>{{if not .Configurations}}<p class="tiny">Create and validate a configuration version in this group workspace first.</p>{{end}}
+{{if .SelectedConfig}}<p class="tiny">Selected: <a class="agentname" href="/configurations/{{.SelectedConfig.ID}}">{{.SelectedConfig.Name}} v{{.SelectedConfig.Version}}</a> · hash <code>{{.SelectedConfig.Hash}}</code></p>
+{{if .PipelineError}}<div class="configerror" role="alert">Unable to visualize this configuration: {{.PipelineError}}</div>{{else if .SelectedPipeline}}<div class="pipeline-list" style="margin:14px 0">{{range .SelectedPipeline.Pipelines}}<div class="pipeline"><div class="pipeline-title"><div><strong>{{.Name}}</strong><div class="tiny">{{.Signal}} telemetry</div></div><span class="badge ok">{{.Signal}}</span></div><div class="pipeline-flow" aria-label="{{.Name}} deployment pipeline"><div class="pipeline-stage"><div class="pipeline-stage-title">Collect</div><div class="pipeline-components">{{range .Receivers}}<span class="chip">{{.}}</span>{{end}}</div></div><div class="pipeline-arrow" aria-hidden="true">→</div><div class="pipeline-stage"><div class="pipeline-stage-title">Process</div>{{if .Processors}}<div class="pipeline-components">{{range .Processors}}<span class="chip">{{.}}</span>{{end}}</div>{{else}}<div class="pipeline-empty">No processors</div>{{end}}</div><div class="pipeline-arrow" aria-hidden="true">→</div><div class="pipeline-stage"><div class="pipeline-stage-title">Send</div><div class="pipeline-components">{{range .Exporters}}<span class="chip">{{.}}</span>{{end}}</div></div></div></div>{{end}}</div>{{if .SelectedPipeline.Warnings}}<div class="notice">⚠ {{len .SelectedPipeline.Warnings}} configuration warning(s). <a href="/configurations/{{.SelectedConfig.ID}}">View pipeline details</a>.</div>{{end}}{{end}}
+<p><strong>Target: {{.Group.Name}}</strong>{{if .LabelSelectorText}} · labels <span class="code">{{.LabelSelectorText}}</span>{{end}} · <strong>{{.Eligible}} ready</strong> of {{len .Preview}} matched members. The approval request records this exact membership, selector and readiness snapshot.</p>{{if .Preview}}<div style="overflow:auto"><table><thead><tr><th>Agent</th><th>UID</th><th>Match explanation</th><th>Readiness</th></tr></thead><tbody>{{range .Preview}}<tr><td>{{.Agent.Name}}</td><td class="code">{{.Agent.InstanceUID}}</td><td>{{.LabelMatch}}</td><td>{{.Reason}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="tiny">No Collectors match the group and label selector.</p>{{end}}{{if and .Group.Enabled (gt .Eligible 0)}}{{if .EligibleReviewers}}<form class="detailform" method="post" action="/groups/{{.Group.ID}}" style="margin-top:14px"><input type="hidden" name="action" value="request_deployment"><input type="hidden" name="configuration_id" value="{{.SelectedConfig.ID}}"><input type="hidden" name="label_selector" value="{{.LabelSelectorText}}"><label>Assigned reviewer<select class="select" name="assigned_reviewer" required><option value="">Select reviewer</option>{{range .EligibleReviewers}}<option value="{{.Username}}">{{.Username}} · {{.Role}}</option>{{end}}</select></label><label>Why is this change required?<textarea class="input" name="change_reason" required maxlength="1000" rows="3" placeholder="Describe the purpose, expected impact and relevant ticket"></textarea></label><label>Approval validity<select class="select" name="expiry_days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="60">60 days</option><option value="90">90 days (maximum)</option></select></label><button class="btn primary" type="submit">Request approval</button></form>{{else}}<p class="tiny red">No eligible reviewer is available. Add another enabled Admin, or assign an enabled Group Owner to this group.</p>{{end}}{{end}}{{end}}<p class="tiny">Creating a request does not deliver configuration. Approval and rollout are separate steps. Unreviewed requests become read-only when their validity expires.</p></div></section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Approval requests</div><div class="cardsub">Review, approve and track immutable deployment snapshots</div></div></div>{{if .Requests}}<div style="overflow:auto"><table><thead><tr><th>Configuration</th><th>Status</th><th>Requester / reviewer</th><th>Change reason</th><th>Created</th><th>Action</th></tr></thead><tbody>{{range .Requests}}<tr><td><strong>{{.ConfigurationName}} v{{.ConfigurationVersion}}</strong><div class="tiny code">{{.ID}}</div></td><td><span class="badge {{if eq .Status "completed"}}ok{{else}}warn{{end}}">{{.Status}}</span></td><td>{{.RequestedBy}}<div class="tiny">Reviewer: {{if .AssignedReviewer}}{{.AssignedReviewer}}{{else}}Legacy unassigned{{end}}</div></td><td>{{if .ChangeReason}}{{.ChangeReason}}{{else}}<span class="tiny">Legacy request</span>{{end}}</td><td>{{.CreatedAt}}</td><td>{{if eq .Status "pending_approval"}}<a class="btn" href="/approvals/{{.ID}}">Open review</a>{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No approval requests have been created.</div>{{end}}</section>
+<section class="card wide"><div class="cardhead"><div><div class="cardtitle">Deployment history</div><div class="cardsub">User-governed deployments and rollbacks across current group members; drift reconciliations remain in Audit logs</div></div></div>{{if .DeploymentHistory}}<div style="overflow:auto"><table><thead><tr><th>Agent</th><th>Configuration</th><th>Action</th><th>Status</th><th>Created</th><th>Applied / Failed</th></tr></thead><tbody>{{range .DeploymentHistory}}<tr><td><a href="/agents/{{.AgentInstanceUID}}" class="code">{{.AgentInstanceUID}}</a></td><td><strong>{{.ConfigurationName}} v{{.ConfigurationVersion}}</strong></td><td>{{.Action}}</td><td>{{.Status}}{{if .Error}}<div class="tiny red">{{.Error}}</div>{{end}}</td><td>{{.CreatedAt}}</td><td>{{if .AppliedAt}}{{.AppliedAt}}{{else if .FailedAt}}{{.FailedAt}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="cardbody tiny">No deployment history exists for current group members.</div>{{end}}</section>
+</div></div></main></div><script src="/assets/configuration-editor.js" defer></script><script src="/assets/group-selectors.js" defer></script></body></html>`
+
+var groupDetailHTML = strings.ReplaceAll(
+	strings.ReplaceAll(groupDetailBaseHTML, "Use Blueprint", "Open Configuration Builder"),
+	`</div>{{if .EditorSections}}<div class="editor-mode-switch">`,
+	`</div>{{if .EditorSections}}{{if .DistributionProfiles}}<label style="display:block;margin-top:12px">Collector package completion profile<select class="select" id="configuration-distribution-profile"><option value="">General Collector catalog</option>{{range .DistributionProfiles}}<option value="{{.ID}}" data-receivers="{{range .Components.Receivers}}{{.}},{{end}}" data-processors="{{range .Components.Processors}}{{.}},{{end}}" data-exporters="{{range .Components.Exporters}}{{.}},{{end}}" data-extensions="{{range .Components.Extensions}}{{.}},{{end}}" data-connectors="{{range .Components.Connectors}}{{.}},{{end}}">{{.Name}} · Collector {{.Version}}</option>{{end}}</select><span class="tiny">Limits component suggestions to the immutable package inventory. Validation remains authoritative.</span></label>{{end}}<div class="editor-mode-switch">`,
+)
+var groupDetailPage = template.Must(template.New("group-detail-modern").Parse(groupDetailHTML))

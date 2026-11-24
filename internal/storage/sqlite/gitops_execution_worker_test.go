@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
 )
 
 func TestGitOpsExecutionClaimLeaseAndComplete(t *testing.T) {
@@ -22,7 +22,7 @@ func TestGitOpsExecutionClaimLeaseAndComplete(t *testing.T) {
 	}
 	store := db.GitOpsExecutions()
 	now := time.Now().UTC()
-	request := &lifecycle.GitOpsExecutionRequest{ID: "execution", ApprovalID: "approval", PreviewID: "preview", PreviewHash: "preview-hash", PlanHash: "plan-hash", ConnectionID: "connection", Provider: "github", Mode: "fleetamp-pull-request", RepositoryPath: "fleetamp/groups/payments/change.json", Branch: "main", RequestedBy: "admin", CreatedAt: now}
+	request := &lifecycle.GitOpsExecutionRequest{ID: "execution", ApprovalID: "approval", PreviewID: "preview", PreviewHash: "preview-hash", PlanHash: "plan-hash", ConnectionID: "connection", Provider: "github", Mode: "otelplane-pull-request", RepositoryPath: "otelplane/groups/payments/change.json", Branch: "main", RequestedBy: "admin", CreatedAt: now}
 	queued := &lifecycle.GitOpsExecutionEvent{ID: "queued", ExecutionID: request.ID, Status: lifecycle.GitOpsExecutionQueued, Actor: "admin", Message: "queued", CreatedAt: now}
 	if err = store.Create(ctx, request, queued); err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestGitOpsExecutionExpiredLeaseCanBeRecovered(t *testing.T) {
 	}
 	store := db.GitOpsExecutions()
 	now := time.Now().UTC()
-	request := &lifecycle.GitOpsExecutionRequest{ID: "recover", ApprovalID: "approval", PreviewID: "preview", PreviewHash: "preview-hash", PlanHash: "plan-hash", ConnectionID: "connection", Provider: "github", Mode: "fleetamp-pull-request", RepositoryPath: "fleetamp/groups/payments/change.json", Branch: "main", RequestedBy: "admin", CreatedAt: now}
+	request := &lifecycle.GitOpsExecutionRequest{ID: "recover", ApprovalID: "approval", PreviewID: "preview", PreviewHash: "preview-hash", PlanHash: "plan-hash", ConnectionID: "connection", Provider: "github", Mode: "otelplane-pull-request", RepositoryPath: "otelplane/groups/payments/change.json", Branch: "main", RequestedBy: "admin", CreatedAt: now}
 	queued := &lifecycle.GitOpsExecutionEvent{ID: "recover-queued", ExecutionID: request.ID, Status: lifecycle.GitOpsExecutionQueued, Actor: "admin", Message: "queued", CreatedAt: now}
 	if err = store.Create(ctx, request, queued); err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestGitOpsExecutionFailedRequestCanBeRetried(t *testing.T) {
 	}
 	store := db.GitOpsExecutions()
 	now := time.Now().UTC()
-	request := &lifecycle.GitOpsExecutionRequest{ID: "retry", ApprovalID: "approval", PreviewID: "preview", PreviewHash: "preview-hash", PlanHash: "plan-hash", ConnectionID: "connection", Provider: "github", Mode: "fleetamp-pull-request", RepositoryPath: "fleetamp/groups/payments/change.json", Branch: "main", RequestedBy: "admin", CreatedAt: now}
+	request := &lifecycle.GitOpsExecutionRequest{ID: "retry", ApprovalID: "approval", PreviewID: "preview", PreviewHash: "preview-hash", PlanHash: "plan-hash", ConnectionID: "connection", Provider: "github", Mode: "otelplane-pull-request", RepositoryPath: "otelplane/groups/payments/change.json", Branch: "main", RequestedBy: "admin", CreatedAt: now}
 	queued := &lifecycle.GitOpsExecutionEvent{ID: "retry-queued", ExecutionID: request.ID, Status: lifecycle.GitOpsExecutionQueued, Actor: "admin", Message: "queued", CreatedAt: now}
 	if err = store.Create(ctx, request, queued); err != nil {
 		t.Fatal(err)

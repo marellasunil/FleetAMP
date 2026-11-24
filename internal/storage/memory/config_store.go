@@ -1,7 +1,7 @@
 // In-memory ConfigurationStore implementation.
 //
 // Purpose:
-//   Stores immutable configuration artifacts for the current FleetAMP process
+//   Stores immutable configuration artifacts for the current OTelPlane process
 //   using a concurrency-safe map and defensive copies.
 //
 // Limitation:
@@ -13,8 +13,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type ConfigStore struct {

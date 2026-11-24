@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/integrations"
+	"github.com/marellasunil/OTelPlane/internal/integrations"
 )
 
 type GitOpsFile struct {
@@ -82,7 +82,7 @@ func PrepareGitOpsPreview(plan *ExecutionPlan, request *Request, connection *int
 		RequestID  string           `json:"requestId"`
 		Spec       Spec             `json:"spec"`
 		Targets    []TargetSnapshot `json:"targets"`
-	}{"fleetamp.io/v1alpha1", "ComponentLifecycleChange", plan.PlanHash, request.ID, request.Spec, plan.Targets}
+	}{"otelplane.io/v1alpha1", "ComponentLifecycleChange", plan.PlanHash, request.ID, request.Spec, plan.Targets}
 	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return nil, err

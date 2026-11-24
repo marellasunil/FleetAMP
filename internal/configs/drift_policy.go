@@ -1,4 +1,4 @@
-// Configuration drift policy controls how FleetAMP reacts when an agent's
+// Configuration drift policy controls how OTelPlane reacts when an agent's
 // effective configuration differs from its approved desired configuration.
 package configs
 

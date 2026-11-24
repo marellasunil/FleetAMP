@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/blueprints"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/blueprints"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 func catalogStrings(values []string) string { b, _ := json.Marshal(values); return string(b) }

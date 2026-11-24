@@ -10,7 +10,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/configs"
 )
 
 var ErrAssignmentNotFound = errors.New("configuration assignment not found")

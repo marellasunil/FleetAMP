@@ -1,6 +1,6 @@
 # Scalable console navigation
 
-FleetAMP uses task-focused tabs, filters, and bounded result pages so the same
+OTelPlane uses task-focused tabs, filters, and bounded result pages so the same
 console remains usable for a small team or an organization with thousands of
 Collectors and ownership groups.
 
@@ -27,7 +27,7 @@ if it were live.
 - **Selectors** provides a compact rule catalogue for reviewing targeting at
   scale.
 
-FleetAMP displays group names in the interface while retaining stable group IDs
+OTelPlane displays group names in the interface while retaining stable group IDs
 for APIs, links, authorization, and storage. Group and selector lists use
 25/50/100-row pagination.
 ## Users, access groups, and roles
@@ -59,13 +59,13 @@ Upcoming and existing authorization checks continue to apply to every route.
 
 ## Group-scoped RBAC
 
-FleetAMP separates organization-wide administration from group responsibilities.
+OTelPlane separates organization-wide administration from group responsibilities.
 Platform Admin is the only global role. All other permissions are attached to a
 user's membership in a specific Collector Group.
 
 Built-in group roles are Group Owner, Configuration Editor, Deployment
 Approver, Deployment Operator, Auditor, and Viewer. A member may hold several
-roles in one group and different roles in another group. FleetAMP preserves the
+roles in one group and different roles in another group. OTelPlane preserves the
 legacy role and group fields during the compatibility period, while normalized
 membership tables are the source of truth for new assignments.
 

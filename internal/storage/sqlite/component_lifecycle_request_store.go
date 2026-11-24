@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
-	"github.com/marellasunil/FleetAMP/internal/runtimes"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/runtimes"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type ComponentLifecycleRequestStore struct{ db *sql.DB }

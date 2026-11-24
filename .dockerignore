@@ -3,7 +3,7 @@ data
 .env
 .env.*
 !.env.example
-fleetamp
+otelplane
 *.db
 *.sqlite
 *.sqlite3

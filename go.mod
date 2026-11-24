@@ -1,4 +1,4 @@
-module github.com/marellasunil/FleetAMP
+module github.com/marellasunil/OTelPlane
 
 go 1.26.0
 

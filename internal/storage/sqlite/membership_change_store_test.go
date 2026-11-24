@@ -3,15 +3,15 @@ package sqlite
 import (
 	"context"
 	"errors"
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 	"path/filepath"
 	"testing"
 )
 
 func TestMembershipChangePersistenceAndStateGuard(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, filepath.Join(t.TempDir(), "fleetamp.db"))
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "otelplane.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

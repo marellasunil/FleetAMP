@@ -1,4 +1,4 @@
-# FleetAMP v0.3.0 E2E evidence report
+# OTelPlane v0.3.0 E2E evidence report
 
 Use this report while completing the [v0.3.0 E2E checklist](e2e-v0.3.0.md).
 Replace each `Not run` value and add links to sanitized screenshots as the test
@@ -13,7 +13,7 @@ session cookies or personal data.
 | Tester | |
 | Commit | |
 | Image or binary | |
-| FleetAMP version | `v0.3.0-rc1` |
+| OTelPlane version | `v0.3.0-rc1` |
 | Kubernetes namespace | |
 | Database source | Fresh / copied v0.2 |
 | Git provider mode | Dry-run / GitHub PR |

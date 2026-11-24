@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
 )
 
 var ErrComponentLifecycleValidationNotFound = errors.New("component lifecycle validation not found")

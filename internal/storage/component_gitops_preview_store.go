@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
 )
 
 var (

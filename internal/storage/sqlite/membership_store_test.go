@@ -8,7 +8,7 @@ import (
 
 func TestGroupMembershipRolesAreStoredPerGroup(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, filepath.Join(t.TempDir(), "fleetamp.db"))
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "otelplane.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestGroupMembershipRolesAreStoredPerGroup(t *testing.T) {
 
 func TestRBACRoleCatalogueIsSeeded(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, filepath.Join(t.TempDir(), "fleetamp.db"))
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "otelplane.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

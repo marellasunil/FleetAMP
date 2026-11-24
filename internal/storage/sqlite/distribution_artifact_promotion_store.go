@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/distributions"
+	"github.com/marellasunil/OTelPlane/internal/distributions"
 )
 
 type DistributionArtifactPromotionStore struct{ db *sql.DB }

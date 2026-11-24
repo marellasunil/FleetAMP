@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/agents"
-	"github.com/marellasunil/FleetAMP/internal/groups"
-	"github.com/marellasunil/FleetAMP/internal/runtimes"
+	"github.com/marellasunil/OTelPlane/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/runtimes"
 )
 
 type ValidationStatus string
@@ -147,9 +147,9 @@ func validateTarget(spec Spec, agent *agents.ManagedAgent) []Finding {
 	if spec.ComponentType == runtimes.OTelOperator { add("operator_inventory", "blocking", "Operator inventory is not yet reported through the built-in management provider.") }
 	authority := agents.EffectiveManagementAuthority(agent)
 	if spec.DeploymentMethod != "manual-package" && authority != agents.AuthorityLifecycleManaged {
-		add("lifecycle_authority", "blocking", "Target has not explicitly granted FleetAMP lifecycle-managed authority.")
+		add("lifecycle_authority", "blocking", "Target has not explicitly granted OTelPlane lifecycle-managed authority.")
 	} else if spec.DeploymentMethod == "manual-package" && authority == agents.AuthorityObserveOnly {
-		add("management_authority", "advisory", "Target is observe-only; FleetAMP can record evidence but cannot change its process or configuration.")
+		add("management_authority", "advisory", "Target is observe-only; OTelPlane can record evidence but cannot change its process or configuration.")
 	}
 	switch spec.DeploymentMethod {
 	case "gitops", "kubernetes-api":

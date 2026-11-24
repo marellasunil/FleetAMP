@@ -2,7 +2,7 @@
 package groups
 
 import (
-	"github.com/marellasunil/FleetAMP/internal/agents"
+	"github.com/marellasunil/OTelPlane/internal/agents"
 	"testing"
 )
 

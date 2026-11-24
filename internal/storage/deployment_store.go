@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/configs"
 )
 
 var ErrDeploymentNotFound = errors.New("configuration deployment not found")

@@ -1,2 +1,2 @@
-// Package opamp implements FleetAMP management integration with OpenTelemetry OpAMP.
+// Package opamp implements OTelPlane management integration with OpenTelemetry OpAMP.
 package opamp

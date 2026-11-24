@@ -4,7 +4,7 @@ package storage
 import (
 	"context"
 
-	"github.com/marellasunil/FleetAMP/internal/audit"
+	"github.com/marellasunil/OTelPlane/internal/audit"
 )
 
 type AuditStore interface {

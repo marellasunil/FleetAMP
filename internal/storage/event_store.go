@@ -10,7 +10,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/events"
+	"github.com/marellasunil/OTelPlane/internal/events"
 )
 
 type AgentEventStore interface {

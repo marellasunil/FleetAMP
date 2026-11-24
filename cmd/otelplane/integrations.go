@@ -1,0 +1,178 @@
+package main
+
+import (
+	"github.com/marellasunil/OTelPlane/internal/groups"
+	"github.com/marellasunil/OTelPlane/internal/integrations"
+	"github.com/marellasunil/OTelPlane/internal/storage"
+	"html/template"
+	"net/http"
+	"strings"
+	"time"
+)
+
+type integrationConnectionRow struct {
+	*integrations.Connection
+	Validation *integrations.ConnectionValidation
+}
+
+type integrationsView struct {
+	Page                                     string
+	Providers                                []integrations.Provider
+	Connections                              []integrationConnectionRow
+	Groups                                   []*groups.Group
+	Message, Error                           string
+	Total, Passed, Failed, Expired, Untested int
+}
+
+const integrationsHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Integrations · OTelPlane</title><style>` + controlPlaneCSS + detailCSS + `.integration-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}@media(max-width:1050px){.integration-grid{grid-template-columns:1fr}}</style></head><body><div class="shell">` + sideNav + `<main class="main"><header class="top"><div><div class="crumb">OTelPlane / Administration / Integrations</div><div class="pagetitle">Git Integrations</div><div class="subtitle">Scope existing repositories for governed delivery.</div></div><span class="badge off">No provider API calls</span></header><div class="content"><section class="page-description" aria-label="About this page"><div class="page-description-icon" aria-hidden="true">i</div><div><div class="page-description-title">About Git Integrations</div><p>Register existing GitHub, GitLab or Azure DevOps repositories as governed delivery boundaries. OTelPlane stores repository scope and a credential reference, validates access, restricts allowed groups and paths, and uses approved immutable previews for GitOps delivery without creating repositories or pipelines.</p></div></section>{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .Error}}<div class="configerror">{{.Error}}</div>{{end}}<div class="metrics"><div class="metric"><div class="metriclabel">Connections</div><div class="metricvalue">{{.Total}}</div><div class="metricnote">Immutable repository scopes</div></div><div class="metric"><div class="metriclabel">Validated</div><div class="metricvalue green">{{.Passed}}</div><div class="metricnote">Passed and not expired</div></div><div class="metric"><div class="metriclabel">Needs attention</div><div class="metricvalue purple">{{.Failed}}</div><div class="metricnote">Latest validation failed</div></div><div class="metric"><div class="metriclabel">Expired / untested</div><div class="metricvalue">{{.Expired}} / {{.Untested}}</div><div class="metricnote">Must test before execution</div></div></div><section class="card"><div class="cardhead"><div><div class="cardtitle">Register repository connection</div><div class="cardsub">Stores scope and a secret reference only; never a raw token.</div></div></div><div class="cardbody"><form method="post"><div class="form-grid"><label class="field">Name<input class="input" name="name" required></label><label class="field">Provider<select class="select" name="provider" required><option value="" selected disabled>Choose provider…</option>{{range .Providers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label class="field">Base URL<input class="input" name="base_url" placeholder="Optional for provider cloud"></label><label class="field">Organization / group<input class="input" name="organization" required></label><label class="field">Azure DevOps project<input class="input" name="project"></label><label class="field">Existing repository<input class="input" name="repository" required></label><label class="field">Branch<input class="input" name="branch" value="main" required></label><label class="field">Allowed root<input class="input" name="allowed_root" value="otelplane/groups" required></label><label class="field">Mode<select class="select" name="mode"><option value="otelplane-pull-request">OTelPlane pull request</option><option value="git-managed">Git managed</option><option value="observe-only">Observe only</option><option value="otelplane-direct-commit">Direct commit</option><option value="otelplane-primary-sync">OTelPlane primary sync</option></select></label><label class="field">Credential reference<input class="input" name="credential_ref" required placeholder="secret://github/production"></label><fieldset class="field full"><legend>Allowed OTelPlane groups</legend>{{range .Groups}}<label><input type="checkbox" name="group_ids" value="{{.ID}}"> {{.Name}}</label>{{else}}<span class="tiny">Create a group first.</span>{{end}}</fieldset><label class="field"><input type="checkbox" name="enabled" value="true" checked> Enabled</label></div>
+<div class="provider-guidance" aria-live="polite">
+<article class="guidance-card guidance-github"><strong>GitHub connection requirements</strong><div class="tiny">Use an existing owner and repository. Store the credential externally and enter only its secret:// reference. Observe mode needs repository read access; pull-request workflows also need contents write and pull-request access.</div></article>
+<article class="guidance-card guidance-gitlab"><strong>GitLab connection requirements</strong><div class="tiny">Use an existing group or namespace and project repository. Store the access token externally and enter only its secret:// reference. Grant repository read access, plus write and merge-request access only when the selected mode requires it.</div></article>
+<article class="guidance-card guidance-azure"><strong>Azure DevOps connection requirements</strong><div class="tiny">Use an existing organization, project and repository. Store the PAT externally and enter only its secret:// reference. Grant Code read for observation; add Code write and pull-request contribution only for governed change workflows.</div></article>
+</div><div class="notice">OTelPlane never creates repositories or pipelines. Credentials are resolved only while validating or executing an approved change.</div><div class="detailactions"><button class="btn primary">Register connection scope</button></div></form></div></section><section class="card" style="margin-top:16px"><div class="cardhead"><div><div class="cardtitle">Registered connections</div><div class="cardsub">Immutable repository security boundaries with expiring validation evidence.</div></div></div>{{if .Connections}}<div style="overflow:auto"><table><thead><tr><th>Name</th><th>Provider / repository</th><th>Branch / allowed root</th><th>Mode</th><th>Groups</th><th>Validation</th><th>Action</th></tr></thead><tbody>{{range .Connections}}<tr><td><strong>{{.Name}}</strong><div class="tiny code">{{.ID}}</div></td><td>{{.Provider}}<div class="tiny">{{.Organization}}{{if .Project}}/{{.Project}}{{end}}/{{.Repository}}</div></td><td>{{.Branch}}<div class="tiny code">{{.AllowedRoot}}</div></td><td>{{.Mode}}</td><td>{{len .GroupIDs}}</td><td>{{if .Validation}}<span class="badge {{if eq .Validation.Status "passed"}}ok{{else}}off{{end}}">{{.Validation.Status}}</span><div class="tiny">{{.Validation.Message}}</div><div class="tiny">Expires {{.Validation.ExpiresAt}}</div>{{else}}<span class="badge warn">not tested</span>{{end}}</td><td><form method="post"><input type="hidden" name="action" value="test_connection"><input type="hidden" name="connection_id" value="{{.ID}}"><button class="btn" type="submit">Test connection</button></form></td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty">No connections registered.</div>{{end}}</section><section class="card" style="margin-top:16px"><div class="cardbody integration-grid">{{range .Providers}}<article class="component-item"><strong>{{.Name}}</strong><div class="tiny">{{.Description}}</div></article>{{end}}</div></section></div></main></div></body></html>`
+
+const integrationFormLayoutCSS = `<style>
+.cardbody>form>.form-grid{display:grid!important;grid-template-columns:1fr!important;gap:0!important}
+.cardbody>form>.form-grid>.field{display:grid!important;grid-template-columns:minmax(170px,.65fr) minmax(300px,1.35fr) minmax(260px,1fr)!important;grid-template-rows:auto!important;align-items:center;column-gap:18px;row-gap:6px;padding:13px 0;border-bottom:1px solid var(--line)}
+.cardbody>form>.form-grid>.field.full{grid-column:auto!important}
+.cardbody>form>.form-grid>.field::after{color:var(--muted);font-size:13px;font-weight:400;line-height:1.45;align-self:center}
+.cardbody>form>.form-grid>.field:nth-child(1)::after{content:"A clear OTelPlane name for this repository connection."}
+.cardbody>form>.form-grid>.field:nth-child(2)::after{content:"Choose GitHub, GitLab or Azure DevOps."}
+.cardbody>form>.form-grid>.field:nth-child(3)::after{content:"Leave empty for provider cloud; set it for a self-hosted service."}
+.cardbody>form>.form-grid>.field:nth-child(4)::after{content:"The existing organization, owner or top-level group."}
+.cardbody>form>.form-grid>.field:nth-child(5)::after{content:"Required only when the provider is Azure DevOps."}
+.cardbody>form>.form-grid>.field:nth-child(6)::after{content:"OTelPlane uses an existing repository and never creates one."}
+.cardbody>form>.form-grid>.field:nth-child(7)::after{content:"The governed branch used for previews and approved changes."}
+.cardbody>form>.form-grid>.field:nth-child(8)::after{content:"A relative directory that generated files cannot escape."}
+.cardbody>form>.form-grid>.field:nth-child(9)::after{content:"Select the governance workflow; execution remains disabled."}
+.cardbody>form>.form-grid>.field:nth-child(10)::after{content:"Use a secret reference only. Never paste a token or password."}
+.cardbody>form>.form-grid>fieldset.field{display:block!important;padding:13px 0;margin:0;border:0;border-bottom:1px solid var(--line)}
+.cardbody>form>.form-grid>fieldset.field legend{font-weight:650;margin-bottom:10px}
+.cardbody>form>.form-grid>fieldset.field label{display:inline-flex;align-items:center;gap:7px;padding:8px 11px;margin:0 7px 7px 0;border:1px solid var(--line);border-radius:8px;background:#0a1626}
+.cardbody>form>.form-grid>.field:last-child{display:flex!important;align-items:center;gap:8px;border-bottom:0}
+@media(max-width:950px){.cardbody>form>.form-grid>.field{grid-template-columns:minmax(150px,.55fr) minmax(260px,1fr)!important}.cardbody>form>.form-grid>.field::after{grid-column:2}}
+@media(max-width:650px){.cardbody>form>.form-grid>.field{grid-template-columns:1fr!important}.cardbody>form>.form-grid>.field::after{grid-column:auto}}
+
+/* Progressive disclosure: Azure DevOps is the only provider with a project field. */
+.cardbody>form>.form-grid>.field:nth-child(5){display:none!important}
+.cardbody>form>.form-grid:has(select[name="provider"] option[value="azure-devops"]:checked)>.field:nth-child(5){display:grid!important}
+
+
+/* Guided progressive disclosure. Start with only name and provider. */
+.cardbody>form>.form-grid>.field:nth-child(n+3){display:none!important}
+.cardbody>form>.form-grid:has(select[name="provider"] option:not([value=""]):checked)>.field:nth-child(n+3){display:grid!important}
+.cardbody>form>.form-grid:has(select[name="provider"] option:not([value=""]):checked)>fieldset.field{display:block!important}
+.cardbody>form>.form-grid:has(select[name="provider"] option:not([value=""]):checked)>.field:last-child{display:flex!important}
+.cardbody>form>.form-grid:has(select[name="provider"] option:not([value="azure-devops"]):checked)>.field:nth-child(5){display:none!important}
+.provider-guidance{margin-top:16px}.guidance-card{display:none;padding:14px;border:1px solid var(--line);border-radius:9px;background:#0a1626}.guidance-card .tiny{margin-top:6px;line-height:1.5}
+.cardbody>form:has(select[name="provider"] option[value="github"]:checked) .guidance-github,
+.cardbody>form:has(select[name="provider"] option[value="gitlab"]:checked) .guidance-gitlab,
+.cardbody>form:has(select[name="provider"] option[value="azure-devops"]:checked) .guidance-azure{display:block}
+
+</style>`
+
+var integrationsPage = template.Must(template.New("integrations").Parse(strings.NewReplacer(
+	"<span class=\"badge off\">No provider API calls</span>", "<span class=\"badge off\">Governed provider access</span>",
+	"Repository/pipeline creation, connection tests and Git writes remain disabled.", "OTelPlane never creates repositories or pipelines. GitHub pull-request writes require exact-preview approval and the server-side write-enable flag; GitLab and Azure DevOps remain dry-run.",
+	"</head>", integrationFormLayoutCSS+"</head>",
+).Replace(integrationsHTML)))
+
+func registerIntegrationRoutes(mux *http.ServeMux, catalog *integrations.Catalog, connections storage.IntegrationConnectionStore, validations storage.IntegrationValidationStore, validator *integrations.ConnectionValidator, validationTTL time.Duration, groupStore storage.GroupStore, auth *authManager) {
+	mux.HandleFunc("/settings/integrations", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/settings/integrations" {
+			http.NotFound(w, r)
+			return
+		}
+		errorMessage := ""
+		if r.Method == http.MethodPost {
+			if currentRole(auth, r) != roleAdmin {
+				http.Error(w, "administrator access required", http.StatusForbidden)
+				return
+			}
+			if e := r.ParseForm(); e != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			creator := currentUsername(auth, r)
+			if creator == "" && auth == nil {
+				creator = "test-admin"
+			}
+			if r.FormValue("action") == "test_connection" {
+				connection, e := connections.Get(r.Context(), r.FormValue("connection_id"))
+				if e != nil {
+					http.Error(w, "connection not found", http.StatusNotFound)
+					return
+				}
+				evidence, validationErr := validator.Validate(r.Context(), connection)
+				status, validationMessage := "passed", "Provider repository and branch validation passed."
+				if validationErr != nil {
+					status, validationMessage = "failed", validationErr.Error()
+				}
+				record, e := integrations.NewConnectionValidation(connection, status, creator, validationMessage, evidence, validationTTL)
+				if e != nil {
+					internalServerError(w, e)
+					return
+				}
+				if e = validations.Create(r.Context(), record); e != nil {
+					internalServerError(w, e)
+					return
+				}
+				http.Redirect(w, r, "/settings/integrations?validated="+record.ID, http.StatusSeeOther)
+				return
+			}
+			v, e := integrations.NewConnection(integrations.Connection{Name: r.FormValue("name"), Provider: integrations.ProviderID(r.FormValue("provider")), BaseURL: r.FormValue("base_url"), Organization: r.FormValue("organization"), Project: r.FormValue("project"), Repository: r.FormValue("repository"), Branch: r.FormValue("branch"), AllowedRoot: r.FormValue("allowed_root"), Mode: r.FormValue("mode"), CredentialRef: r.FormValue("credential_ref"), GroupIDs: r.Form["group_ids"], Enabled: r.FormValue("enabled") == "true"}, creator)
+			if e != nil {
+				errorMessage = e.Error()
+			} else if e = connections.Create(r.Context(), v); e != nil {
+				errorMessage = "Connection name already exists."
+			} else {
+				http.Redirect(w, r, "/settings/integrations?created="+v.ID, http.StatusSeeOther)
+				return
+			}
+		} else if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		rows, e := connections.List(r.Context(), 200)
+		if e != nil {
+			internalServerError(w, e)
+			return
+		}
+		connectionRows := make([]integrationConnectionRow, 0, len(rows))
+		passed, failed, expired, untested := 0, 0, 0, 0
+		now := time.Now().UTC()
+		for _, connection := range rows {
+			validation, validationErr := validations.Latest(r.Context(), connection.ID)
+			if validationErr != nil && validationErr != storage.ErrIntegrationValidationNotFound {
+				internalServerError(w, validationErr)
+				return
+			}
+			connectionRows = append(connectionRows, integrationConnectionRow{Connection: connection, Validation: validation})
+			switch {
+			case validation == nil:
+				untested++
+			case validation.Status == "failed":
+				failed++
+			case !validation.Usable(now):
+				expired++
+			default:
+				passed++
+			}
+		}
+		groupRows, e := groupStore.List(r.Context())
+		if e != nil {
+			internalServerError(w, e)
+			return
+		}
+		message := ""
+		if strings.TrimSpace(r.URL.Query().Get("created")) != "" {
+			message = "Connection scope registered. No provider API was called and no Git content changed."
+		} else if strings.TrimSpace(r.URL.Query().Get("validated")) != "" {
+			message = "Connection test completed and immutable validation evidence was recorded."
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if e := integrationsPage.Execute(w, integrationsView{Page: "settings-integrations", Providers: catalog.List(), Connections: connectionRows, Groups: groupRows, Message: message, Error: errorMessage, Total: len(rows), Passed: passed, Failed: failed, Expired: expired, Untested: untested}); e != nil {
+			internalServerError(w, e)
+		}
+	})
+}

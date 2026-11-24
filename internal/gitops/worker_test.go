@@ -4,18 +4,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/lifecycle"
-	"github.com/marellasunil/FleetAMP/internal/storage/memory"
+	"github.com/marellasunil/OTelPlane/internal/lifecycle"
+	"github.com/marellasunil/OTelPlane/internal/storage/memory"
 )
 
 func TestWorkerProcessesApprovedExecutionWithNoopAdapter(t *testing.T) {
 	executions := memory.NewGitOpsExecutionStore()
 	previews := memory.NewComponentGitOpsPreviewStore()
-	preview := &lifecycle.GitOpsPreview{ID: "preview", PlanID: "plan", PlanHash: "plan-hash", PreviewHash: "preview-hash", RepositoryPath: "fleetamp/groups/payments/change.json", Connection: lifecycle.GitConnectionSnapshot{ID: "connection", Provider: "github", Mode: "fleetamp-pull-request", Branch: "main"}, Files: []lifecycle.GitOpsFile{{Path: "change.json", Content: "{}"}}, CreatedAt: time.Now().UTC()}
+	preview := &lifecycle.GitOpsPreview{ID: "preview", PlanID: "plan", PlanHash: "plan-hash", PreviewHash: "preview-hash", RepositoryPath: "otelplane/groups/payments/change.json", Connection: lifecycle.GitConnectionSnapshot{ID: "connection", Provider: "github", Mode: "otelplane-pull-request", Branch: "main"}, Files: []lifecycle.GitOpsFile{{Path: "change.json", Content: "{}"}}, CreatedAt: time.Now().UTC()}
 	if err := previews.Create(t.Context(), preview); err != nil {
 		t.Fatal(err)
 	}
-	request := &lifecycle.GitOpsExecutionRequest{ID: "execution", ApprovalID: "approval", PreviewID: preview.ID, PreviewHash: preview.PreviewHash, PlanHash: preview.PlanHash, ConnectionID: preview.Connection.ID, Provider: "github", Mode: "fleetamp-pull-request", RepositoryPath: preview.RepositoryPath, Branch: "main", RequestedBy: "admin", CreatedAt: time.Now().UTC()}
+	request := &lifecycle.GitOpsExecutionRequest{ID: "execution", ApprovalID: "approval", PreviewID: preview.ID, PreviewHash: preview.PreviewHash, PlanHash: preview.PlanHash, ConnectionID: preview.Connection.ID, Provider: "github", Mode: "otelplane-pull-request", RepositoryPath: preview.RepositoryPath, Branch: "main", RequestedBy: "admin", CreatedAt: time.Now().UTC()}
 	queued := &lifecycle.GitOpsExecutionEvent{ID: "queued", ExecutionID: request.ID, Status: lifecycle.GitOpsExecutionQueued, Actor: "admin", Message: "queued", CreatedAt: time.Now().UTC()}
 	if err := executions.Create(t.Context(), request, queued); err != nil {
 		t.Fatal(err)

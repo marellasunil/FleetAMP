@@ -1,4 +1,4 @@
-// SQLite-backed implementation of FleetAMP AssignmentStore.
+// SQLite-backed implementation of OTelPlane AssignmentStore.
 package sqlite
 
 import (
@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marellasunil/FleetAMP/internal/configs"
-	"github.com/marellasunil/FleetAMP/internal/storage"
+	"github.com/marellasunil/OTelPlane/internal/configs"
+	"github.com/marellasunil/OTelPlane/internal/storage"
 )
 
 type AssignmentStore struct{ db *sql.DB }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/marellasunil/FleetAMP/internal/blueprints"
+	"github.com/marellasunil/OTelPlane/internal/blueprints"
 )
 
 var (
