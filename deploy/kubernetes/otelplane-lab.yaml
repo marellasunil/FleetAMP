@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: otelplane-lab-data
+  namespace: observability
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests: {storage: 2Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelplane-lab
+  namespace: observability
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: otelplane-lab}
+  template:
+    metadata:
+      labels: {app: otelplane-lab}
+    spec:
+      containers:
+      - name: otelplane
+        image: localhost/otelplane:lab-v0.3.0-dev
+        imagePullPolicy: Never
+        ports:
+        - {name: http, containerPort: 8080}
+        - {name: opamp, containerPort: 4320}
+        env:
+        - {name: OTELPLANE_HTTP_ADDR, value: '0.0.0.0:8080'}
+        - {name: OTELPLANE_OPAMP_ADDR, value: '0.0.0.0:4320'}
+        - {name: OTELPLANE_DATA_DIR, value: /var/lib/otelplane}
+        - {name: OTELPLANE_DATABASE_PATH, value: /var/lib/otelplane/otelplane.db}
+        - {name: OTELPLANE_SERVER_PEPPER_FILE, value: /run/otelplane-secrets/server-pepper}
+        - {name: OTELPLANE_ALLOW_INSECURE, value: 'true'}
+        - name: OTELPLANE_OPAMP_TOKEN
+          valueFrom:
+            secretKeyRef: {name: otelplane-lab-secrets, key: opamp-token}
+        readinessProbe:
+          httpGet: {path: /ready, port: http}
+          initialDelaySeconds: 3
+        livenessProbe:
+          httpGet: {path: /health, port: http}
+          initialDelaySeconds: 10
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {cpu: '1', memory: 512Mi}
+        volumeMounts:
+        - {name: data, mountPath: /var/lib/otelplane}
+        - {name: credentials, mountPath: /run/otelplane-secrets, readOnly: true}
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities: {drop: [ALL]}
+      volumes:
+      - name: data
+        persistentVolumeClaim: {claimName: otelplane-lab-data}
+      - name: credentials
+        secret: {secretName: otelplane-lab-secrets, defaultMode: 288}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otelplane-lab
+  namespace: observability
+spec:
+  type: ClusterIP
+  selector: {app: otelplane-lab}
+  ports:
+  - {name: http, port: 8080, targetPort: http}
+  - {name: opamp, port: 4320, targetPort: opamp}

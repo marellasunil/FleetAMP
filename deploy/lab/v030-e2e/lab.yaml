@@ -1,0 +1,542 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: otelplane-v030-e2e
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: otelplane-data
+  namespace: otelplane-v030-e2e
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelplane
+  namespace: otelplane-v030-e2e
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: otelplane
+  template:
+    metadata:
+      labels:
+        app: otelplane
+    spec:
+      containers:
+      - name: otelplane
+        image: localhost/otelplane:lab-v0.3.0-dev
+        imagePullPolicy: Never
+        ports:
+        - name: http
+          containerPort: 8080
+        - name: opamp
+          containerPort: 4320
+        env:
+        - name: OTELPLANE_HTTP_ADDR
+          value: 0.0.0.0:8080
+        - name: OTELPLANE_OPAMP_ADDR
+          value: 0.0.0.0:4320
+        - name: OTELPLANE_DATA_DIR
+          value: /var/lib/otelplane
+        - name: OTELPLANE_DATABASE_PATH
+          value: /var/lib/otelplane/otelplane.db
+        - name: OTELPLANE_SERVER_PEPPER_FILE
+          value: /run/otelplane-e2e-secrets/server-pepper
+        - name: OTELPLANE_ALLOW_INSECURE
+          value: 'true'
+        - name: OTELPLANE_OPAMP_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: otelplane-e2e-secrets
+              key: opamp-token
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/otelplane
+        - name: credentials
+          mountPath: /run/otelplane-e2e-secrets
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: otelplane-data
+      - name: credentials
+        secret:
+          secretName: otelplane-e2e-secrets
+          defaultMode: 288
+      securityContext:
+        fsGroup: 10001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otelplane
+  namespace: otelplane-v030-e2e
+spec:
+  type: ClusterIP
+  selector:
+    app: otelplane
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+  - name: opamp
+    port: 4320
+    targetPort: opamp
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelplane-infra-01-config
+  namespace: otelplane-v030-e2e
+data:
+  base.yaml: "receivers:\n  otlp:\n    protocols:\n      grpc:\n        endpoint:\
+    \ 127.0.0.1:14317\n      http:\n        endpoint: 127.0.0.1:14318\n  hostmetrics:\n\
+    \    collection_interval: 60s\n    scrapers:\n      cpu: {}\n      memory: {}\n\
+    \      load: {}\nprocessors:\n  batch: {}\n  resource:\n    attributes:\n    -\
+    \ key: deployment.environment.name\n      value: otelplane-e2e\n      action: upsert\n\
+    \    - key: otelplane.test.role\n      value: infra\n      action: upsert\nexporters:\n\
+    \  debug:\n    verbosity: basic\nservice:\n  pipelines:\n    traces:\n      receivers:\n\
+    \      - otlp\n      processors:\n      - resource\n      - batch\n      exporters:\n\
+    \      - debug\n    metrics:\n      receivers:\n      - otlp\n      - hostmetrics\n\
+    \      processors:\n      - resource\n      - batch\n      exporters:\n      -\
+    \ debug\n    logs:\n      receivers:\n      - otlp\n      processors:\n      -\
+    \ resource\n      - batch\n      exporters:\n      - debug\n"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: otelplane-infra-01-data
+  namespace: otelplane-v030-e2e
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelplane-infra-01
+  namespace: otelplane-v030-e2e
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: otelplane-infra-01
+  template:
+    metadata:
+      labels:
+        app: otelplane-infra-01
+    spec:
+      initContainers:
+      - name: prepare-supervisor-config
+        image: docker.io/library/alpine:3.22
+        command:
+        - sh
+        - -ec
+        args:
+        - 'printf ''server:\n  endpoint: ws://otelplane.otelplane-v030-e2e.svc.cluster.local:4320/v1/opamp\n  headers:\n    Authorization:
+          "Bearer %s"\ncapabilities:\n  reports_effective_config: true\n  reports_health:
+          true\n  reports_remote_config: true\n  accepts_remote_config: true\n  reports_available_components:
+          true\nagent:\n  executable: /otelcol-contrib\n  config_files:\n    - /etc/otelcol/base.yaml\n  description:\n    non_identifying_attributes:\n      otelplane.agent.id:
+          otelplane-infra-01\nstorage:\n  directory: /var/lib/otel-supervisor\nhealthcheck:\n  endpoint:
+          127.0.0.1:13133\n'' "$(cat /secrets/opamp-token)" > /generated/supervisor.yaml
+
+          chmod 0600 /generated/supervisor.yaml
+
+          '
+        volumeMounts:
+        - name: credentials
+          mountPath: /secrets
+          readOnly: true
+        - name: generated
+          mountPath: /generated
+      containers:
+      - name: supervisor
+        image: localhost/otelplane-opamp-supervisor:lab-0.149.0
+        imagePullPolicy: Never
+        volumeMounts:
+        - name: generated
+          mountPath: /etc/otelplane-supervisor
+          readOnly: true
+        - name: base
+          mountPath: /etc/otelcol
+          readOnly: true
+        - name: state
+          mountPath: /var/lib/otel-supervisor
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 384Mi
+      volumes:
+      - name: credentials
+        secret:
+          secretName: otelplane-e2e-secrets
+      - name: generated
+        emptyDir:
+          medium: Memory
+      - name: base
+        configMap:
+          name: otelplane-infra-01-config
+      - name: state
+        persistentVolumeClaim:
+          claimName: otelplane-infra-01-data
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelplane-app-01-config
+  namespace: otelplane-v030-e2e
+data:
+  base.yaml: "receivers:\n  otlp:\n    protocols:\n      grpc:\n        endpoint:\
+    \ 127.0.0.1:14317\n      http:\n        endpoint: 127.0.0.1:14318\nprocessors:\n\
+    \  batch: {}\n  resource:\n    attributes:\n    - key: deployment.environment.name\n\
+    \      value: otelplane-e2e\n      action: upsert\n    - key: otelplane.test.role\n\
+    \      value: app\n      action: upsert\nexporters:\n  debug:\n    verbosity:\
+    \ basic\nservice:\n  pipelines:\n    traces:\n      receivers:\n      - otlp\n\
+    \      processors:\n      - resource\n      - batch\n      exporters:\n      -\
+    \ debug\n    metrics:\n      receivers:\n      - otlp\n      processors:\n   \
+    \   - resource\n      - batch\n      exporters:\n      - debug\n    logs:\n  \
+    \    receivers:\n      - otlp\n      processors:\n      - resource\n      - batch\n\
+    \      exporters:\n      - debug\n"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: otelplane-app-01-data
+  namespace: otelplane-v030-e2e
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelplane-app-01
+  namespace: otelplane-v030-e2e
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: otelplane-app-01
+  template:
+    metadata:
+      labels:
+        app: otelplane-app-01
+    spec:
+      initContainers:
+      - name: prepare-supervisor-config
+        image: docker.io/library/alpine:3.22
+        command:
+        - sh
+        - -ec
+        args:
+        - 'printf ''server:\n  endpoint: ws://otelplane.otelplane-v030-e2e.svc.cluster.local:4320/v1/opamp\n  headers:\n    Authorization:
+          "Bearer %s"\ncapabilities:\n  reports_effective_config: true\n  reports_health:
+          true\n  reports_remote_config: true\n  accepts_remote_config: true\n  reports_available_components:
+          true\nagent:\n  executable: /otelcol-contrib\n  config_files:\n    - /etc/otelcol/base.yaml\n  description:\n    non_identifying_attributes:\n      otelplane.agent.id:
+          otelplane-app-01\nstorage:\n  directory: /var/lib/otel-supervisor\nhealthcheck:\n  endpoint:
+          127.0.0.1:13133\n'' "$(cat /secrets/opamp-token)" > /generated/supervisor.yaml
+
+          chmod 0600 /generated/supervisor.yaml
+
+          '
+        volumeMounts:
+        - name: credentials
+          mountPath: /secrets
+          readOnly: true
+        - name: generated
+          mountPath: /generated
+      containers:
+      - name: supervisor
+        image: localhost/otelplane-opamp-supervisor:lab-0.149.0
+        imagePullPolicy: Never
+        volumeMounts:
+        - name: generated
+          mountPath: /etc/otelplane-supervisor
+          readOnly: true
+        - name: base
+          mountPath: /etc/otelcol
+          readOnly: true
+        - name: state
+          mountPath: /var/lib/otel-supervisor
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 384Mi
+      volumes:
+      - name: credentials
+        secret:
+          secretName: otelplane-e2e-secrets
+      - name: generated
+        emptyDir:
+          medium: Memory
+      - name: base
+        configMap:
+          name: otelplane-app-01-config
+      - name: state
+        persistentVolumeClaim:
+          claimName: otelplane-app-01-data
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelplane-gateway-01-config
+  namespace: otelplane-v030-e2e
+data:
+  base.yaml: "receivers:\n  otlp:\n    protocols:\n      grpc:\n        endpoint:\
+    \ 127.0.0.1:14317\n      http:\n        endpoint: 127.0.0.1:14318\nprocessors:\n\
+    \  batch: {}\n  resource:\n    attributes:\n    - key: deployment.environment.name\n\
+    \      value: otelplane-e2e\n      action: upsert\n    - key: otelplane.test.role\n\
+    \      value: gateway\n      action: upsert\n  transform/test:\n    error_mode:\
+    \ ignore\n    trace_statements:\n    - context: span\n      statements:\n    \
+    \  - set(attributes[\"otelplane.test\"], true)\nexporters:\n  debug:\n    verbosity:\
+    \ basic\nservice:\n  pipelines:\n    traces:\n      receivers:\n      - otlp\n\
+    \      processors:\n      - resource\n      - transform/test\n      - batch\n\
+    \      exporters:\n      - debug\n    metrics:\n      receivers:\n      - otlp\n\
+    \      processors:\n      - resource\n      - batch\n      exporters:\n      -\
+    \ debug\n    logs:\n      receivers:\n      - otlp\n      processors:\n      -\
+    \ resource\n      - batch\n      exporters:\n      - debug\n"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: otelplane-gateway-01-data
+  namespace: otelplane-v030-e2e
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelplane-gateway-01
+  namespace: otelplane-v030-e2e
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: otelplane-gateway-01
+  template:
+    metadata:
+      labels:
+        app: otelplane-gateway-01
+    spec:
+      initContainers:
+      - name: prepare-supervisor-config
+        image: docker.io/library/alpine:3.22
+        command:
+        - sh
+        - -ec
+        args:
+        - 'printf ''server:\n  endpoint: ws://otelplane.otelplane-v030-e2e.svc.cluster.local:4320/v1/opamp\n  headers:\n    Authorization:
+          "Bearer %s"\ncapabilities:\n  reports_effective_config: true\n  reports_health:
+          true\n  reports_remote_config: true\n  accepts_remote_config: true\n  reports_available_components:
+          true\nagent:\n  executable: /otelcol-contrib\n  config_files:\n    - /etc/otelcol/base.yaml\n  description:\n    non_identifying_attributes:\n      otelplane.agent.id:
+          otelplane-gateway-01\nstorage:\n  directory: /var/lib/otel-supervisor\nhealthcheck:\n  endpoint:
+          127.0.0.1:13133\n'' "$(cat /secrets/opamp-token)" > /generated/supervisor.yaml
+
+          chmod 0600 /generated/supervisor.yaml
+
+          '
+        volumeMounts:
+        - name: credentials
+          mountPath: /secrets
+          readOnly: true
+        - name: generated
+          mountPath: /generated
+      containers:
+      - name: supervisor
+        image: localhost/otelplane-opamp-supervisor:lab-0.149.0
+        imagePullPolicy: Never
+        volumeMounts:
+        - name: generated
+          mountPath: /etc/otelplane-supervisor
+          readOnly: true
+        - name: base
+          mountPath: /etc/otelcol
+          readOnly: true
+        - name: state
+          mountPath: /var/lib/otel-supervisor
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 384Mi
+      volumes:
+      - name: credentials
+        secret:
+          secretName: otelplane-e2e-secrets
+      - name: generated
+        emptyDir:
+          medium: Memory
+      - name: base
+        configMap:
+          name: otelplane-gateway-01-config
+      - name: state
+        persistentVolumeClaim:
+          claimName: otelplane-gateway-01-data
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelplane-canary-01-config
+  namespace: otelplane-v030-e2e
+data:
+  base.yaml: "receivers:\n  otlp:\n    protocols:\n      grpc:\n        endpoint:\
+    \ 127.0.0.1:14317\n      http:\n        endpoint: 127.0.0.1:14318\nprocessors:\n\
+    \  batch: {}\n  resource:\n    attributes:\n    - key: deployment.environment.name\n\
+    \      value: otelplane-e2e\n      action: upsert\n    - key: otelplane.test.role\n\
+    \      value: canary\n      action: upsert\nexporters:\n  debug:\n    verbosity:\
+    \ basic\nservice:\n  pipelines:\n    traces:\n      receivers:\n      - otlp\n\
+    \      processors:\n      - resource\n      - batch\n      exporters:\n      -\
+    \ debug\n    metrics:\n      receivers:\n      - otlp\n      processors:\n   \
+    \   - resource\n      - batch\n      exporters:\n      - debug\n    logs:\n  \
+    \    receivers:\n      - otlp\n      processors:\n      - resource\n      - batch\n\
+    \      exporters:\n      - debug\n"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: otelplane-canary-01-data
+  namespace: otelplane-v030-e2e
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelplane-canary-01
+  namespace: otelplane-v030-e2e
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: otelplane-canary-01
+  template:
+    metadata:
+      labels:
+        app: otelplane-canary-01
+    spec:
+      initContainers:
+      - name: prepare-supervisor-config
+        image: docker.io/library/alpine:3.22
+        command:
+        - sh
+        - -ec
+        args:
+        - 'printf ''server:\n  endpoint: ws://otelplane.otelplane-v030-e2e.svc.cluster.local:4320/v1/opamp\n  headers:\n    Authorization:
+          "Bearer %s"\ncapabilities:\n  reports_effective_config: true\n  reports_health:
+          true\n  reports_remote_config: true\n  accepts_remote_config: true\n  reports_available_components:
+          true\nagent:\n  executable: /otelcol-contrib\n  config_files:\n    - /etc/otelcol/base.yaml\n  description:\n    non_identifying_attributes:\n      otelplane.agent.id:
+          otelplane-canary-01\nstorage:\n  directory: /var/lib/otel-supervisor\nhealthcheck:\n  endpoint:
+          127.0.0.1:13133\n'' "$(cat /secrets/opamp-token)" > /generated/supervisor.yaml
+
+          chmod 0600 /generated/supervisor.yaml
+
+          '
+        volumeMounts:
+        - name: credentials
+          mountPath: /secrets
+          readOnly: true
+        - name: generated
+          mountPath: /generated
+      containers:
+      - name: supervisor
+        image: localhost/otelplane-opamp-supervisor:lab-0.149.0
+        imagePullPolicy: Never
+        volumeMounts:
+        - name: generated
+          mountPath: /etc/otelplane-supervisor
+          readOnly: true
+        - name: base
+          mountPath: /etc/otelcol
+          readOnly: true
+        - name: state
+          mountPath: /var/lib/otel-supervisor
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 384Mi
+      volumes:
+      - name: credentials
+        secret:
+          secretName: otelplane-e2e-secrets
+      - name: generated
+        emptyDir:
+          medium: Memory
+      - name: base
+        configMap:
+          name: otelplane-canary-01-config
+      - name: state
+        persistentVolumeClaim:
+          claimName: otelplane-canary-01-data
